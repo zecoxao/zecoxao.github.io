@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="ps3xploit_v31.js"></script>
+<meta charset="UTF-8"> 
+<title>PS3Xploit Tools v3.0.1 - Swap Debug Settings For CEX/DEX</title>
+<script>
+function initROP(init)
+{
+	try
+	{
+		if(init===true){frame_fails=0;search_base_off=0;search_size_ext=0;}
+		if(t_out!==0){clearTimeout(t_out);t_out=0;}
+		offset_array=[];
+		disable_all();
+		clearLogEntry();
+		store_idx_arr1=new Array(1);
+		store_idx_arr2=new Array(1);
+		xtra_data_addr=0;
+		stack_frame_addr=0;
+		jump_2_addr=0;
+		jump_1_addr=0;
+
+		var search_max_threshold=70*0x100000; // 70Mb maximum memory search
+		var search_base=0x80200000;//0x80190000;//
+		var search_size=2*mbytes;
+		search_base_off=0*mbytes;
+		search_size_ext=2*mbytes;
+		total_loops++;
+		
+		// Overwrite filename and destination path here
+		template_1_file_usb='/sysconf_plugin.sprx';
+		template_1_file_blind='/dev_blind/vsh/module/sysconf_plugin.sprx';
+		
+		xtra_data=flash_partition.convert()
+		+filesystem.convert()
+		+mount_path.convert()
+		+getPath(template_1_file_usb).convert()
+		+fill_by_4bytes(0xC,dbyte00)
+		+template_1_file_blind.convert()
+		+make_dummy_xtra2()
+		+fill_by_16bytes(0x70,dbyte00)
+		+hexdw2bin(sp_exit)+fill_by_8bytes(0x8,dbyte41)+callsub(gadget12_addr,2,0,0,0,0,0,0,0,0,0x80)+syscall(sc_sm_shutdown,hard_reboot,0,0,0,0,0,0,0)
+		+unescape("\uFD7E");
+		while(xtra_data_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			xtra_data=xtra_data.replaceAt(0,hexh2bin(0x7EFD));
+			xtra_data_addr=findJsVariableOffset("xtra_data",xtra_data,search_base,search_size);
+			search_max_threshold-=search_size;
+		}
+		
+		flash_partition_addr=xtra_data_addr;
+		fs_addr=flash_partition_addr+flash_partition.convertedSize()-0x4;
+		mount_path_addr=fs_addr+filesystem.convertedSize();
+		
+		template_1_file_usb_addr=mount_path_addr+mount_path.convertedSize();
+		template_1_file_usbfd_addr=template_1_file_usb_addr+getPath(template_1_file_usb).convertedSize();
+		template_1_file_usb_readlen_addr=template_1_file_usbfd_addr+word_size;
+		
+		template_1_file_blind_addr=template_1_file_usb_readlen_addr+dword_size;
+		template_1_file_blindfd_addr=template_1_file_blind_addr+template_1_file_blind.convertedSize();
+		template_1_file_blind_writelen_addr=template_1_file_blindfd_addr+word_size;
+		store_idx_arr1[0]=(template_1_file_blind_writelen_addr-flash_partition_addr+0x8)/2;
+		
+		null_addr=template_1_file_blind_writelen_addr+dword_size+make_dummy_null_padding2()+dword_size;
+		
+		store_idx_arr2[0]=(null_addr-flash_partition_addr+0xC)/2;
+		stat_addr=null_addr+dword_size*0x3;
+		reboot_sf_addr=stat_addr+dword_size*0xB;
+		//############################ Building stack frame ###############################################################
+		stack_frame=stack_frame_hookup()
+		+syscall(sc_fs_umount,flash_partition_addr,fs_addr,mount_path_addr,0,0,0,0,0)
+		+copy_file_overwrite(template_1_file_usb_addr,template_1_file_blind_addr,template_1_file_usbfd_addr,template_1_file_blindfd_addr,template_1_file_buf_addr,template_1_file_usb_readlen_addr,template_1_file_blind_writelen_addr,stat_addr,null_addr,null_addr+0x8)
+		+optional_reboot1(reboot_sf_addr,template_1_file_blind_writelen_addr)
+		+stack_frame_exit();
+		//############################ End stack frame ###############################################################		
+		
+		while(stack_frame_addr===0)
+		{
+			if(search_max_threshold<search_size+search_size_ext){frame_fails++;if((frame_fails%10)===0){search_base_off+=0;search_size_ext+=0;}load_check();return;}
+			stack_frame=stack_frame.replaceAt(0,hexh2bin(0x2A2F));
+			stack_frame_addr=findJsVariableOffset("stack_frame",stack_frame,search_base+search_base_off,search_size+search_size_ext);
+			if(stack_frame_addr==-1)if(search_max_threshold<search_size+search_size_ext){frame_fails++;load_check();return;}
+			search_max_threshold-=search_size+search_size_ext;
+		}
+		jump_2=unescape("\u0102\u7EFB")+fill_by_16bytes(0x30,dbyte41)+hexw2bin(stack_frame_addr)+unescape("\uFB7E");		
+		while(jump_2_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			jump_2=jump_2.replaceAt(0,hexh2bin(0x7EFB));
+			jump_2_addr=findJsVariableOffset("jump_2",jump_2,search_base,search_size);
+			if(jump_2_addr==-1)if(search_max_threshold<search_size){load_check();return;}
+			search_max_threshold-=search_size;
+		}
+		jump_1=unescape("\u4141\u7EFA")+hexw2bin(jump_2_addr)+unescape("\uFA7E");
+		while(jump_1_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			jump_1=jump_1.replaceAt(0,hexh2bin(0x7EFA));
+			jump_1_addr=findJsVariableOffset("jump_1",jump_1,search_base,search_size);
+			if(jump_1_addr==-1)if(search_max_threshold<search_size){load_check();return;}
+			search_max_threshold-=search_size;
+		}
+		var sf=checkMemory(stack_frame_addr-0x4,0x10000,stack_frame.length);
+		var x=checkMemory(xtra_data_addr-0x4,0x2000,xtra_data.length);
+		var j2=checkMemory(jump_2_addr-0x4,0x800,jump_2.length);
+		var j1=checkMemory(jump_1_addr-0x4,0x800,jump_1.length);
+		if((j2===jump_2)&&(j1===jump_1)&&(x===xtra_data)&&(sf===stack_frame))
+		{
+			if(t_out!==0){clearTimeout(t_out);}
+			showResult(hr+"<h1><b><font color=%22386E38%22>Debug Settings Swapper initialized successfully.</font></b></h1><h3><b><span style='color:#000000;'>You can now Swap Debug Settings For CEX/DEX.</span></b></h3>");
+			enable_trigger();
+		}
+		else
+		{
+			if(x!==xtra_data)logAdd("xtra_data mismatch in memory!");
+			if(sf!==stack_frame)logAdd("stack_frame mismatch in memory!");
+			if(j2!==jump_2)logAdd("jump_2 mismatch in memory!");
+			if(j1!==jump_1)logAdd("jump_1 mismatch in memory!");
+			//logAdd("String mismatch in memory!");
+			load_check();
+		}
+	}
+	catch(e)
+	{
+		debug=true;
+		logAdd(br+"Swap Debug Settings For CEX/DEX initialization failed because the following exception was thrown during execution:"+br+e+" at : "+e.lineNumber);
+		debug=false;
+	}
+}
+
+function triggerX()
+{
+		clearLogEntry();
+		showResult(hr+"<h2><b><span style='color:#000000;'>Swapping Debug Settings...</span></b></h2>");
+		disable_all();
+		setTimeout(trigger,1000,jump_1_addr);
+		setTimeout(rop_exit_1val,2000,hr+"<h1><b><font color=%22386E38%22>Swapping Debug Settings succeeded!</font></span></b></h1>",hr+"<h1><b><font color='red'>Swapping Debug Settings failed!</font></b></h1><h3><b><span style='color:#000000;'>Error copying file(s):</span></b></h3>","<h3><b><span style='color:#000000;'>sysconf_plugin.sprx</span></b></h3>");
+		cleanGUI();
+}
+</script>
+</head>
+	<body id="bodyId" style="background-color:#FFD097">
+	<div id="headerId" style="color:#CC2010">
+	<h1>PS3Xploit Tools v3.0.1 - Swap Debug Settings For CEX/DEX</h1>
+	<h2><span style="color:#000000">Courtesy of PS3Xploit Team</span></h2><b>esc0rtd3w </b><span style="color:#000000;"> (Debugging & Testing) <b>|</b> </span><b>habib </b><span style="color:#000000"> (Reverse Engineering & Debugging) <b>|</b> </span><b>bguerville </b><span style="color:#000000"> (ROP, Javascript & Debugging)</span><hr>
+		<span style="color:#000000">Many thanks to xerpi for porting the memory leak exploit to ps3, zecoxao & Joonie for their early & renewed support, mysis for documenting vsh/lv2, SSL for his regular & precious advice, kakaroto for the PS3 IDA tools, naherwert for scetool, Rebug Team for producing/updating the only CFW adequate to develop this work & Cobra team for sharing their CobraUSB source, the psdevwiki team of course, STLcardsWS for his long standing contribution & ever constant support.<br>We also wish to thank all the ps3 community hackers/devs, past & present, who directly or indirectly helped us put this project together, you know who you are...</span><hr>
+	<h3>Supports CEX/DEX 4.81 - 4.84 OFW/CFW/HFW Firmware</h3>
+	<p><span style="color:#000000">More details & news on</span> <a href="http://www.psx-place.com/forums/ps3xploit">http://www.psx-place.com</a></p>
+	<hr></div>
+	<p><b>Place the CEX/DEX version of below file in root source path: 
+	<br>sysconf_plugin.sprx</b><br><br>
+	<p><span style="color:#000000">Root Path </span>
+	<select id="combofilePath" name="fPath" size="1" onChange="selectfilePath()">
+	<option id="usb_0" selected="selected" value="/dev_usb000">/dev_usb000</option><option id="usb_1" value="/dev_usb001">/dev_usb001</option><option id="usb_6" value="/dev_usb006">/dev_usb006</option><option id="xploit_extras" value="/dev_hdd0/game/PS3XPLOIT/USRDIR/extras">/dev_hdd0/game/PS3XPLOIT/USRDIR/extras</option><option id="han_toolbox" value="/dev_hdd0/game/HANTOOLBX/USRDIR/files/">/dev_hdd0/game/HANTOOLBX/USRDIR/files/</option>
+	</select> | Auto-Close Browser <input type="checkbox" id="auto_close" name="aclose" onclick="autoclose();"/> | Auto-Reboot <input type="checkbox" id="auto_reboot" name="areboot" checked="checked" onclick="autoreboot();"/>
+	<span id="dex_txt" style="visibility:hidden"> | DEX mode<input type="checkbox" id="dex" name="DEX" disabled="" onclick="dex();"/></span></p>
+	<p><button id="btnROP" type="button" onclick="initROP(true);" autofocus>Initialize Debug Settings Swapper</button> | 
+	<button id="btnTrigger" disabled="" type="button" onclick="triggerX();">Swap Debug Settings For CEX/DEX</button><span id="reset" style="visibility:hidden"> | <button id="btnReset" type="button" onclick="disable_trigger();">Reset</button></span></p>
+	<div id="result" style="color:#CC2010"></div><br>
+	<div id="log"></div>
+	<div id="exploit" ></div>
+	<div id="trigger"></div>
+	<div id="footer"></div>
+	<script>
+		writeEnvInfo();
+		ps3chk();
+	</script>
+	</body>
+</html>

