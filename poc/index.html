@@ -3,28 +3,28 @@
 </head>
 <body>
 <script>
-input = document.body.appendChild(document.createElement("input"));
+const arr = [0];
 
-foo = document.body.appendChild(document.createElement("a"));
-foo.id = "foo";
+function jitter() {
+        for (let _ in arr) { // create EnumeratorNextUpdateIndexAndMode DFG node.
+                return 0 in arr; // create HasIndexedProperty DFG node.
+        }
+}
 
-// Go to state1 when history.back is called
-// The URL needs to be <currentPage+hash> to trigger loadInSameDocument during the call to back()
-// Since the foo's element id="foo", focus will change to that element
-history.pushState("state1", "", location + "#foo");
+function trigger() {
+        let a = jitter(); // a == true
+        for(let i = 0; i < 0x100000; i++) { 
+                jitter(); // making hot jitter function until it generates FTL bytecode.
+        }
+        let b = jitter(); // b == 0
 
-// Current state = state2
-history.pushState("state2", "");
+        if (a != b) {
+            print("a != b");
+        }
+}
 
-setTimeout(() => {
+trigger();
 
-        // Set the focus on the input element.
-        // During the call to back() the focus will change to the foo element 
-        // and therefore triggering the blur event on the input element
-        input.focus(); 
-        input.onblur = () => history.replaceState("state3", "");
-        setTimeout(() => history.back(), 1000);
-}, 1000);
 </script>
 </body>
 </html>
