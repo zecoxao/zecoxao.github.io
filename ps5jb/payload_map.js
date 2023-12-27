@@ -1,28 +1,12 @@
 const payload_map =
     [
         {
-            displayTitle: 'etaHEN 1.1b By LM',
+            displayTitle: 'etaHEN',
             description: 'Runs With 3.xx and 4.xx. FPKG enabler For FW 4.03-4.51 Only.',
-            fileName: 'etaHEN-1.1b.bin',
+            fileName: 'etaHEN-1.2B.bin',
             author: 'LightningMods_, sleirsgoevy, ChendoChap, astrelsky, illusion',
             source: 'https://github.com/LightningMods/etaHEN',
-            version: '1.1 beta'
-        },
-        {
-            displayTitle: 'etaHEN 1.1b With Cheats By LM',
-            description: 'Runs With 3.xx and 4.xx. FPKG enabler For FW 4.03-4.51 Only.',
-            fileName: 'etaHENwithcheats-1.1b.bin',
-            author: 'LightningMods_, sleirsgoevy, ChendoChap, astrelsky, illusion',
-            source: 'https://github.com/LightningMods/etaHEN',
-            version: '1.1 beta'
-        },
-        {
-            displayTitle: 'etaHEN 1.1b experimental By LM',
-            description: 'Runs With 3.xx and 4.xx. FPKG enabler For FW 4.03-4.51 Only.',
-            fileName: 'etaHEN-1.1B-experimental.bin',
-            author: 'LightningMods_, sleirsgoevy, ChendoChap, astrelsky, illusion',
-            source: 'https://github.com/LightningMods/etaHEN',
-            version: '1.1b experimental'
+            version: '1.2 beta'
         },
         {
             displayTitle: 'K-Stuff',
@@ -35,11 +19,18 @@ const payload_map =
         {
             displayTitle: 'libhijacker game-patch',
             description: 'Patches supported games to run at higher framerates, and adds debug menus to certain titles.',
-            fileName: 'libhijacker-spawner-1.124.elf;libhijacker-daemon-1.124.elf',
+            fileName: 'libhijacker-1.138.elf',
             author: 'illusion0001, astrelsky',
             source: 'https://github.com/illusion0001/libhijacker/releases',
-            loader: 'libhijacker',
-            version: '1.124'
+            version: '1.138'
+        },
+        {
+            displayTitle: 'ps5debug',
+            description: 'Debugger (Experimental beta)',
+            fileName: 'ps5debug.elf',
+            author: 'SiSTR0, ctn123',
+            source: 'https://github.com/GoldHEN/ps5debug',
+            version: '1.0b1'
         },
         {
             displayTitle: 'PS5 Payload ELF Loader',
