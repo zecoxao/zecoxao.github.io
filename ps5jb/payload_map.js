@@ -2,15 +2,15 @@ const payload_map =
     [
         {
             displayTitle: 'etaHEN',
-            description: 'Runs With 3.xx and 4.xx. FPKG enabler For FW 4.03-4.51 Only.',
-            fileName: 'etaHEN-1.2B.bin',
+            description: 'Runs With 3.xx and 4.xx. FPKG enabler For FW 3.xx / 4.xx Only.',
+            fileName: 'etaHEN-1.31B.bin',
             author: 'LightningMods_, sleirsgoevy, ChendoChap, astrelsky, illusion',
             source: 'https://github.com/LightningMods/etaHEN',
-            version: '1.2 beta'
+            version: '1.31 beta'
         },
         {
             displayTitle: 'K-Stuff',
-            description: 'FW 4.03-4.51 Only. FPKG enabler',
+            description: 'FW 3.00, 3.20, 3.21 & 4.03-4.51 Only (Browser crashes on 3.xx). FPKG enabler',
             fileName: 'ps5-kstuff-v1.2.bin',
             author: 'sleirsgoevy',
             source: 'https://github.com/sleirsgoevy/ps4jb2/blob/ps5-403/ps5-kstuff.bin',
