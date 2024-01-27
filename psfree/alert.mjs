@@ -1,4 +1,4 @@
-/* Copyright (C) 2023 anonymous
+/* Copyright (C) 2023-2024 anonymous
 
 This file is part of PSFree.
 
@@ -35,4 +35,4 @@ addEventListener('unhandledrejection', (event) => {
 })
 
 // important that we dynamically import the exploit script after we attach
-import('./run.mjs');
+import('./exploit.mjs');

@@ -1,4 +1,4 @@
-/* Copyright (C) 2023 anonymous
+/* Copyright (C) 2024 anonymous
 
 This file is part of PSFree.
 
@@ -15,18 +15,14 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
-import {
-    debug_log,
-    clear_log,
-} from './module/utils.mjs';
+#pragma once
 
-import { wait_mem } from './exploit.mjs';
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef unsigned int u32;
+typedef unsigned long long u64;
 
-async function run() {
-    await wait_mem();
-    clear_log();
-
-    import('./rop.mjs');
-}
-
-run();
+typedef signed char s8;
+typedef signed short s16;
+typedef signed int s32;
+typedef signed long long s64;

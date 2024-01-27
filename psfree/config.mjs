@@ -1,4 +1,4 @@
-/* Copyright (C) 2023 anonymous
+/* Copyright (C) 2023-2024 anonymous
 
 This file is part of PSFree.
 
@@ -20,7 +20,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 //
 // webkitgtk 2.34.4 was built with cmake variable ENABLE_JIT=OFF, that variable
 // can affect the size of SerializedScriptValue
-export const gtk_2_34_4 = 0;
+//
+// this target is no longer supported
+//
+//export const gtk_2_34_4 = 0;
 
 // the original target platform was 8.03, this version confirmed works on ps4
 // 7.xx-8.xx
@@ -35,11 +38,14 @@ export const ps5_5_00 = ps4_9_00;
 // this version for 6.50-6.72
 export const ps4_6_50 = 3;
 
+// this version for 6.00-6.20
+export const ps4_6_00 = 4;
+
 export function set_target(value) {
     switch (value) {
-        case gtk_2_34_4:
         case ps4_8_03:
         case ps4_9_00:
+        case ps4_6_00:
         case ps4_6_50: {
             break;
         }
