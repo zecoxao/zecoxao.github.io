@@ -80,7 +80,9 @@
     <div id="center-view" style="position: absolute; top: 0; left: 0; width: 100%; min-height: 100%;">
 
         <div style="margin-top: 15px; position: absolute; width: 100%;">
-            <h1 style="text-align: center;">PS5 Auto Jailbreak/etaHEN 3.xx-4.xx (PSFree Edition)</h1><br /><br />
+            <h1 style="text-align: center;">PS5 Auto Jailbreak/etaHEN 3.xx-4.xx (psFree Edition)</h1>
+            <h5 style="text-align: center;">etaHEN 1.6B</h5>
+            <br /><br />
             <div id="PScontainer" style="height: 30%;"></div>
 
             <p id="current-fw" class="text-secondary"
@@ -146,22 +148,23 @@
             </center>
         </div>
     </div>
-
-    <div id="menu-overlay"
-        style="position: fixed; top: -100%; left: 0; width: 100%; min-height: 100%; height: 100%; background-color: #111111d0; opacity:0;"
-        class="opacity-transition"></div>
-    <div id="menu-bar-wrapper"
-        style="position: absolute; top: 0; right: -500px; width: 320px; min-height: 100%; height: 100%; padding: 16px; box-sizing: border-box; transition: right 0.35s ease-in-out;">
-        <div id="menu-bar"
-            style="position: relative;top:0;left: 0; width:100%;height:100%; background-color: #161622; border-radius: 16px; padding: 15px; box-sizing: border-box;">
-            <p style="margin: 10px; font-weight: bold;">Webkit exploit type:</p>
-            <div style="margin: 10px;">
-                <input type="radio" id="wk-exploit-psfree" name="wk-exploit" value="psfree"
-                    onchange="wk_expoit_type_changed(event)">
-                <label for="psfree">PSFree</label><br>
-                <input type="radio" id="wk-exploit-fontface" name="wk-exploit" value="fontface"
-                    onchange="wk_expoit_type_changed(event)">
-                <label for="fontface">FontFace</label>
+    <div style="display: none;">
+        <div id="menu-overlay"
+            style="position: fixed; top: -100%; left: 0; width: 100%; min-height: 100%; height: 100%; background-color: #111111d0; opacity:0;"
+            class="opacity-transition"></div>
+        <div id="menu-bar-wrapper"
+            style="position: absolute; top: 0; right: -500px; width: 320px; min-height: 100%; height: 100%; padding: 16px; box-sizing: border-box; transition: right 0.35s ease-in-out;">
+            <div id="menu-bar"
+                style="position: relative;top:0;left: 0; width:100%;height:100%; background-color: #161622; border-radius: 16px; padding: 15px; box-sizing: border-box;">
+                <p style="margin: 10px; font-weight: bold;">Webkit exploit type:</p>
+                <div style="margin: 10px;">
+                    <input type="radio" id="wk-exploit-psfree" name="wk-exploit" value="psfree"
+                        onchange="wk_expoit_type_changed(event)">
+                    <label for="psfree">PSFree</label><br>
+                    <input type="radio" id="wk-exploit-fontface" name="wk-exploit" value="fontface"
+                        onchange="wk_expoit_type_changed(event)">
+                    <label for="fontface">FontFace</label>
+                </div>
             </div>
         </div>
     </div>
