@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 // the original target platform was 8.03, this version confirmed works on ps4
 // 7.xx-8.xx
+export const ps4_8_00 = 1;
 export const ps4_8_03 = 1;
 
 // this version for 9.xx
@@ -43,6 +44,7 @@ export const ps4_6_00 = 4;
 
 export function set_target(value) {
     switch (value) {
+		case ps4_8_00:
         case ps4_8_03:
         case ps4_9_00:
         case ps4_6_00:
