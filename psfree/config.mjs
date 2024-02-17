@@ -1,4 +1,4 @@
-/* Copyright (C) 2023 anonymous
+/* Copyright (C) 2023-2024 anonymous
 
 This file is part of PSFree.
 
@@ -57,44 +57,4 @@ export function set_target(value) {
     target = value;
 }
 
-function DetectFirmwareVersion()
-{
-    var UA = navigator.userAgent.substring(navigator.userAgent.indexOf('5.0 (') + 19, navigator.userAgent.indexOf(') Apple')).replace("PlayStation 4/","");
-    
-    if (UA == "6.00" || UA == "6.02" || UA == "6.10" || UA == "6.20")
-    {
-        return ps4_6_00;
-    }
-
-    if (UA == "6.50" || UA == "6.70" || UA == "6.71" || UA == "6.72")
-    {
-        return ps4_6_50;
-    }
-
-    if (UA == "7.01" || UA == "7.02" || UA == "7.50" || UA == "7.51" || UA == "7.55" || UA == "8.00" || UA == "8.01" || UA == "8.03" || UA == "8.50")
-    {
-        return ps4_8_03;
-    }
-    
-    //on 9.00 Fw deection changed to laysation insead of regular Playsation
-    UA = navigator.userAgent.substring(navigator.userAgent.indexOf('5.0 (') + 19, navigator.userAgent.indexOf(') Apple')).replace("layStation 4/","");
-
-
-    if (UA == "9.00" || UA == "9.03" || UA == "9.04" || UA == "9.50" || UA == "9.60")
-    {
-        return ps4_9_00;
-    }
-
-    //get user agent for PS5 (taken from PS5 Specter Exploit Host)
-    const supportedFirmwares = ["1.00","1.01","1.02","1.05","1.12","1.14","2.00","2.10","2.20","2.25","2.26","2.30","2.50","2.70","3.00","3.10","3.20","3.21","4.00", "4.02", "4.03", "4.50", "4.51","5.00","5.02","5.10","5.50"];
-    const fw_idx = navigator.userAgent.indexOf('PlayStation; PlayStation 5/') + 27;
-    const fw_str = navigator.userAgent.substring(fw_idx, fw_idx + 4);
-
-    if (supportedFirmwares.includes(fw_str)) 
-    {
-        return ps5_5_00;
-    }
-
-}
-
-export let target = DetectFirmwareVersion();
+export let target = ps4_8_03;

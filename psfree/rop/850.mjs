@@ -72,7 +72,7 @@ let libkernel_base = null;
 // libSceLibcInternal.sprx
 let libc_base = null;
 
-// Chain implementation based on Chain803. Replaced offsets that changed
+// Chain implementation based on Chain800. Replaced offsets that changed
 // between versions. Replaced gadgets that were missing with new ones that
 // won't change the API.
 
