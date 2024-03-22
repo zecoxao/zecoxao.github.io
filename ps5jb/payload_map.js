@@ -33,12 +33,12 @@ const payload_map =
             version: '1.0b1'
         },
         {
-            displayTitle: 'PS5 Payload ELF Loader',
-            description: 'Uses port 9021. Persistent network elf loader',
-            fileName: 'elfldr.elf',
-            author: 'john-tornblom',
-            source:'https://github.com/john-tornblom/ps5-payload-elfldr/releases',
-            version: '0.5'
+            displayTitle: 'etaHEN Testkit',
+            description: 'Runs With 3.xx and 4.xx. FPKG enabler For FW 3.xx / 4.xx Only. Testkit Support Added.',
+            fileName: 'Testkit-etaHEN.bin',
+            author: 'LightningMods_, sleirsgoevy, ChendoChap, astrelsky, illusion, notnotzecoxao, Anonymous',
+            source:'https://github.com/LightningMods/etaHEN',
+            version: '1.7 beta'
         },
         {
             displayTitle: 'FTPS5 (Non-Persistent)',
