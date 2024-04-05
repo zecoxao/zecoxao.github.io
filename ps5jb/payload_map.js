@@ -11,7 +11,7 @@ const payload_map =
         {
             displayTitle: 'K-Stuff',
             description: 'FW 3.00, 3.20, 3.21 & 4.03-4.51 Only (Browser crashes on 3.xx). FPKG enabler',
-            fileName: 'ps5-kstuff-v1.2.bin',
+            fileName: 'payload.bin',
             author: 'sleirsgoevy',
             source: 'https://github.com/sleirsgoevy/ps4jb2/blob/ps5-403/ps5-kstuff.bin',
             version: '1.2'
