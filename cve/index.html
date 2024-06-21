@@ -23,6 +23,10 @@ function test2(i) {
     try { f.__defineGetter__("prototype", () => {}); } catch {}
     f.prototype.x = i; // should not crash
 }
+
+test1();
+test2(0);
+
 </script>
 
 
