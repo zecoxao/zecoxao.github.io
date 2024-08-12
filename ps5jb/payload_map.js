@@ -3,10 +3,10 @@ const payload_map =
         {
             displayTitle: 'etaHEN',
             description: 'Runs With 3.xx and 4.xx. FPKG enabler For FW 3.xx / 4.xx Only.',
-            fileName: 'etaHEN-1.7B.bin',
+            fileName: 'etaHEN-1.8B.bin',
             author: 'LightningMods_, sleirsgoevy, ChendoChap, astrelsky, illusion',
             source: 'https://github.com/LightningMods/etaHEN',
-            version: '1.7 beta'
+            version: '1.8 beta'
         },
         {
             displayTitle: 'K-Stuff',
