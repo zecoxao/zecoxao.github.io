@@ -384,5 +384,4 @@ const OFFSET_KERNEL_TARGETID                    = 0x07D8107D; // data = 0x062410
 const OFFSET_KERNEL_QA_FLAGS                    = 0x07D81098; // data = 0x06241098
 const OFFSET_KERNEL_UTOKEN_FLAGS                = 0x07D81100; // data = 0x06241100
 const OFFSET_KERNEL_PRISON0                     = 0x03451E00; // data = 0x01911E00
-const OFFSET_KERNEL_ROOTVNODE                   = 0x080A5540; // data = 0x06565540
-const OFFSET_KERNEL_DATA_BASE_ROOTVNODE         = 0x06565540;
+const OFFSET_KERNEL_ROOTVNODE                   = OFFSET_KERNEL_DATA + 0x06565540; // data = 0x06565540
