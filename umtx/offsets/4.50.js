@@ -389,3 +389,5 @@ const OFFSET_KERNEL_QA_FLAGS                    = 0x07106498;
 const OFFSET_KERNEL_UTOKEN_FLAGS                = 0x07106500;
 const OFFSET_KERNEL_PRISON0                     = 0x02934D00;
 const OFFSET_KERNEL_ROOTVNODE                   = 0x072E74C0;
+
+const OFFSET_KERNEL_PS4SDK                      = 0x022ABE88;

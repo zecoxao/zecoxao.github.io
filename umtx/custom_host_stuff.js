@@ -4,10 +4,13 @@ const LOCALSTORE_WK_EXPLOIT_TYPE_VALUE_FONTFACE = "FontFace";
 
 const LOCALSTORE_REDIRECTOR_LAST_URL_KEY = "redirector_last_url";
 
-const SESSIONSTORE_RUN_WK_EXPLOIT_ON_LOAD_KEY = "run_wk_exploit_on_load";
+const SESSIONSTORE_ON_LOAD_AUTORUN_KEY = "on_load_autorun";
+
+const MAINLOOP_EXECUTE_PAYLOAD_REQUEST = "mainloop_execute_payload_request";
 
 let exploitStarted = false;
-async function runJailbreak(animate = true) {
+
+async function run(wkonly = false, animate = true) {
     if (exploitStarted) {
         return;
     }
@@ -16,7 +19,7 @@ async function runJailbreak(animate = true) {
     await switchPage("console-view", animate);
 
     // not setting it in the catch since we want to retry both on a handled error and on a browser crash
-    sessionStorage.setItem(SESSIONSTORE_RUN_WK_EXPLOIT_ON_LOAD_KEY, "true");
+    sessionStorage.setItem(SESSIONSTORE_ON_LOAD_AUTORUN_KEY, wkonly ? "wkonly" : "kernel");
 
     let wk_exploit_type = localStorage.getItem(LOCALSTORE_WK_EXPLOIT_TYPE_KEY);
     try {
@@ -34,15 +37,23 @@ async function runJailbreak(animate = true) {
         }
     } catch (error) {
         debug_log("[!] Webkit exploit failed: " + error);
-        debug_log("[+] Retrying in 2 seconds...");
 
+        debug_log("[+] Retrying in 2 seconds...");
         await new Promise((resolve) => setTimeout(resolve, 2000));
         window.location.reload();
         return; // this is necessary
     }
 
-    sessionStorage.removeItem(SESSIONSTORE_RUN_WK_EXPLOIT_ON_LOAD_KEY);
-    run_hax();
+    try {
+        await main(wkonly); // if all goes well, this should block forever
+    } catch (error)  { 
+        debug_log("[!] Kernel exploit/main() failed: " + error);
+        // p.write8(new int64(0,0), 0); // crash
+    }
+
+    debug_log("[+] Retrying in 4 seconds...");
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    window.location.reload();
 }
 
 async function switchPage(id, animate = true) {
@@ -194,6 +205,9 @@ function registerL2ButtonHandler() {
     });
 }
 
+const TOAST_SUCCESS_TIMEOUT = 2000;
+const TOAST_ERROR_TIMEOUT = 5000;
+
 function showToast(message, timeout = 2000) {
     const toastContainer = document.getElementById('toast-container');
     const toast = document.createElement('div');
@@ -231,4 +245,52 @@ async function removeToast(toast) {
     toast.addEventListener('transitionend', () => {
         toast.remove();
     });
+}
+
+
+function populatePayloadsPage(wkOnlyMode = false) {
+    const payloadsView = document.getElementById('payloads-view');
+
+    while (payloadsView.firstChild) {
+        payloadsView.removeChild(payloadsView.firstChild);
+    }
+
+    const payloads = payload_map;
+
+    for (const payload of payloads) {
+        if (wkOnlyMode && !payload.toPort && !payload.customAction) {
+            continue;
+        }
+
+        if (payload.supportedFirmwares && !payload.supportedFirmwares.some(fwPrefix => window.fw_str.startsWith(fwPrefix))) {
+            continue;
+        }
+
+        const payloadButton = document.createElement("a");
+        payloadButton.classList.add("btn");
+        payloadButton.classList.add("w-100");
+        payloadButton.tabIndex = 0;
+
+        const payloadTitle = document.createElement("p");
+        payloadTitle.classList.add("payload-btn-title");
+        payloadTitle.textContent = payload.displayTitle;
+
+        const payloadDescription = document.createElement("p");
+        payloadDescription.classList.add("payload-btn-description");
+        payloadDescription.textContent = payload.description;
+
+        const payloadInfo = document.createElement("p");
+        payloadInfo.classList.add("payload-btn-info");
+        payloadInfo.innerHTML = `v${payload.version} &centerdot; ${payload.author}`;
+
+        payloadButton.appendChild(payloadTitle);
+        payloadButton.appendChild(payloadDescription);
+        payloadButton.appendChild(payloadInfo);
+        payloadButton.addEventListener("click", function () {
+            window.dispatchEvent(new CustomEvent(MAINLOOP_EXECUTE_PAYLOAD_REQUEST, { detail: payload }));
+        });
+
+        payloadsView.appendChild(payloadButton);
+    }
+
 }

@@ -12,7 +12,7 @@
     <!-- Row 1 -->
     <div class="p-2">
         <h1 class="text-center">PS5 UMTX Jailbreak (1.xx-5.xx)</h1>
-        <p class="text-center">Current firmware: <span class="text-bold" id="current-fw"></span></p>
+        <p class="text-center" id="top-bar-text">Current firmware: <span class="fw-bold" id="current-fw"></span></p>
 
         <!-- This is absolute positioned to the body-->
         <div id="toast-container"></div>
@@ -20,12 +20,16 @@
 
     <!-- Row 2 -->
     <div id="main-content">
-        <div id="pre-jb-view" class="d-flex align-items-center justify-content-center selected">
-            <a tabindex="0" class="btn" id="run-jb" onclick="runJailbreak()">Jailbreak</a>
+        <div id="pre-jb-view" class="d-flex align-items-center justify-content-center flex-direction-column selected">
+            <a tabindex="0" class="btn fw-bold" id="run-jb" onclick="run()">Jailbreak</a>
+            <a tabindex="0" class="btn" style="padding: 0.5rem 2rem; font-size: 1rem;" id="run-wk-only" onclick="run(true)">Webkit-only (sender)</a>
         </div>
 
         <div id="console-view">
             <textarea id="console" class="log"></textarea>
+        </div>
+
+        <div id="payloads-view">
         </div>
     </div>
 
@@ -68,6 +72,7 @@
     <script src="module/syscalls.js"></script>
     <script src="webkit_psfree.js"></script>
     <script src="webkit_fontface.js"></script>
+    <script src="payload_map.js"></script>
     
     <script>
         addEventListener('unhandledrejection', (event) => {
@@ -86,8 +91,9 @@
         registerAppCacheEventHandlers();
         registerL2ButtonHandler();
         window.onload = function() {
-            if (sessionStorage.getItem(SESSIONSTORE_RUN_WK_EXPLOIT_ON_LOAD_KEY)) {
-                runJailbreak(false);
+            let autoload = sessionStorage.getItem(SESSIONSTORE_ON_LOAD_AUTORUN_KEY);
+            if (autoload) {
+                run(autoload == "wkonly", false);
             }
         };
     </script>
