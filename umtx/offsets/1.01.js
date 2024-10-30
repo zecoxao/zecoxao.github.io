@@ -377,7 +377,7 @@ const OFFSET_KERNEL_STACK_SYS_SCHED_YIELD_RET   = 0x0000838;
 
 // Kernel text-relative offsets
 const OFFSET_KERNEL_DATA                        = 0x01B40000;
-const OFFSET_KERNEL_SYS_SCHED_YIELD_RET         = 0x00563332;
+const OFFSET_KERNEL_SYS_SCHED_YIELD_RET         = 0x00563322;
 const OFFSET_KERNEL_ALLPROC                     = 0x04211C18;
 const OFFSET_KERNEL_SECURITY_FLAGS              = 0x07D81074;
 const OFFSET_KERNEL_TARGETID                    = 0x07D8107D;
