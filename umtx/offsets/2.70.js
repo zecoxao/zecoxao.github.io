@@ -392,7 +392,7 @@ const OFFSET_KERNEL_PRISON0                     = 0x34CBD20;
 const OFFSET_KERNEL_ROOTVNODE                   = 0x82934C0;
 
 // Kernel data-relative offsets
-const OFFSET_KERNEL_DATA_BASE_ALLPROC           = 0x2701C28;
+
 const OFFSET_KERNEL_DATA_BASE_SECURITYFLAGS     = 0x63E1274;
 const OFFSET_KERNEL_DATA_BASE_TARGETID          = 0x63E127D;
 const OFFSET_KERNEL_DATA_BASE_QA_FLAGS          = 0x63E1298;
