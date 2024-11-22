@@ -9,12 +9,12 @@ const payload_map =
             version: '1.8 beta'
         },
         {
-            displayTitle: 'K-Stuff',
-            description: 'FW 3.XX, 4.XX Only. FPKG enabler',
-            fileName: 'payload.bin',
-            author: 'sleirsgoevy',
-            source: 'https://github.com/sleirsgoevy/ps4jb2/blob/ps5-403/ps5-kstuff.bin',
-            version: '1.4'
+            displayTitle: 'etaHEN Devkit',
+            description: '4.03 Only. FPKG enabler',
+            fileName: 'devkit_etaHEN.bin',
+            author: 'LightningMods_, sleirsgoevy, ChendoChap, astrelsky, illusion, zecoxao',
+            source: 'https://github.com/LightningMods/etaHEN',
+            version: '1.7 beta'
         },
         {
             displayTitle: 'libhijacker game-patch',
