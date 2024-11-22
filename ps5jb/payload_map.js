@@ -57,12 +57,12 @@ const payload_map =
             version: '1.4'
         },
         {
-            displayTitle: 'Versions',
-            description: 'Shows kernel build, os and sdk versions',
-            fileName: 'versions.elf',
-            author: 'SiSTRo',
-            source:'https://mega.nz/folder/4xA2ATTI#6lHvye1JUfhxRGvqOva8fw/folder/gwhWmRrB',
-            version: '1.0'
+            displayTitle: 'K-Stuff',
+            description: 'FW 3.XX, 4.XX Only. FPKG enabler',
+            fileName: 'payload.bin',
+            author: 'sleirsgoevy',
+            source: 'https://github.com/sleirsgoevy/ps4jb2/blob/ps5-403/ps5-kstuff.bin',
+            version: '1.4'
         },
         {
             displayTitle: 'GetOSVersion',
