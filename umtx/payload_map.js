@@ -30,16 +30,6 @@ const payload_map = [
     //     version: "?",
     //     supportedFirmwares: ["1.", "2.", "3.", "4.", "5."]
     // },
-	{
-        displayTitle: "etaHEN",
-        description: "Homebrew ENabler (Experimental beta)",
-        fileName: "etaHEN.bin",
-        author: "LM et al",
-        projectSource: "https://github.com/LightningMods/etaHEN",
-        binarySource: "https://github.com/LightningMods/etaHEN/releases/download/1.9b/etaHEN.bin",
-        version: "1.9b",
-        supportedFirmwares: ["1.","2.","3.", "4."]
-    },
     {
         displayTitle: "ps5-kstuff",
         description: "FPKG enabler",
@@ -50,16 +40,15 @@ const payload_map = [
         version: "3e6053c",
         supportedFirmwares: ["3.", "4."]
     },
-    {
-        displayTitle: "Byepervisor HEN",
-        description: "FPKG enabler",
-        fileName: "byepervisor.elf",
-        author: "SpecterDev, ChendoChap, flatz, fail0verflow, Znullptr, kiwidog, sleirsgoevy, EchoStretch",
-        projectSource: "https://github.com/EchoStretch/Byepervisor",
-        binarySource: "https://github.com/EchoStretch/Byepervisor/actions/runs/11545292602",
-        version: "4655f86",
-        supportedFirmwares: ["1.12", "1.14", "2.00", "2.20", "2.25", "2.26", "2.30", "2.50"],
-        toPort: 9021
+	{
+        displayTitle: "etaHEN",
+        description: "Homebrew ENabler (Experimental beta)",
+        fileName: "etaHEN.bin",
+        author: "LM et al",
+        projectSource: "https://github.com/LightningMods/etaHEN",
+        binarySource: "https://github.com/LightningMods/etaHEN/releases/download/1.9b/etaHEN.bin",
+        version: "1.9b",
+        supportedFirmwares: ["1.","2.","3.", "4."]
     },
     {
         displayTitle: "libhijacker game-patch",
