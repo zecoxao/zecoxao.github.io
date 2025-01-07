@@ -50,7 +50,7 @@ const payload_map = [
         version: "1.9b",
         supportedFirmwares: ["1.","2.","3.", "4."]
 		toPort: 9020
-    }0
+    }
     {
         displayTitle: "libhijacker game-patch",
         description: "Patches supported games to run at higher framerates, and adds debug menus to certain titles.",
