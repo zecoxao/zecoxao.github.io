@@ -1,0 +1,108 @@
+==83706==ERROR: AddressSanitizer: heap-use-after-free on address 0x00010da683a0 at pc 0x00013dd0fd30 bp 0x00016afb20f0 sp 0x00016afb20e8
+READ of size 8 at 0x00010da683a0 thread T0
+==83706==WARNING: Failed to use and restart external symbolizer!
+    #0 0x13dd0fd2c in WebCore::DocumentFontLoader::fontLoadingTimerFired()+0x538 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x547fd2c)
+    #1 0x13fb86950 in WebCore::ThreadTimers::sharedTimerFiredInternal()+0x280 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x72f6950)
+    #2 0x13fc729a8 in WebCore::timerFired(__CFRunLoopTimer*, void*)+0x7c (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x73e29a8)
+    #3 0x1872a55b4 in __CFRUNLOOP_IS_CALLING_OUT_TO_A_TIMER_CALLBACK_FUNCTION__+0x1c (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x9a5b4)
+    #4 0x1872a5258 in __CFRunLoopDoTimer+0x3c8 (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x9a258)
+    #5 0x1872a4d90 in __CFRunLoopDoTimers+0x160 (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x99d90)
+    #6 0x1872881c8 in __CFRunLoopRun+0x73c (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x7d1c8)
+    #7 0x187287430 in CFRunLoopRunSpecific+0x25c (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x7c430)
+    #8 0x1883bb864 in -[NSRunLoop(NSRunLoop) runMode:beforeDate:]+0xd0 (/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation:arm64e+0x5b864)
+    #9 0x1884354a0 in -[NSRunLoop(NSRunLoop) run]+0x3c (/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation:arm64e+0xd54a0)
+    #10 0x186ec1464 in _xpc_objc_main+0x2a8 (/usr/lib/system/libxpc.dylib:arm64e+0x19464)
+    #11 0x186ed0e54 in _xpc_main+0x140 (/usr/lib/system/libxpc.dylib:arm64e+0x28e54)
+    #12 0x186ec1010 in xpc_main+0x3c (/usr/lib/system/libxpc.dylib:arm64e+0x19010)
+    #13 0x1104bc62c in WebKit::XPCServiceMain(int, char const**)+0x88 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit:arm64+0x16e862c)
+    #14 0x186e1f150 in start+0x9a8 (/usr/lib/dyld:arm64e+0xfffffffffff4d150)
+
+0x00010da683a0 is located 0 bytes inside of 88-byte region [0x00010da683a0,0x00010da683f8)
+freed by thread T0 here:
+    #0 0x1056fbea8 in __sanitizer_mz_free+0xf8 (/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/15.0.0/lib/darwin/libclang_rt.asan_osx_dynamic.dylib:arm64e+0x53ea8)
+    #1 0x1243ff334 in bmalloc_heap_config_specialized_try_deallocate_not_small_exclusive_segregated+0x1dc (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/JavaScriptCore.framework/Versions/A/JavaScriptCore:arm64+0x4723334)
+    #2 0x13dc3a474 in WebCore::Document::~Document()+0x2474 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x53aa474)
+    #3 0x13e5fbb90 in WebCore::HTMLDocument::~HTMLDocument()+0x18 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x5d6bb90)
+    #4 0x13dc4200c in WebCore::Document::removedLastRef()+0x6f8 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x53b200c)
+    #5 0x13f4b97c8 in WebCore::CachedResourceLoader::loadDone(WebCore::LoadCompletionType, bool)+0x45c (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x6c297c8)
+    #6 0x13dd0f93c in WebCore::DocumentFontLoader::fontLoadingTimerFired()+0x148 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x547f93c)
+    #7 0x13fb86950 in WebCore::ThreadTimers::sharedTimerFiredInternal()+0x280 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x72f6950)
+    #8 0x13fc729a8 in WebCore::timerFired(__CFRunLoopTimer*, void*)+0x7c (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x73e29a8)
+    #9 0x1872a55b4 in __CFRUNLOOP_IS_CALLING_OUT_TO_A_TIMER_CALLBACK_FUNCTION__+0x1c (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x9a5b4)
+    #10 0x1872a5258 in __CFRunLoopDoTimer+0x3c8 (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x9a258)
+    #11 0x1872a4d90 in __CFRunLoopDoTimers+0x160 (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x99d90)
+    #12 0x1872881c8 in __CFRunLoopRun+0x73c (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x7d1c8)
+    #13 0x187287430 in CFRunLoopRunSpecific+0x25c (/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation:arm64e+0x7c430)
+    #14 0x1883bb864 in -[NSRunLoop(NSRunLoop) runMode:beforeDate:]+0xd0 (/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation:arm64e+0x5b864)
+    #15 0x1884354a0 in -[NSRunLoop(NSRunLoop) run]+0x3c (/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation:arm64e+0xd54a0)
+    #16 0x186ec1464 in _xpc_objc_main+0x2a8 (/usr/lib/system/libxpc.dylib:arm64e+0x19464)
+    #17 0x186ed0e54 in _xpc_main+0x140 (/usr/lib/system/libxpc.dylib:arm64e+0x28e54)
+    #18 0x186ec1010 in xpc_main+0x3c (/usr/lib/system/libxpc.dylib:arm64e+0x19010)
+    #19 0x1104bc62c in WebKit::XPCServiceMain(int, char const**)+0x88 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit:arm64+0x16e862c)
+    #20 0x186e1f150 in start+0x9a8 (/usr/lib/dyld:arm64e+0xfffffffffff4d150)
+
+previously allocated by thread T0 here:
+    #0 0x1056fb9f4 in __sanitizer_mz_malloc+0x94 (/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/15.0.0/lib/darwin/libclang_rt.asan_osx_dynamic.dylib:arm64e+0x539f4)
+    #1 0x186fe3a64 in _malloc_zone_malloc_instrumented_or_legacy+0x90 (/usr/lib/system/libsystem_malloc.dylib:arm64e+0x2ba64)
+    #2 0x1243e795c in bmalloc_allocate_impl_casual_case+0x330 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/JavaScriptCore.framework/Versions/A/JavaScriptCore:arm64+0x470b95c)
+    #3 0x13dc4583c in WebCore::Document::ensureFontLoader()+0x24 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x53b583c)
+    #4 0x13dc81484 in WebCore::Document::fontLoadRequest(WTF::String const&, bool, bool, WebCore::LoadedFromOpaqueSource)+0xcc (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x53f1484)
+    #5 0x13d1a4da0 in WebCore::CSSFontFaceSrcResourceValue::fontLoadRequest(WebCore::ScriptExecutionContext&, bool)+0x490 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x4914da0)
+    #6 0x13d17551c in WebCore::CSSFontFace::appendSources(WebCore::CSSFontFace&, WebCore::CSSValueList&, WebCore::ScriptExecutionContext*, bool)+0x294 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x48e551c)
+    #7 0x13d1b0934 in WebCore::CSSFontSelector::addFontFaceRule(WebCore::StyleRuleFontFace&, bool)+0x794 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x4920934)
+    #8 0x13d1afd90 in WebCore::CSSFontSelector::buildCompleted()+0x364 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x491fd90)
+    #9 0x1410dd83c in WebCore::Style::Scope::createDocumentResolver()+0x5a4 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x884d83c)
+    #10 0x1410dbe94 in WebCore::Style::Scope::resolver()+0x1bc (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x884be94)
+    #11 0x141103cd4 in WebCore::Style::TreeResolver::Scope::Scope(WebCore::Document&, WebCore::Style::Update&)+0xa8 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x8873cd4)
+    #12 0x141118708 in WebCore::Style::TreeResolver::resolve()+0x6c4 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x8888708)
+    #13 0x13dc6cbe8 in WebCore::Document::resolveStyle(WebCore::Document::ResolveStyleType)+0x760 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x53dcbe8)
+    #14 0x13dc6ec30 in WebCore::Document::updateStyleIfNeeded()+0x334 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x53dec30)
+    #15 0x13dcda000 in WebCore::Document::finishedParsing()+0x910 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x544a000)
+    #16 0x13eaf32ac in WebCore::HTMLConstructionSite::finishedParsing()+0x110 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x62632ac)
+    #17 0x13eb07adc in WebCore::HTMLDocumentParser::prepareToStopParsing()+0x34c (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x6277adc)
+    #18 0x13eb0c9f8 in WebCore::HTMLDocumentParser::finish()+0x150 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x627c9f8)
+    #19 0x13f189774 in WebCore::DocumentWriter::end()+0x2a8 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x68f9774)
+    #20 0x13f1866c0 in WebCore::DocumentLoader::finishedLoading()+0x33c (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x68f66c0)
+    #21 0x13f185b78 in WebCore::DocumentLoader::notifyFinished(WebCore::CachedResource&, WebCore::NetworkLoadMetrics const&, WebCore::LoadWillContinueInAnotherProcess)+0x414 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x68f5b78)
+    #22 0x13f488024 in WebCore::CachedResource::checkNotify(WebCore::NetworkLoadMetrics const&, WebCore::LoadWillContinueInAnotherProcess)+0x148 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x6bf8024)
+    #23 0x13f47ebcc in WebCore::CachedRawResource::finishLoading(WebCore::FragmentedSharedBuffer const*, WebCore::NetworkLoadMetrics const&)+0x820 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x6beebcc)
+    #24 0x13f3c4af0 in WebCore::SubresourceLoader::didFinishLoading(WebCore::NetworkLoadMetrics const&)+0x1054 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x6b34af0)
+    #25 0x1122f5c04 in WebKit::WebResourceLoader::didFinishResourceLoad(WebCore::NetworkLoadMetrics&&)+0x4c0 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit:arm64+0x3521c04)
+    #26 0x1133aa190 in void IPC::handleMessage<Messages::WebResourceLoader::DidFinishResourceLoad, IPC::Connection, WebKit::WebResourceLoader, WebKit::WebResourceLoader, void (WebCore::NetworkLoadMetrics&&)>(IPC::Connection&, IPC::Decoder&, WebKit::WebResourceLoader*, void (WebKit::WebResourceLoader::*)(WebCore::NetworkLoadMetrics&&))+0x11c (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit:arm64+0x45d6190)
+    #27 0x1133a9124 in WebKit::WebResourceLoader::didReceiveMessage(IPC::Connection&, IPC::Decoder&)+0x1d4 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit:arm64+0x45d5124)
+    #28 0x1122cbfc4 in WebKit::NetworkProcessConnection::dispatchMessage(IPC::Connection&, IPC::Decoder&)+0x478 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit:arm64+0x34f7fc4)
+    #29 0x10f9dd448 in WebKit::NetworkProcessConnection::didReceiveMessage(IPC::Connection&, IPC::Decoder&)+0x354 (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebKit.framework/Versions/A/WebKit:arm64+0xc09448)
+
+SUMMARY: AddressSanitizer: heap-use-after-free (/d6f064dc8eb8b9f04171f24f4c04c94244de6b73/WebKitBuild/Release/WebCore.framework/Versions/A/WebCore:arm64+0x547fd2c) in WebCore::DocumentFontLoader::fontLoadingTimerFired()+0x538
+Shadow bytes around the buggy address:
+  0x00010da68100: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fd
+  0x00010da68180: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fd
+  0x00010da68200: fa fa fa fa 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00010da68280: fa fa fa fa 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00010da68300: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fd
+=>0x00010da68380: fa fa fa fa[fd]fd fd fd fd fd fd fd fd fd fd fa
+  0x00010da68400: fa fa fa fa 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00010da68480: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fa
+  0x00010da68500: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fa
+  0x00010da68580: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fa
+  0x00010da68600: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==83706==ABORTING

@@ -1,0 +1,16 @@
+<head>
+<style>
+/* cache the font */
+@font-face {
+  font-family: 'uaf';
+  src: url(a.ttf);
+}
+body { 
+  font-family: 'uaf';
+}
+</style>
+</head>
+<body>
+  <iframe id="a" onload="document.getElementById('a').remove();" src="child.html"></iframe>
+  <iframe id="b" onload="document.getElementById('b').remove();" src="child.html"></iframe>
+</body>
