@@ -125,13 +125,13 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "gdbsrv",
-        description: "Uses john-tornblom's elfldr. GDB server. Runs on port 2159.",
-        fileName: "gdbsrv.elf",
-        author: "john-tornblom",
-        projectSource: "https://github.com/ps5-payload-dev/gdbsrv",
-        binarySource: "https://github.com/ps5-payload-dev/gdbsrv/releases/tag/v0.5",
-        version: "0.5",
+        displayTitle: "idps",
+        description: "AlAzif's partial idps dumper, dumps the partial idps to notification",
+        fileName: "idps.elf",
+        author: "AlAzif",
+        projectSource: "N.A.",
+        binarySource: "N.A.",
+        version: "1.0",
         toPort: 9021
     },
     {
