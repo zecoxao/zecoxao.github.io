@@ -15,6 +15,10 @@ function hex(n) {
     return "0x" + (new Number(n)).toString(16);
 }
 
+function sleep(ms=0) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function run_fontface() {
     print("[+] Webkit exploit (FontFace)");
     await sleep(0); // trigger rerender

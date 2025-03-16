@@ -8,6 +8,12 @@ const SESSIONSTORE_ON_LOAD_AUTORUN_KEY = "on_load_autorun";
 
 const MAINLOOP_EXECUTE_PAYLOAD_REQUEST = "mainloop_execute_payload_request";
 
+const console = document.getElementById('console');
+
+function debug_log(msg='') {
+	console.append(msg + '\n');
+}
+
 let exploitStarted = false;
 
 async function run(wkonly = false, animate = true) {

