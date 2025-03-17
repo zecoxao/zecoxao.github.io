@@ -1,6 +1,6 @@
 const OFFSET_wk_vtable_first_element     = 0x00DF7BD0; // B8 37 00 00 00 C3
-const OFFSET_wk_memset_import            = 0x0069CAD0; // not an import
-const OFFSET_wk___stack_chk_guard_import = 0x021A6278; // fixed
+const OFFSET_wk_snprintf_import          = 0x021A6438; //fixed
+const OFFSET_wk___stack_chk_guard_import = 0x021A6278; //fixed
 
 const OFFSET_lk___stack_chk_guard        = 0x000911B0;//match
 const OFFSET_lk_pthread_create_name_np   = 0x00001910;//match
@@ -10,7 +10,7 @@ const OFFSET_lk__thread_list             = 0x0005C198;//maybe?
 const OFFSET_lk_sleep                    = 0x00020c30;//match
 const OFFSET_lk_sceKernelGetCurrentCpu   = 0x00000460;//match
 
-const OFFSET_lc_memset                   = 0x000054F0;//match
+const OFFSET_lc_snprintf                 = 0x00063BD0;//match
 const OFFSET_lc_setjmp                   = 0x000737D0;//match
 const OFFSET_lc_longjmp                  = 0x0005d2d0;//match
 
