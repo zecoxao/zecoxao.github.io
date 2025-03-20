@@ -1,0 +1,96 @@
+<html>
+<!-- <html manifest="cache.appcache"> -->
+
+<head>
+    <title>PS5 UMTX Jailbreak</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="main.css">
+</head>
+
+<!-- body is set up as three rows: auto 1fr auto -->
+<body>
+    <!-- Row 1 -->
+    <div class="p-2">
+        <h1 class="text-center">PS5 UMTX Jailbreak (1.xx-5.xx)</h1>
+        <p class="text-center">Current firmware: <span class="text-bold" id="current-fw"></span></p>
+
+        <!-- This is absolute positioned to the body-->
+        <div id="toast-container"></div>
+    </div>
+
+    <!-- Row 2 -->
+    <div id="main-content">
+        <div id="pre-jb-view" class="d-flex align-items-center justify-content-center selected">
+            <a tabindex="0" class="btn" id="run-jb" onclick="runJailbreak()">Jailbreak</a>
+        </div>
+
+        <div id="console-view">
+            <textarea id="console" class="log"></textarea>
+        </div>
+    </div>
+
+    <!-- Row 3 -->
+    <div class="position-relative text-center p-2 mb-2">
+        <p class="text-secondary" id="version">v1.2</p>
+        <p class="text-secondary">creds & greetz</p>
+        <h3 class="text-secondary mt-2">
+            <a href="https://x.com/fail0verflow">@fail0verflow</a>,
+            <a href="https://twitter.com/flat_z">@flat_z</a>,
+            <a href="https://twitter.com/SpecterDev">@SpecterDev</a>,
+            ChendoChap,
+            SlidyBat,
+            abc/psfree,
+            <br />
+            idlesauce,
+            <a href="https://x.com/znullptr">@znullptr</a>,
+            <a href="https://twitter.com/notnotzecoxao">@notnotzecoxao</a>,
+            <a href="https://twitter.com/SocraticBliss">@SocraticBliss</a>,
+            <a href="https://github.com/john-tornblom">John Tornblom</a>,
+            <a href="https://discord.gg/kbrzGuH3F6">PS5 R&D Discord</a>
+        </h3>
+
+        <div class="position-absolute d-flex align-items-center bottom-0 left-0 m-4"> 
+            <div class="l2-redirect-box">L2</div>
+            <span class="ml-2">Redirect</span>
+        </div>
+    </div>
+
+    <script src="int64.js"></script>
+    <script src="rop.js"></script>
+    <script src="exploit.js"></script>
+    <script src="custom_host_stuff.js"></script>
+    <script src="module/utils.js"></script>
+    <script src="module/constants.js"></script>
+    <script src="module/int64.js"></script>
+    <script src="module/mem.js"></script>
+    <script src="module/memtools.js"></script>
+    <script src="module/rw.js"></script>
+    <script src="module/syscalls.js"></script>
+    <script src="webkit_psfree.js"></script>
+    <script src="webkit_fontface.js"></script>
+    
+    <script>
+        addEventListener('unhandledrejection', (event) => {
+            const reason = event.reason;
+            // We log the line and column numbers as well since some exceptions (like
+            // SyntaxError) do not show it in the stack trace.
+            alert(
+                `${reason}\n`
+                + `${reason.sourceURL}:${reason.line}:${reason.column}\n`
+                + `${reason.stack}`
+            );
+            throw reason;
+        });
+        document.getElementById("current-fw").innerHTML = fw_str;
+        localStorage.setItem(LOCALSTORE_WK_EXPLOIT_TYPE_KEY, LOCALSTORE_WK_EXPLOIT_TYPE_VALUE_PSFREE);
+        registerAppCacheEventHandlers();
+        registerL2ButtonHandler();
+        window.onload = function() {
+            if (sessionStorage.getItem(SESSIONSTORE_RUN_WK_EXPLOIT_ON_LOAD_KEY)) {
+                runJailbreak(false);
+            }
+        };
+    </script>
+</body>
+
+</html>
