@@ -128,7 +128,7 @@ function find_worker(p, libKernelBase) {
 /**
  * @enum {number}
  */
-const LogLevel = {
+var LogLevel = {
     DEBUG: 0,
     INFO: 1,
     LOG: 2,
@@ -136,7 +136,7 @@ const LogLevel = {
     ERROR: 4,
     SUCCESS: 5,
 
-    FLAG_TEMP: 0x1000,
+    FLAG_TEMP: 0x1000
 };
 
 let consoleElem = null;
