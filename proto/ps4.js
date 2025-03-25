@@ -1344,16 +1344,10 @@ function stage3() {
 		  alert("failed to read, error -1");
 		  break;
 	  }
-	  else{
-		alert("read successfully, 0x" + read);
-	  }
-	  let write = chain.syscall(0x004, dump_sock_fd, buf, buf_size);//write
+	  let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
 	  if(write.low == 0xffffffff){
 		  alert("failed to write, error -1");
 		  break;
-	  }
-	  else{
-		alert("written successfully, 0x" + write);
 	  }
   }
   // end dump code
