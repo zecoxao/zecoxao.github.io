@@ -577,12 +577,10 @@ async function main(userlandRW, wkOnly = false) {
 
         // Set qa flags and utoken flags for debug menu enable
         let qaf_dword = await krw.read4(get_kaddr(OFFSET_KERNEL_QA_FLAGS));
-        await krw.write8(get_kaddr(OFFSET_KERNEL_QA_FLAGS), new int64(0xFFFFFFFF, 0xFFFFFFFF));
-		await krw.write8(get_kaddr(OFFSET_KERNEL_QA_FLAGS+8), new int64(0xFFFFFFFF, 0xFFFFFFFF));
+        await krw.write4(get_kaddr(OFFSET_KERNEL_QA_FLAGS), qaf_dword | 0x10300);
 
         let utoken_flags = await krw.read1(get_kaddr(OFFSET_KERNEL_UTOKEN_FLAGS));
-        await krw.write8(get_kaddr(OFFSET_KERNEL_UTOKEN_FLAGS), new int64(0xFFFFFFFF, 0xFFFFFFFF));
-		await krw.write8(get_kaddr(OFFSET_KERNEL_UTOKEN_FLAGS+8), new int64(0xFFFFFFFF, 0xFFFFFFFF));
+        await krw.write1(get_kaddr(OFFSET_KERNEL_UTOKEN_FLAGS), utoken_flags | 0x1);
         await log("Enabled debug menu", LogLevel.INFO);
 
         // Patch creds
