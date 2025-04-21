@@ -573,7 +573,7 @@ async function main(userlandRW, wkOnly = false) {
         await krw.write4(get_kaddr(OFFSET_KERNEL_SECURITY_FLAGS), security_flags | 0x14);
 
         // Set targetid to DEX
-        await krw.write1(get_kaddr(OFFSET_KERNEL_TARGETID), 0x84);
+        await krw.write1(get_kaddr(OFFSET_KERNEL_TARGETID), 0x81);
 
         // Set qa flags and utoken flags for debug menu enable
         await krw.write8(get_kaddr(OFFSET_KERNEL_QA_FLAGS    ), new int64(0xFFFFFFFF, 0xFFFFFFFF));
