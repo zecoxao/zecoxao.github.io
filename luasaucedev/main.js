@@ -573,7 +573,7 @@ async function main(userlandRW, wkOnly = false) {
         await krw.write4(get_kaddr(OFFSET_KERNEL_SECURITY_FLAGS), security_flags | 0x14);
 
         // Set targetid to DEX
-        await krw.write1(get_kaddr(OFFSET_KERNEL_TARGETID), 0x81);
+        await krw.write1(get_kaddr(OFFSET_KERNEL_TARGETID), 0x83);
 
         // Set qa flags and utoken flags for debug menu enable
         await krw.write8(get_kaddr(OFFSET_KERNEL_QA_FLAGS    ), new int64(0xFFFFFFFF, 0xFFFFFFFF));
@@ -595,7 +595,7 @@ async function main(userlandRW, wkOnly = false) {
         await krw.write4(krw.procUcredAddr.add32(0x14), 0); // cr_rgid
 
         // Escalate sony privs
-        await krw.write8(krw.procUcredAddr.add32(0x58), new int64(0x00000013, 0x48010000)); // cr_sceAuthId
+        await krw.write8(krw.procUcredAddr.add32(0x58), new int64(0x00010003, 0x48000000)); // cr_sceAuthId
         await krw.write8(krw.procUcredAddr.add32(0x60), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[0]
         await krw.write8(krw.procUcredAddr.add32(0x68), new int64(0xFFFFFFFF, 0xFFFFFFFF)); // cr_sceCaps[1]
         await krw.write1(krw.procUcredAddr.add32(0x83), 0x80);                              // cr_sceAttr[0]
