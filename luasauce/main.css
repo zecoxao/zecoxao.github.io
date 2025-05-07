@@ -214,6 +214,7 @@ a:focus {
     margin: 8px;
     box-sizing: border-box;
     overflow-y: auto;
+    font-size: initial;
 }
 
 
