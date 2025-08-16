@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>QuickHEN 3.55-5.07</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    .loader {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      margin: -75px 0 0 -75px;
+
+      border: 10px solid #f3f3f3;
+      border-radius: 50%;
+      border-top: 10px solid #044595;
+      border-left: 10px solid #044595;
+      width: 120px;
+      height: 120px;
+
+      -webkit-animation: spin 1s linear infinite;
+    }
+
+    .info {
+      overflow: hidden;
+      position: fixed;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+
+      font-size: 45px;
+      font-family: sans-serif;
+
+      transform: translate(-50%, -50%);
+    }
+
+    .credits {
+      overflow: hidden;
+      position: fixed;
+      position: absolute;
+      top: 90%;
+      left: 50%;
+
+      font-size: 16px;
+      font-family: sans-serif;
+      text-align: center;
+
+      transform: translate(-50%, -90%);
+    }
+
+    @-webkit-keyframes spin {
+      0% { -webkit-transform: rotate(0deg); }
+      100% { -webkit-transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body style="margin:0;">
+  <script>
+	var fwFromUA = navigator.userAgent.substring(navigator.userAgent.indexOf("5.0 (") + 19, navigator.userAgent.indexOf(") Apple"));
+	var fw_major_string = fwFromUA.substring(fwFromUA.indexOf(""), fwFromUA.indexOf("."));
+	var fw_minor_string = fwFromUA.substring(fwFromUA.indexOf(".")+3, fwFromUA.indexOf(fw_major_string)+2);
+	var ps4_fw = parseInt(fw_major_string) * 100 + parseInt(fw_minor_string);
+	window.ps4_fw = ps4_fw;
+	//alert(ps4_fw);
+	if (window.ps4_fw <= 407)
+		window.leakval_slide = 0x28;
+	else
+		window.leakval_slide = 0x10;
+
+    window.onload = function () {
+		runWebKitExploit();
+    }
+	
+	function runWebKitExploit() {
+		if (ps4_fw <= 407)
+			setTimeout(exploit_StackUnitializedRead, 1);
+		else if (ps4_fw >= 450 && ps4_fw <= 501 && 1==0)
+			setTimeout(exploit_setAttributeNodeNS, 1);
+		else if (ps4_fw >= 450 && ps4_fw <= 555)
+			setTimeout(exploit_haveABadTime, 1);
+    }
+	
+	window.postExpl = function () {
+		setTimeout(window.stage2, 1);
+	}
+
+    function allset() {
+      document.getElementById("loader").style.display = "none";
+      document.getElementById("allset").style.display = "block";
+    }
+
+    function awaitpl() {
+      document.getElementById("loader").style.display = "none";
+      document.getElementById("awaiting").style.display = "block";
+    }
+
+    function fail(info) {
+      document.getElementById("loader").style.display = "none";
+      document.getElementById("fail").style.display = "block";
+    }
+  </script>
+
+  <div id="loader" class="loader"></div>
+
+  <div id="awaiting" class="info" style="display:none;">
+    Awaiting Payload...
+  </div>
+
+  <div id="allset" class="info" style="display:none;">
+    You're all set!
+  </div>
+
+  <div id="fail" class="info" style="display:none;">
+    Something went wrong :(
+  </div>
+
+  <div id="badfw" class="info" style="display:none;">
+    Only firmwares 3.55-5.07 are supported!
+  </div>
+  
+  <div id="footer" class="credits">
+    <ul style="list-style: none;padding-left:0">
+      <li>Exploits from qwertyoruiopz</li>
+      <li>Implementation by Specter and CelesteBlue</li>
+      <li>HEN thanks to flatz, idc, WildCard, zecoxao, xvortex, hitodama, BigBoss, kozarovv, Zer0xFF</li>
+    </ul>
+  </div>
+  
+  <script src="./common_utils.js"></script>
+  <script src="./rop.js"></script>
+  <script src="./syscalls.js"></script>
+  <script src="./kernel_namedobj.js"></script>
+  <script src="./kernel_bpf_race_old.js"></script>
+  <script src="./kernel_bpf_race.js"></script>
+  <script src="./kernel_bpf_double_free.js"></script>
+  <script src="./userland.js"></script>
+  <script src="./exploit_StackUnitializedRead.js"></script>
+  <script src="./exploit_setAttributeNodeNS.js"></script>
+  <script src="./exploit_haveABadTime.js"></script>
+  <pre id="console"></pre>
+</body>
+</html>

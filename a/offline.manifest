@@ -1,0 +1,21 @@
+CACHE MANIFEST
+
+index.html
+common_utils.js
+rop.js
+syscalls.js
+kernel_namedobj.js
+kernel_bpf_race.js
+kernel_bpf_double_free.js
+userland.js
+exploit_StackUnitializedRead.js
+exploit_setAttributeNodeNS.js
+exploit_haveABadTime.js
+kdumper.bin
+unblocker.bin
+ps4-hen-vtx-455.bin
+ps4-hen-vtx-505.bin
+fake_installer.bin
+
+FALLBACK:
+. offline.html
