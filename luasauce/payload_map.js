@@ -48,7 +48,7 @@ const payload_map = [
         projectSource: "https://github.com/EchoStretch/kstuff",
         binarySource: "https://github.com/EchoStretch/kstuff/actions/runs/14686953552",
         version: "1.3-r3",
-        supportedFirmwares: ["3.", "4.", "5."],
+        supportedFirmwares: ["3.", "4.", "5.", "6.", "7.", "8."],
         toPort: 9021
     },
     {
