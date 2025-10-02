@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Tester CVE‑2025‑24201 – WebKit</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 1rem;
+    }
+    #out {
+      font-size: 1.5rem;
+      padding: 1rem 2rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    #log {
+      max-width: 90vw;
+      width: 600px;
+      background: #222;
+      border: 1px solid #444;
+      padding: 1rem;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      overflow: auto;
+      max-height: 45vh;
+    }
+    .bad   { background: #600; box-shadow: 0 0 12px #f33; }
+    .good  { background: #064; box-shadow: 0 0 12px #0f8; }
+    .info  { background: #333; box-shadow: 0 0 6px #888; }
+  </style>
+</head>
+<body>
+
+<canvas id="c" style="display:none"></canvas>
+<div id="out" class="info">Ejecutando prueba…</div>
+<pre id="log"></pre>
+
+<script>
+(function () {
+  const log = (...msg) => {
+    console.log(...msg);
+    document.getElementById('log').textContent += msg.join(' ') + '\n';
+  };
+
+  const canvas = document.getElementById('c');
+  const out = document.getElementById('out');
+
+  log('[*] Intentando crear contexto WebGL...');
+  const gl = canvas.getContext("webgl");
+
+  if (!gl) {
+    log('[!] No se pudo crear el contexto WebGL.');
+    out.textContent = 'WebGL no disponible – getContext("webgl") retornó null';
+    out.className = 'good'; // sin WebGL, no hay riesgo
+    return;
+  }
+
+  log('[+] Contexto WebGL creado correctamente.');
+  const RESTART = 0x8D69;
+
+  // Limpia errores previos
+  let cleared = 0;
+  while (gl.getError() !== gl.NO_ERROR && cleared++ < 10);
+  log('[*] Limpieza previa de errores completada.');
+
+  log(`[*] Llamando a gl.enable(0x${RESTART.toString(16)})`);
+  gl.enable(RESTART);
+  const err = gl.getError();
+  log(`[*] gl.getError() devolvió: 0x${err.toString(16).padStart(4, '0')}`);
+
+  if (err === gl.NO_ERROR) {
+    out.textContent = 'VULNERABLE – gl.enable(0x8D69) no produjo error';
+    out.className = 'bad';
+    log('[!] Posible CVE-2025-24201 – ruta peligrosa activa');
+  } else {
+    out.textContent = 'Seguro – WebGL activo, pero el motor devolvió error';
+    out.className = 'good';
+    log('[+] El motor devolvió error como se esperaba – protección presente.');
+  }
+})();
+</script>
+
+</body>
+</html>
