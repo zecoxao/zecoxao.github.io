@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Bushigan</title>
+<style>
+body{font-family:system-ui,monospace;background:#000;color:#fff;padding:12px}
+.wrap{max-width:900px;margin:auto}
+button{padding:8px 12px;margin:4px;border-radius:6px;background:#111;border:1px solid #444;color:#fff;cursor:pointer}
+pre{background:#06060a;padding:10px;border-radius:6px;white-space:pre-wrap;overflow:auto;max-height:520px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>PS4 | POC (Reuse / UAF) ?</h1>
+<button id="startBtn">START</button>
+<button id="stopBtn">STOP</button>
+<pre id="log">Prêt.</pre>
+</div>
+<script>
+(()=>{
+const SERVER="http://192.168.1.63:8000/upload";
+const DNG="./IMGP0847.DNG";
+let stop=false,baseline=null;
+
+const log=document.getElementById("log");
+function appendLine(t=''){log.textContent+=(log.textContent?'\n':'')+t;log.scrollTop=log.scrollHeight;}
+function toHex(n){return "0x"+n.toString(16).toUpperCase();}
+async function upload(buf,name){
+ try{
+   const res=await fetch(SERVER,{method:"POST",headers:{"X-Filename":name},body:buf});
+   appendLine(res.ok?`>>> Upload ${name}`:`Erreur upload ${res.status}`);
+ }catch(e){appendLine("Erreur upload: "+e);}
+}
+function diff(a,b){
+ const len=Math.min(a.length,b.length);
+ let first=-1,last=-1,total=0;
+ for(let i=0;i<len;i++){
+  if(a[i]!==b[i]){
+    if(first===-1)first=i;
+    last=i;total++;
+  }
+ }
+ return {first,last,total};
+}
+
+async function runInfinite(){
+ stop=false;appendLine("=== START ===");
+ if(!baseline){
+   const r0=await fetch(DNG,{cache:"no-store"});
+   const ab0=await r0.arrayBuffer();
+   baseline=new Uint8Array(ab0);
+   appendLine(`Baseline chargée (${baseline.length} octets)`);
+ }
+ let run=0;
+ while(!stop){
+   run++;
+   const resp=await fetch(DNG,{cache:"no-store"});
+   const ab=await resp.arrayBuffer();
+   const u=new Uint8Array(ab);
+   const d=diff(baseline,u);
+   if(d.first>=0){
+     appendLine(`[!] Run${run}: corruption détectée (${d.total} diffs, first=${toHex(d.first)})`);
+     const name=`dump_corrupt_${Date.now()}.bin`;
+     await upload(u,name);
+   }else{
+     appendLine(`Run${run}: OK`);
+   }
+   await new Promise(r=>setTimeout(r,400));
+ }
+ appendLine("=== STOP ===");
+}
+document.getElementById("startBtn").onclick=()=>runInfinite();
+document.getElementById("stopBtn").onclick=()=>{stop=true;appendLine("STOP demandé.");};
+})();
+</script>
+</body>
+</html>
