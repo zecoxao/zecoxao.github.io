@@ -103,13 +103,13 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "shsrv",
-        description: "Telnet shell server. Runs on port 2323.",
-        fileName: "shsrv.elf",
-        author: "john-tornblom",
-        projectSource: "https://github.com/ps5-payload-dev/shsrv",
-        binarySource: "https://github.com/ps5-payload-dev/shsrv/releases/tag/v0.15",
-        version: "0.15",
+        displayTitle: "shadowmount",
+        description: "Mount games has never been easier with shadowmount",
+        fileName: "shadowmount.elf",
+        author: "voidwhisper",
+        projectSource: "https://github.com/voidwhisper-ps/ShadowMount",
+        binarySource: "https://github.com/voidwhisper-ps/ShadowMount/releases/tag/v0.1",
+        version: "0.1",
         toPort: 9021
     },
     {
