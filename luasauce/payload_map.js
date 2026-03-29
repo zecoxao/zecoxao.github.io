@@ -103,13 +103,13 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "shadowmount",
-        description: "Mount games has never been easier with shadowmount",
-        fileName: "shadowmount.elf",
-        author: "voidwhisper",
-        projectSource: "https://github.com/voidwhisper-ps/ShadowMount",
-        binarySource: "https://github.com/voidwhisper-ps/ShadowMount/releases/tag/v0.1",
-        version: "0.1",
+        displayTitle: "shadowmountplus",
+        description: "Mount games has never been easier with shadowmountplus",
+        fileName: "shadowmountplus.elf",
+        author: "drakmor",
+        projectSource: "https://github.com/drakmor/ShadowMountPlus/",
+        binarySource: "https://github.com/drakmor/ShadowMountPlus/releases/tag/1.6beta5",
+        version: "1.6beta5",
         toPort: 9021
     },
     {
