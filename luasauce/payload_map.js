@@ -41,13 +41,13 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "ps5-kstuff",
+        displayTitle: "ps5-kstuff-lite",
         description: "FPKG enabler",
         fileName: "kstuff.elf",
         author: "sleirsgoevy, john-tornblom, EchoStretch, buzzer-re, BestPig, LightningMods, zecoxao, idlesauce",
-        projectSource: "https://github.com/EchoStretch/kstuff",
-        binarySource: "https://github.com/EchoStretch/kstuff/actions/runs/14686953552",
-        version: "1.6",
+        projectSource: "https://github.com/EchoStretch/kstuff-lite",
+        binarySource: "https://github.com/EchoStretch/kstuff-lite/releases/download/v1.01/",
+        version: "1.01",
         supportedFirmwares: ["3.", "4.", "5.", "6.", "7.", "8."],
         toPort: 9021
     },
