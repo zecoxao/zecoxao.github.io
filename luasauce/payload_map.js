@@ -113,13 +113,13 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "gdbsrv",
-        description: "GDB server. Runs on port 2159.",
-        fileName: "gdbsrv.elf",
-        author: "john-tornblom",
-        projectSource: "https://github.com/ps5-payload-dev/gdbsrv",
-        binarySource: "https://github.com/ps5-payload-dev/pacbrew-repo/actions/runs/14012252230",
-        version: "0.5",
+        displayTitle: "voidshell",
+        description: "AIO tool by VoidWhisper",
+        fileName: "voidshell.elf",
+        author: "VoidWhisper",
+        projectSource: "https://ko-fi.com/s/d90b784d5d",
+        binarySource: "https://ko-fi.com/s/d90b784d5d",
+        version: "3.0B",
         toPort: 9021
     },
     {
