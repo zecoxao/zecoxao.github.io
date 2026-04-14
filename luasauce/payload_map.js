@@ -52,14 +52,14 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "Byepervisor HEN",
-        description: "FPKG enabler",
-        fileName: "byepervisor.elf",
-        author: "SpecterDev, ChendoChap, flatz, fail0verflow, Znullptr, kiwidog, sleirsgoevy, EchoStretch, LightningMods, BestPig, zecoxao", 
-        projectSource: "https://github.com/EchoStretch/Byepervisor",
-        binarySource: "https://github.com/EchoStretch/Byepervisor/actions/runs/14004003762",
-        version: "84164bb",
-        supportedFirmwares: ["1.00", "1.01", "1.02", "1.12", "1.14", "2.00", "2.20", "2.25", "2.26", "2.30", "2.50", "2.70"],
+        displayTitle: "PS5 HEN",
+        description: "HEN for 1.xx-4.xx by Cragson",
+        fileName: "ps5-hen.elf",
+        author: "cragson, fail0verflow, flatz", 
+        projectSource: "https://github.com/cragson/ps5-hen",
+        binarySource: "https://github.com/cragson/ps5-hen/releases/download/dev-latest",
+        version: "dev-latest",
+        supportedFirmwares: ["1.","2.","3.","4."],
         toPort: 9021
     },
     {
