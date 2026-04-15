@@ -55,7 +55,7 @@ const payload_map = [
         displayTitle: "PS5 HEN",
         description: "HEN for 1.xx-4.xx by Cragson",
         fileName: "ps5-hen.elf",
-        author: "cragson, fail0verflow, flatz", 
+        author: "cragson, SpecterDev, fail0verflow, flatz, EchoStretch", 
         projectSource: "https://github.com/cragson/ps5-hen",
         binarySource: "https://github.com/cragson/ps5-hen/releases/download/dev-latest",
         version: "dev-latest",
