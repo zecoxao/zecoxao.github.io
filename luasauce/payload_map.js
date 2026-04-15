@@ -53,12 +53,12 @@ const payload_map = [
     },
     {
         displayTitle: "PS5 HEN",
-        description: "HEN for 1.xx-4.xx by Cragson",
+        description: "HEN for 1.00 to 4.51 by Cragson",
         fileName: "ps5-hen.elf",
         author: "cragson, SpecterDev, fail0verflow, flatz, EchoStretch", 
         projectSource: "https://github.com/cragson/ps5-hen",
         binarySource: "https://github.com/cragson/ps5-hen/releases/download/dev-latest",
-        version: "dev-latest",
+        version: "1.0",
         supportedFirmwares: ["1.","2.","3.","4."],
         toPort: 9021
     },
