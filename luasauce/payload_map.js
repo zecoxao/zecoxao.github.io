@@ -144,13 +144,13 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "ps5-versions",
-        description: "Shows kernel build, os and sdk versions",
-        fileName: "ps5-versions.elf",
-        author: "SiSTRo",
-        projectSource: "https://github.com/SiSTR0/ps5-versions",
-        binarySource: "https://github.com/SiSTR0/ps5-versions/releases/download/v1.0/ps5-versions.elf",
-        version: "1.0",
+        displayTitle: "ps5-backpork",
+        description: "Backpork by BestPig, for the best BackPorts",
+        fileName: "ps5-backpork.elf",
+        author: "MeilleurCochon",
+        projectSource: "https://github.com/BestPig/BackPork",
+        binarySource: "https://github.com/BestPig/BackPork/releases/download/0.1/ps5-backpork.elf",
+        version: "0.1",
         supportedFirmwares: ["1.", "2.", "3.", "4."]
     },
     {
