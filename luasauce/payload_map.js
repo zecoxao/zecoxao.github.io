@@ -162,6 +162,7 @@ const payload_map = [
         projectSource: "https://github.com/idlesauce/ps5-remoteplay-get-pin",
         binarySource: "https://github.com/idlesauce/ps5-remoteplay-get-pin/releases/tag/v0.1.1",
         version: "0.1.1",
+		supportedFirmwares: ["4."],
         toPort: 9021
     },
     {
