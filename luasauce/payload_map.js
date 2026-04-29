@@ -155,14 +155,14 @@ const payload_map = [
 		toPort: 9021
     },
     {
-        displayTitle: "ps5-remoteplay-get-pin",
-        description: "Get Remote Play PIN for offline activated users. Send again to cancel.",
-        fileName: "rp-get-pin.elf",
-        author: "idlesauce",
-        projectSource: "https://github.com/idlesauce/ps5-remoteplay-get-pin",
-        binarySource: "https://github.com/idlesauce/ps5-remoteplay-get-pin/releases/tag/v0.1.1",
-        version: "0.1.1",
-		supportedFirmwares: ["4."],
+        displayTitle: "ps5-linux-loader",
+        description: "Linux Loader for the PS5 by TheFlow",
+        fileName: "ps5-linux-loader.elf",
+        author: "TheFlow",
+        projectSource: "https://github.com/ps5-linux/ps5-linux-loader/",
+        binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v1.0",
+        version: "1.0",
+		supportedFirmwares: ["3.","4."],
         toPort: 9021
     },
     {
