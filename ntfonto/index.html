@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style id="s">
+@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+</style>
+</head>
+<body>
+<script>
+if (window.testRunner) {
+    testRunner.dumpAsText();
+    testRunner.waitUntilDone();
+}
+
+window.onload = () => {
+    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+    document.fonts.add(A);
+    void A.loaded;
+
+    let fired = false;
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            if (!fired && this === A) {
+                fired = true;
+                new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
+                new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+                document.getElementById('s').sheet.deleteRule(0);
+                document.body.offsetTop;
+            }
+            return undefined;
+        }
+    });
+    document.fonts.load('1em x', 'AB');
+    setTimeout(() => {
+        if (window.testRunner)
+            testRunner.notifyDone();
+    }, 0);
+};
+</script>
+</body>
+</html>
