@@ -46,20 +46,20 @@ const payload_map = [
         fileName: "kstuff.elf",
         author: "sleirsgoevy, john-tornblom, EchoStretch, buzzer-re, BestPig, LightningMods, zecoxao, idlesauce",
         projectSource: "https://github.com/EchoStretch/kstuff-lite",
-        binarySource: "https://github.com/EchoStretch/kstuff-lite/releases/download/v1.01/",
-        version: "1.03",
+        binarySource: "https://github.com/EchoStretch/kstuff-lite/releases/tag/v1.06",
+        version: "1.06 beta",
         supportedFirmwares: ["3.", "4.", "5.", "6.", "7.", "8.", "9.", "10."],
         toPort: 9021
     },
     {
-        displayTitle: "PS5 HEN",
-        description: "HEN for 1.00 to 4.51 by Cragson",
-        fileName: "ps5-hen.elf",
-        author: "cragson, SpecterDev, fail0verflow, flatz, EchoStretch", 
-        projectSource: "https://github.com/cragson/ps5-hen",
-        binarySource: "https://github.com/cragson/ps5-hen/releases/download/dev-latest",
-        version: "1.0",
-        supportedFirmwares: ["1.","2.","3.","4."],
+        displayTitle: "elf-arsenal",
+        description: "all in one tool for payloads",
+        fileName: "elf-arsenal.elf",
+        author: "Sonic-Iso", 
+        projectSource: "https://git.etawen.dev/soniciso/elf-arsenal",
+        binarySource: "https://git.etawen.dev/soniciso/elf-arsenal/releases/tag/v1.6.4",
+        version: "1.6.4",
+        supportedFirmwares: ["1.","2.","3.","4.","5."],
         toPort: 9021
     },
     {
@@ -123,24 +123,14 @@ const payload_map = [
         toPort: 9021
     },
     {
-        displayTitle: "ps5debug",
-        description: "Debugger (Experimental beta)",
-        fileName: "ps5debug_v1.0b3.elf",
-        author: "SiSTR0, ctn123",
-        projectSource: "https://github.com/GoldHEN/ps5debug",
-        binarySource: "https://github.com/GoldHEN/ps5debug/releases/download/1.0b3/ps5debug_v1.0b3.elf",
-        version: "1.0b3",
-        supportedFirmwares: ["3.", "4.", "5."],
-        toPort: 9021
-    },
-    {
-        displayTitle: "ps5debug",
-        description: "Debugger, open source version by DizzRL",
-        fileName: "ps5debug_dizz.elf",
-        author: "Dizz, astrelsky, John Tornblom, SiSTR0, golden, idlesauce",
-        projectSource: "https://github.com/idlesauce/ps5debug",
-        binarySource: "https://github.com/idlesauce/ps5debug/releases/download/v0.0.1/ps5debug.elf",
-        version: "0.0.1-r2",
+        displayTitle: "ps5debug-NG",
+        description: "OpenSource Debugger",
+        fileName: "ps5debug-NG_v1.2.5.elf",
+        author: "SiSTR0, ctn123, jogolden, OpenSourcereR-dev",
+        projectSource: "https://github.com/OpenSourcereR-dev/ps5debug-NG",
+        binarySource: "https://github.com/OpenSourcereR-dev/ps5debug-NG/releases/tag/1.2.5",
+        version: "1.2.5",
+        supportedFirmwares: ["3.", "4.","5."],
         toPort: 9021
     },
     {
@@ -151,7 +141,7 @@ const payload_map = [
         projectSource: "https://github.com/BestPig/BackPork",
         binarySource: "https://github.com/BestPig/BackPork/releases/download/0.1/ps5-backpork.elf",
         version: "0.1",
-        supportedFirmwares: ["1.", "2.", "3.", "4."],
+        supportedFirmwares: ["1.", "2.", "3.", "4.", "5."],
 		toPort: 9021
     },
     {
@@ -166,12 +156,11 @@ const payload_map = [
         toPort: 9021
     },
     {
-        // https://github.com/Storm21CH/PS5_Browser_appCache_remove
         displayTitle: "Browser appcache remover",
         description: "Deletes for only the current user in webkit-only mode",
         fileName: "",
         author: "Storm21CH, idlesauce",
-        projectSource: "",
+        projectSource: "https://github.com/Storm21CH/PS5_Browser_appCache_remove",
         binarySource: "",
         version: "1.0",
         customAction: CUSTOM_ACTION_APPCACHE_REMOVE
