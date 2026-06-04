@@ -150,7 +150,7 @@ const payload_map = [
         fileName: "ps5-linux-loader.elf",
         author: "TheFlow",
         projectSource: "https://github.com/ps5-linux/ps5-linux-loader/",
-        binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v2.0",
+        binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v2.1",
         version: "2.1",
 		supportedFirmwares: ["3.","4.","5.","6."],
         toPort: 9021
