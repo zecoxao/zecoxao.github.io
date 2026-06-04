@@ -46,8 +46,8 @@ const payload_map = [
         fileName: "kstuff.elf",
         author: "sleirsgoevy, john-tornblom, EchoStretch, buzzer-re, BestPig, LightningMods, zecoxao, idlesauce",
         projectSource: "https://github.com/EchoStretch/kstuff-lite",
-        binarySource: "https://github.com/EchoStretch/kstuff-lite/releases/tag/v1.06",
-        version: "1.06 beta",
+        binarySource: "https://github.com/EchoStretch/kstuff-lite/releases/tag/v1.07",
+        version: "1.07",
         supportedFirmwares: ["3.", "4.", "5.", "6.", "7.", "8.", "9.", "10."],
         toPort: 9021
     },
@@ -151,7 +151,7 @@ const payload_map = [
         author: "TheFlow",
         projectSource: "https://github.com/ps5-linux/ps5-linux-loader/",
         binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v2.0",
-        version: "2.0",
+        version: "2.1",
 		supportedFirmwares: ["3.","4.","5.","6."],
         toPort: 9021
     },
