@@ -57,8 +57,8 @@ const payload_map = [
         fileName: "elf-arsenal.elf",
         author: "Sonic-Iso", 
         projectSource: "https://git.etawen.dev/soniciso/elf-arsenal",
-        binarySource: "https://git.etawen.dev/soniciso/elf-arsenal/releases/tag/v1.6.4",
-        version: "1.6.4",
+        binarySource: "https://git.etawen.dev/soniciso/elf-arsenal/releases/tag/v1.6.6",
+        version: "1.6.6",
         supportedFirmwares: ["1.","2.","3.","4.","5."],
         toPort: 9021
     },
