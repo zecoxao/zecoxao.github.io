@@ -1,23 +1,116 @@
 <!DOCTYPE html>
 <html>
+<head>
+<meta charset="UTF-8">
+<title>Test: changing input type during input event does not crash</title>
+<style>
+  body { font-family: monospace; padding: 20px; }
+  .pass { color: green; font-weight: bold; }
+  .fail { color: red;  font-weight: bold; }
+  #log  { margin-top: 16px; line-height: 1.6; }
+  #description { margin-bottom: 12px; font-style: italic; color: #555; }
+</style>
+</head>
 <body>
 
 <input id="input" type="date">
+<p id="description"></p>
+<div id="log"></div>
 
 <script>
+
+
+function log(html) {
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    document.getElementById("log").appendChild(div);
+}
+
+function description(msg) {
+    document.getElementById("description").textContent = msg;
+    console.log("DESCRIPTION: " + msg);
+}
+
+function testPassed(msg) {
+    log('<span class="pass">PASS</span> ' + msg);
+    console.log("PASS: " + msg);
+}
+
+function testFailed(msg) {
+    log('<span class="fail">FAIL</span> ' + msg);
+    console.log("FAIL: " + msg);
+}
+
+function shouldBeEqualToString(exprStr, expected) {
+    const actual = eval(exprStr);
+    if (actual === expected)
+        testPassed(exprStr + ' is "' + expected + '"');
+    else
+        testFailed(exprStr + ' should be "' + expected + '". Was "' + actual + '".');
+}
+
+
+const KEY_MAP = {
+    "rightArrow" : { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+    "leftArrow"  : { key: "ArrowLeft",  code: "ArrowLeft",  keyCode: 37 },
+    "upArrow"    : { key: "ArrowUp",    code: "ArrowUp",    keyCode: 38 },
+    "downArrow"  : { key: "ArrowDown",  code: "ArrowDown",  keyCode: 40 },
+};
+
+function keyDown(keyStr, modifiers = []) {
+    const mapped = KEY_MAP[keyStr];
+    const key    = mapped ? mapped.key     : keyStr;
+    const code   = mapped ? mapped.code    : "Key" + keyStr.toUpperCase();
+    const keyCode = mapped ? mapped.keyCode : keyStr.charCodeAt(0);
+
+    const props = {
+        key,
+        code,
+        keyCode,
+        which: keyCode,
+        bubbles: true,
+        cancelable: true,
+        shiftKey:   modifiers.includes("shiftKey"),
+        ctrlKey:    modifiers.includes("ctrlKey"),
+        altKey:     modifiers.includes("altKey"),
+        metaKey:    modifiers.includes("metaKey"),
+    };
+
+
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown",  props));
+    if (!mapped) // printable character
+        document.activeElement.dispatchEvent(new KeyboardEvent("keypress", props));
+    document.activeElement.dispatchEvent(new KeyboardEvent("keyup",    props));
+}
+
+
+description("Test that changing the input type during an input event does not crash.");
+
 const input = document.getElementById("input");
 
 input.addEventListener("input", () => {
     input.type = "text";
 });
 
-input.focus();
+addEventListener("load", async () => {
+    try {
+        input.focus();           // [mm]/dd/yyyy
+        keyDown("9");            // -> [09]/dd/yyyy
+        keyDown("rightArrow");   // -> 09/[dd]/yyyy
+        keyDown("2");            // -> 09/[02]/yyyy
+        keyDown("rightArrow");   // -> 09/02/[yyyy]
+        keyDown("2");            // -> 09/02/[0002]
+        keyDown("0");            // -> 09/02/[0020]
+        keyDown("1");            // -> 09/02/[0201]
+        keyDown("2");            // -> 09/02/[2012] -> input event fires -> type = "text"
 
-input.value = "2024-01-01";
-input.dispatchEvent(new Event("input", { bubbles: true }));
+        shouldBeEqualToString("input.type", "text");
+        testPassed("Did not crash.");
+    } catch (e) {
+        testFailed("Threw exception: " + e);
+    }
+});
 
-alert("type = " + input.type);
 </script>
-
 </body>
 </html>
