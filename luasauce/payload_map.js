@@ -44,10 +44,10 @@ const payload_map = [
         displayTitle: "ps5-kstuff-lite",
         description: "FPKG enabler",
         fileName: "kstuff.elf",
-        author: "sleirsgoevy, john-tornblom, EchoStretch, buzzer-re, BestPig, LightningMods, zecoxao, idlesauce",
+        author: "sleirsgoevy, john-tornblom, EchoStretch, buzzer-re, BestPig, LightningMods, zecoxao, idlesauce, flatz",
         projectSource: "https://github.com/EchoStretch/kstuff-lite",
-        binarySource: "https://github.com/EchoStretch/kstuff-lite/releases/tag/v1.07",
-        version: "1.07",
+        binarySource: "https://github.com/EchoStretch/kstuff-lite/releases/tag/v1.08",
+        version: "1.08 Beta",
         supportedFirmwares: ["3.", "4.", "5.", "6.", "7.", "8.", "9.", "10."],
         toPort: 9021
     },
@@ -57,8 +57,8 @@ const payload_map = [
         fileName: "elf-arsenal.elf",
         author: "Sonic-Iso", 
         projectSource: "https://git.etawen.dev/soniciso/elf-arsenal",
-        binarySource: "https://git.etawen.dev/soniciso/elf-arsenal/releases/tag/v1.6.7",
-        version: "1.6.7",
+        binarySource: "https://git.etawen.dev/soniciso/elf-arsenal/releases/tag/v1.6.21",
+        version: "1.6.21",
         supportedFirmwares: ["1.","2.","3.","4.","5."],
         toPort: 9021
     },
@@ -85,11 +85,11 @@ const payload_map = [
     {
         displayTitle: "ftpsrv",
         description: "FTP server. Runs on port 2121.",
-        fileName: "ftpsrv.elf",
+        fileName: "ftpsrv-ps5.elf",
         author: "john-tornblom",
         projectSource: "https://github.com/ps5-payload-dev/ftpsrv",
-        binarySource: "https://github.com/ps5-payload-dev/pacbrew-repo/actions/runs/14012252230",
-        version: "0.12.8",
+        binarySource: "https://github.com/ps5-payload-dev/ftpsrv/releases/tag/v0.20",
+        version: "0.20",
         toPort: 9021
     },
     {
@@ -108,8 +108,8 @@ const payload_map = [
         fileName: "shadowmountplus.elf",
         author: "drakmor",
         projectSource: "https://github.com/drakmor/ShadowMountPlus/",
-        binarySource: "https://github.com/drakmor/ShadowMountPlus/releases/tag/1.6test15-fix2",
-        version: "1.6test15-fix2",
+        binarySource: "https://github.com/drakmor/ShadowMountPlus/releases/tag/1.6beta16",
+        version: "1.6beta16",
         toPort: 9021
     },
     {
@@ -125,10 +125,10 @@ const payload_map = [
     {
         displayTitle: "ps5debug-NG",
         description: "OpenSource Debugger",
-        fileName: "ps5debug-NG_v1.2.5.elf",
+        fileName: "ps5debug-NG_v1.3.0.elf",
         author: "SiSTR0, ctn123, jogolden, OpenSourcereR-dev",
         projectSource: "https://github.com/OpenSourcereR-dev/ps5debug-NG",
-        binarySource: "https://github.com/OpenSourcereR-dev/ps5debug-NG/releases/tag/1.2.5",
+        binarySource: "https://github.com/OpenSourcereR-dev/ps5debug-NG/releases/tag/1.3.0",
         version: "1.2.5",
         supportedFirmwares: ["3.", "4.","5."],
         toPort: 9021
@@ -150,9 +150,9 @@ const payload_map = [
         fileName: "ps5-linux-loader.elf",
         author: "TheFlow",
         projectSource: "https://github.com/ps5-linux/ps5-linux-loader/",
-        binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v2.1",
-        version: "2.1",
-		supportedFirmwares: ["3.","4.","5.","6."],
+        binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v2.3",
+        version: "2.3",
+		supportedFirmwares: ["3.","4.","5.","6.","7."],
         toPort: 9021
     },
     {
