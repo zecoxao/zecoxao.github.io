@@ -114,7 +114,7 @@ async function doJb() {
 
       kernel_patches(kpatches_u8);
 
-      const bin_rsp = await fetch("/mnt/usb0/payload.bin");
+      const bin_rsp = await fetch("src/payload.bin");
       const bin_buf = await bin_rsp.arrayBuffer();
       const bin_u8 = new Uint8Array(bin_buf);
 
