@@ -451,6 +451,14 @@ function get_in6p_outputopts(fd) {
   return kview(so_pcb).getBInt(0x118, true); // in6p_outputopts
 }
 
+function get_pktinfo_from_so(fd) {
+  return kview(get_in6p_outputopts(fd)).gerBInt(0x10, true); // ip6po_pktinfo
+}
+
+function get_rthdr_from_so(fd) {
+  return kview(get_in6p_outputopts(fd)).getBInt(0x68, true); // ip6po_rthdr
+}
+
 function remove_pktinfo_from_so(fd) {
   kview(get_in6p_outputopts(fd)).setBInt(0x10, 0, true); // ip6po_pktinfo
 }
@@ -464,14 +472,6 @@ function inc_karw_pipe_refcnt() {
   fhold(fget(master_pipe[1]));
   fhold(fget(slave_pipe[0]));
   fhold(fget(slave_pipe[1]));
-}
-
-function remove_pktinfo_from_so(fd) {
-  kview(get_in6p_outputopts(fd)).setBInt(0x10, 0, true); // ip6po_pktinfo
-}
-
-function remove_rthdr_from_so(fd) {
-  kview(get_in6p_outputopts(fd)).setBInt(0x68, 0, true); // ip6po_rthdr
 }
 
 function pfind(pid) {
@@ -576,7 +576,7 @@ function jailbreak() {
 
 // intended for use only after kernel arw
 function kernel_patches(shellcode) {
-  logger.info("Applying kernal patches...");
+  logger.info("Applying kernel patches...");
 
   const sysent_661_addr = kernel_base.add(constants.SYSENT_661);
   logger.debug(`sysent_661_addr: ${sysent_661_addr}`);
@@ -624,7 +624,7 @@ function kernel_patches(shellcode) {
   kview(sysent_661_addr).setBInt(8, sy_call, true);
   kview(sysent_661_addr).setUint32(0x2c, sy_thrcnt, true);
 
-  logger.info("Kernal patches applied !!");
+  logger.info("Kernel patches applied !!");
 }
 //#endregion
 //#region Structs
