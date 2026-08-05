@@ -1,0 +1,537 @@
+{
+ "_comment": "Per-fw gadget + kernel-offset table for lapse. Two ROP bases: `webkit` = libSceNKWebKit.sprx (slopkit.webkitBase). `libkernel_web` = libkernel_web.sprx (slopkit.kernelBase). All gadgets pad=0 (clean pop; ret) so lapse.js's chain-building convention works without modification. mov_rax_0x200000000 does not exist in either module \u2014 lapse.js patched to use pop_rax + 0x200000000n.",
+ "09.00": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x2661d",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x17324d",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x30c9e",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0xea62",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x19f15",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x127db9",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d1992f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x9f1af",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2b1bbca",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2b1bdae",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc2",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a357",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x58f80",
+    "pad": 0,
+    "desc": "setjmp"
+   },
+   "longjmp": {
+    "rva": "0x58fd0",
+    "pad": 0,
+    "desc": "longjmp"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "09.20": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x2661d",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x8b61d",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x30c9e",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x16e8ea",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x19f15",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x127d99",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d1990f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x9f1af",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2b1bbaa",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2b1bd8e",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc2",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a357",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x58f80",
+    "pad": 0,
+    "desc": "setjmp"
+   },
+   "longjmp": {
+    "rva": "0x58fd0",
+    "pad": 0,
+    "desc": "longjmp"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "09.40": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x2661d",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x8b61d",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x30c9e",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x65770",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x19f15",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x127d99",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d19b6f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x9f1af",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2b1bf5a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2b1c13e",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc2",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a357",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x58f80",
+    "pad": 0,
+    "desc": "setjmp"
+   },
+   "longjmp": {
+    "rva": "0x58fd0",
+    "pad": 0,
+    "desc": "longjmp"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "09.60": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x2661d",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x8b61d",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x30c9e",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x65770",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x19f15",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x127d99",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d19b6f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x9f1af",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2b1bf5a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2b1c13e",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc2",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a357",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x58f80",
+    "pad": 0,
+    "desc": "setjmp"
+   },
+   "longjmp": {
+    "rva": "0x58fd0",
+    "pad": 0,
+    "desc": "longjmp"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "10.00": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x45b53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x5fc4e",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x1027fa",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x106760",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x24d8d",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x9d627",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x17daf73",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x32a57",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2d18e0a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2d18fee",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc2",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a5b7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x58f80",
+    "pad": 0,
+    "desc": "setjmp"
+   },
+   "longjmp": {
+    "rva": "0x58fd0",
+    "pad": 0,
+    "desc": "longjmp"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "10.01": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x45b53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x5fc4e",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x1027fa",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x106760",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x24d8d",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x9d627",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x17daf73",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x32a57",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2d18e0a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2d18fee",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc2",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a5b7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x58f80",
+    "pad": 0,
+    "desc": "setjmp"
+   },
+   "longjmp": {
+    "rva": "0x58fd0",
+    "pad": 0,
+    "desc": "longjmp"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ }
+}
