@@ -70,14 +70,14 @@
     "desc": "mov r10, rcx; syscall; ret"
    },
    "setjmp": {
-    "rva": "0x1c8e3",
+    "rva": "0x58f80",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp"
    },
    "longjmp": {
-    "rva": "0x1c93c",
+    "rva": "0x58fd0",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp"
    }
   },
   "kernel_offset": {
@@ -159,14 +159,14 @@
     "desc": "mov r10, rcx; syscall; ret"
    },
    "setjmp": {
-    "rva": "0x1c8e3",
+    "rva": "0x58f80",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp"
    },
    "longjmp": {
-    "rva": "0x1c93c",
+    "rva": "0x58fd0",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp"
    }
   },
   "kernel_offset": {
@@ -248,14 +248,14 @@
     "desc": "mov r10, rcx; syscall; ret"
    },
    "setjmp": {
-    "rva": "0x1c8e3",
+    "rva": "0x58f80",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp"
    },
    "longjmp": {
-    "rva": "0x1c93c",
+    "rva": "0x58fd0",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp"
    }
   },
   "kernel_offset": {
@@ -337,14 +337,14 @@
     "desc": "mov r10, rcx; syscall; ret"
    },
    "setjmp": {
-    "rva": "0x1c8e3",
+    "rva": "0x58f80",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp"
    },
    "longjmp": {
-    "rva": "0x1c93c",
+    "rva": "0x58fd0",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp"
    }
   },
   "kernel_offset": {
@@ -426,14 +426,14 @@
     "desc": "mov r10, rcx; syscall; ret"
    },
    "setjmp": {
-    "rva": "0x1cb43",
+    "rva": "0x58f80",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp"
    },
    "longjmp": {
-    "rva": "0x1cb9c",
+    "rva": "0x58fd0",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp"
    }
   },
   "kernel_offset": {
@@ -515,14 +515,14 @@
     "desc": "mov r10, rcx; syscall; ret"
    },
    "setjmp": {
-    "rva": "0x1cb43",
+    "rva": "0x58f80",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp"
    },
    "longjmp": {
-    "rva": "0x1cb9c",
+    "rva": "0x58fd0",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp"
    }
   },
   "kernel_offset": {

