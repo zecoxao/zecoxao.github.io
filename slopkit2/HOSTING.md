@@ -1,8 +1,10 @@
 # netctrl (Poopsploit) — self-hosting the exploit site
 
-Client-side files for the PS5 **netcontrol UAF** jailbreak (firmware 9.00–12.00;
-tested on a 10.00 devkit). This is the browser payload only — you supply the
-server (DNS spoof + HTTPS + a beacon sink).
+Client-side files for the PS5 browser jailbreak, firmware **09.00–12.70**. The
+WebKit stage is shared; the kernel stage uses one of three bugs depending on the
+firmware (see *Firmware window* below). Tested on a 10.00 devkit and a 12.00
+console. This is the browser payload only — you supply the server (DNS spoof +
+HTTPS + a beacon sink).
 
 ## Files
 - `netctrl.html` — entry page. The console loads this and runs the chain.
@@ -10,6 +12,7 @@ server (DNS spoof + HTTPS + a beacon sink).
 - `rop-worker.js`, `rop_slave.js` — the sacrificial-Worker ROP runner.
 - `lapse-runtime.js` — slopkit2 WebKit runtime (offsets, primitives).
 - `offsets/` — per-firmware offset tables (slopkit).
+- `lapse-ps5.js` — the 09.00–10.01 kernel route (aio double free).
 - `elfldr-ps5-1360.elf` — the ELF loader payload written into the console.
   Despite the name this is **not** a 13.60-only build: it selects its own kernel
   offsets at runtime from an internal firmware switch covering 1.00–13.60, so
@@ -41,25 +44,43 @@ server (DNS spoof + HTTPS + a beacon sink).
    triplet / make_karw / JAILBROKEN / elfldr / "REBOOT AND TRY AGAIN").
 
 ## Firmware window
-slopkit2 WebKit entry 09.00–13.60; netcontrol bug 4.03–12.00. The overlap is
-what this kit can run, and all fourteen retail firmwares in it are now shipped
-with their own verified tables:
+slopkit2's WebKit entry covers 09.00–13.60. The kernel stage is where the limit
+actually is, and it uses **three different bugs** which partition the range
+exactly — every supported firmware belongs to one and only one:
+
+| firmware | bug | file | cost |
+|---|---|---|---|
+| 09.00 – 10.01 | lapse — SceKernelAio double free | `lapse-ps5.js` | seconds |
+| 10.20 – 12.00 | poops — netcontrol UAF | `netctrl-ps5.js` | seconds |
+| 12.02 – 12.70 | p2jb — cr_refcnt overflow | `netctrl-ps5.js` | **~50 minutes** |
+
+All nineteen retail firmwares in that span ship with their own verified tables:
 
     09.00  09.20  09.40  09.60
     10.00  10.01  10.20  10.40  10.60
     11.00  11.20  11.40  11.60
-    12.00
+    12.00  12.02  12.20  12.40  12.60  12.70
+
+Routing is a set lookup, not a range comparison, and lives in one place:
+`LAPSE_FIRMWARES_KERNEL` / `NETCTRL_FIRMWARES` / `P2JB_FIRMWARES` in
+`netctrl-ps5.js`. Sending a console down the wrong route does not fail cleanly —
+it grinds a race against a bug that is not there and reports a lost race, which
+is the hardest failure to tell from a real one.
+
+`lapse-ps5.js` currently implements the double-free stage only; `leak_kaddrs`,
+`double_free_reqs1` and its `make_karw` are still to be written, and it says so
+rather than pretending.
 
 `index.html` detects the console's firmware, picks the matching entry out of
 `offsets/offsets.json`, and forwards it in the `fw=` query value; anything not
 in the list above falls through to the notification-only PoC instead of running
-a chain built from missing offsets. 12.02 and later parse as "in range" but the
-netcontrol bug is fixed there, so they are deliberately excluded.
+a chain built from missing offsets.
 
-Adding a firmware means adding it in six places, which are checked against each
-other: `GADGETS`, `EXTRA_GADGETS` and `ALLPROC_TO_KDATA` in `netctrl-ps5.js`,
-`LKW_TABLE` in `rop-worker.js`, `LAPSE_FIRMWARES` in `index.html`, and a block
-in `offsets/lapse-offsets.json`. None of them are typed by hand —
+Adding a firmware means adding it in seven places, which are checked against
+each other: `GADGETS`, `EXTRA_GADGETS`, `ALLPROC_TO_KDATA` and `LIBKERNEL_FN`
+in `netctrl-ps5.js`, `LKW_TABLE` in `rop-worker.js`, `LAPSE_FIRMWARES` in
+`index.html`, and a block in `offsets/lapse-offsets.json` — plus the one route
+set it belongs to. None of them are typed by hand —
 `offsets/extract-gadgets.py` regenerates all of them from retail firmware:
 
     python extract-gadgets.py --db <system_system_ex_database> --check   # drift vs published

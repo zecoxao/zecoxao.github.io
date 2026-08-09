@@ -1670,9 +1670,19 @@ function find_twins() {
  * there is no way to make it one.
  * ====================================================================== */
 
-/* Firmwares the p2jb route is wired for. The netcontrol bug dies after 12.00
- * and p2jb picks up from 12.02; 13.x is deliberately absent because nothing
- * here has been checked against those kernels. */
+/* The three kernel bugs partition the supported range exactly — every firmware
+ * belongs to one and only one of them, so routing is a set lookup rather than a
+ * comparison. 13.x is absent from all three: nothing here has been checked
+ * against those kernels.
+ *
+ *   lapse    09.00 - 10.01   aio double free      (lapse-ps5.js)
+ *   netctrl  10.20 - 12.00   netcontrol UAF       (this file)  [aka "poops"]
+ *   p2jb     12.02 - 12.70   cr_refcnt overflow   (this file)
+ */
+const LAPSE_FIRMWARES_KERNEL =
+    new Set(["09.00", "09.20", "09.40", "09.60", "10.00", "10.01"]);
+const NETCTRL_FIRMWARES =
+    new Set(["10.20", "10.40", "10.60", "11.00", "11.20", "11.40", "11.60", "12.00"]);
 const P2JB_FIRMWARES = new Set(["12.02", "12.20", "12.40", "12.60", "12.70"]);
 const sk_fw = () => String((window.slopkit && window.slopkit.FW_VERSION) || "");
 
@@ -3014,22 +3024,36 @@ function run() {
                         + "(clears itself on reboot)");
 
     const fw = parseFloat((window.slopkit && window.slopkit.FW_VERSION) || "0");
-    log("PS5 netcontrol UAF — fw " + fw);
+    const fwk = sk_fw();
+    log("PS5 kernel stage — fw " + fwk);
     if (fw < 9.00) {
         log("fw " + fw + " below slopkit's WebKit floor (9.00) — kernel bug is " +
             "present but there is no userland R/W to drive it from");
         return false;
     }
-    /* Two routes to the same double free, chosen by firmware.
+    /* THREE kernel bugs, and they PARTITION the firmware range — no overlap,
+     * so the firmware alone picks the route:
      *
-     *   <= 12.00  netcontrol UAF   — fast (seconds), bug fixed after 12.00
-     *   >  12.00  p2jb cr_refcnt   — works on 12.02..12.70, but spends ~50
-     *                                minutes spinning kqueueex first
+     *   09.00 - 10.01   lapse   aio double free      (lapse-ps5.js)
+     *   10.20 - 12.00   poops   netcontrol UAF       (this file)
+     *   12.02 - 12.70   p2jb    cr_refcnt overflow   (this file)
      *
-     * Everything after the triple free is shared, so this is the only fork. */
-    const useP2jb = fw > 12.00;
-    if (useP2jb && !P2JB_FIRMWARES.has(String(sk_fw()))) {
-        log("fw " + fw + " has no p2jb table (supported: 12.02-12.70)");
+     * This used to claim netcontrol for 09.00-12.00, which overstated it by six
+     * firmwares: 09.00 through 10.01 are lapse's window, not netcontrol's.
+     * Sending one of those down the netcontrol path would grind find_twins
+     * against a bug that is not there and report it as a lost race — the exact
+     * failure mode that is hardest to tell from a real one.
+     *
+     * Everything after the double free is shared, so this is the only fork. */
+    if (LAPSE_FIRMWARES_KERNEL.has(fwk)) {
+        log("fw " + fwk + " is lapse's window (09.00-10.01), not netcontrol's — "
+            + "load lapse-ps5.js and call lapse_ps5.run()");
+        return false;
+    }
+    const useP2jb = P2JB_FIRMWARES.has(fwk);
+    if (!useP2jb && !NETCTRL_FIRMWARES.has(fwk)) {
+        log("fw " + fwk + " has no kernel route (lapse 09.00-10.01, "
+            + "netcontrol 10.20-12.00, p2jb 12.02-12.70)");
         return false;
     }
 

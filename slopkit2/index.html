@@ -40,10 +40,11 @@ const OFFSETS_URL = "offsets/offsets.json";
 // (GADGETS + EXTRA_GADGETS) and a matching block in offsets/lapse-offsets.json.
 //
 // The floor is 9.00 because that is where slopkit's WebKit stage starts. The
-// ceiling is 12.70, but the set spans TWO different kernel exploits and
-// netctrl-ps5.js picks between them by firmware:
-//   09.00 - 12.00   netcontrol UAF     (seconds)
-//   12.02 - 12.70   p2jb cr_refcnt     (~50 minutes of spinning first)
+// ceiling is 12.70, but the set spans THREE different kernel exploits, which
+// partition the range exactly — every firmware belongs to one and only one:
+//   09.00 - 10.01   lapse   aio double free      (lapse-ps5.js, seconds)
+//   10.20 - 12.00   poops   netcontrol UAF       (netctrl-ps5.js, seconds)
+//   12.02 - 12.70   p2jb    cr_refcnt overflow   (~50 min of spinning first)
 // Listing members explicitly rather than testing a range still matters: a
 // firmware inside the range with no gadget row would build a ROP chain out of
 // undefined and take the renderer down. If a row is ever added to GADGETS, add

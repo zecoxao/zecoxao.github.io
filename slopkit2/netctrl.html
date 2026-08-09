@@ -2061,8 +2061,15 @@ async function handoffToLapse() {
     // report survives whatever keeps killing the renderer in the stage below.
     try {
         await loadScript("netctrl-ps5.js");
+        /* lapse-ps5.js carries the 09.00-10.01 route. The three kernel bugs
+           partition the range (lapse 09.00-10.01, netcontrol 10.20-12.00,
+           p2jb 12.02-12.70), so exactly one of these modules will claim any
+           given console; loading both is cheap and lets netctrl-ps5's router
+           hand off by name instead of the page having to know the split. */
+        await loadScript("lapse-ps5.js");
         const defined = (typeof window.netctrl_ps5 !== "undefined");
-        mark("NETCTRL-JS-LOADED", "defined=" + defined);
+        mark("NETCTRL-JS-LOADED", "defined=" + defined
+             + " lapse=" + (typeof window.lapse_ps5 !== "undefined"));
         report("netctrl_early", {
             defined: defined ? 1 : 0,
             version: defined ? window.netctrl_ps5.version : "none",
@@ -2248,7 +2255,18 @@ async function handoffToLapse() {
                 if (r && s.retval === r.retval) {
                     mark("NETCTRL-ARMED", "primitive verified both ways");
                     try {
-                        const ok = window.netctrl_ps5.run();
+                        /* Route by firmware. netctrl_ps5.run() owns 10.20-12.00
+                           (netcontrol) and 12.02-12.70 (p2jb) and refuses
+                           anything else; 09.00-10.01 is lapse's window and lives
+                           in its own module. Asking the module that owns the
+                           firmware keeps the split in one place. */
+                        const fwNow = String((window.slopkit
+                                              && window.slopkit.FW_VERSION) || "");
+                        const useLapse = window.lapse_ps5
+                            && window.lapse_ps5.LAPSE_FIRMWARES.has(fwNow);
+                        if (useLapse) mark("KERNEL-ROUTE", "lapse " + fwNow);
+                        const ok = useLapse ? window.lapse_ps5.run()
+                                            : window.netctrl_ps5.run();
                         mark("NETCTRL-RUN", String(ok));
                         report("netctrl_run", {result: String(ok)});
                         // fire AFTER the +1000ms SURVIVED marker so it is the last
