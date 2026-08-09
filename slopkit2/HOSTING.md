@@ -67,9 +67,14 @@ Routing is a set lookup, not a range comparison, and lives in one place:
 it grinds a race against a bug that is not there and reports a lost race, which
 is the hardest failure to tell from a real one.
 
-`lapse-ps5.js` currently implements the double-free stage only; `leak_kaddrs`,
-`double_free_reqs1` and its `make_karw` are still to be written, and it says so
-rather than pretending.
+`lapse-ps5.js` is complete end to end: the `SO_LINGER` aio race, the evf
+type-confusion leak, the second (0x100-zone) double free, the pktopts twins, and
+`make_karw`. It finishes by forging a pipebuf and then **hands off to
+`netctrl-ps5.js`** — the pipe pair it builds is the same primitive that module's
+KRW already drives, and allproc / jailbreak / elfldr above it are
+route-independent, so there is only ever one copy of the code that writes kernel
+memory. Before the handoff it cross-checks the new pipe KRW against its own
+pktopts reader on the same address; a disagreement aborts rather than writing.
 
 `index.html` detects the console's firmware, picks the matching entry out of
 `offsets/offsets.json`, and forwards it in the `fw=` query value; anything not
