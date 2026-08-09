@@ -28,6 +28,7 @@ RVAs are module virtual addresses, i.e. exactly what gets added to those bases.
 
 import argparse
 import collections
+import glob
 import json
 import os
 import struct
@@ -45,13 +46,26 @@ FIRMWARES = [
     "09.00", "09.20", "09.40", "09.60",
     "10.00", "10.01", "10.20", "10.40", "10.60",
     "11.00", "11.20", "11.40", "11.60",
-    "12.00",
+    # 12.02+ are the p2jb window: the netcontrol bug is fixed there, but the
+    # WebKit stage and every ROP gadget still resolve, so they get full tables.
+    "12.00", "12.02", "12.20", "12.40", "12.60", "12.70",
 ]
 
-WEBKIT_REL = ("PS5UPDATE.PUP_out/PS5UPDATE1.PUP/dev/ssd0.system_ex_b_out/"
-              "common_ex/lib/libSceNKWebKit.sprx")
-LIBK_REL = ("PS5UPDATE.PUP_out/PS5UPDATE1.PUP/dev/ssd0.system_b_out/"
-            "common/lib/libkernel_web.sprx")
+# Located by glob rather than a fixed path: the extraction layout is not uniform
+# across the database. Most firmware directories nest under "PS5UPDATE.PUP_out",
+# but 12.02 / 12.40 / 12.60 / 12.70 use "<build>.PUP_out" (e.g. "1202.PUP_out"),
+# and a hardcoded path silently reports every gadget as missing on exactly those
+# — which reads as "the module changed" rather than "you looked in the wrong
+# place".
+WEBKIT_NAME = "libSceNKWebKit.sprx"
+LIBK_NAME = "libkernel_web.sprx"
+
+
+def _find(fwdir, name):
+    hits = glob.glob(os.path.join(fwdir, "**", name), recursive=True)
+    if not hits:
+        sys.exit("%s: cannot find %s under %s" % (os.path.basename(fwdir), name, fwdir))
+    return hits[0]
 
 # name -> (pattern, exact capstone rendering the bytes MUST decode to)
 GADGETS = collections.OrderedDict([
@@ -144,10 +158,7 @@ def disasm_gadget(d, segs, rva):
 
 def extract(db, fw):
     base = os.path.join(db, str(int(fw.split(".")[0])), "Firmware %s.00" % fw)
-    wk_path, lk_path = os.path.join(base, WEBKIT_REL), os.path.join(base, LIBK_REL)
-    for p in (wk_path, lk_path):
-        if not os.path.exists(p):
-            sys.exit("%s: missing module %s" % (fw, p))
+    wk_path, lk_path = _find(base, WEBKIT_NAME), _find(base, LIBK_NAME)
 
     wd, wsegs = read_segments(wk_path)
     ld, lsegs = read_segments(lk_path)
@@ -198,7 +209,7 @@ def extract_ropw(db, fw):
     with "slot holds libkernel+0x6d1d0, expected +0x190db".
     """
     base = os.path.join(db, str(int(fw.split(".")[0])), "Firmware %s.00" % fw)
-    lk_path, wk_path = os.path.join(base, LIBK_REL), os.path.join(base, WEBKIT_REL)
+    lk_path, wk_path = _find(base, LIBK_NAME), _find(base, WEBKIT_NAME)
     ld, lsegs = read_segments(lk_path)
 
     # pop rsp; ret. Absent from libkernel_web on 11.x/12.00 (zero hits), so fall

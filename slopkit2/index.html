@@ -39,18 +39,20 @@ const OFFSETS_URL = "offsets/offsets.json";
 // it is the exact set that has a verified ROP gadget table in netctrl-ps5.js
 // (GADGETS + EXTRA_GADGETS) and a matching block in offsets/lapse-offsets.json.
 //
-// The floor is 9.00 because that is where slopkit's WebKit stage starts; the
-// ceiling is 12.00 because the netcontrol bug is fixed after it (netctrl-ps5.js
-// bails on fw > 12.00 regardless). Listing members explicitly rather than
-// testing a range matters here: 12.02+ parses as "in range" but is patched, and
-// a firmware inside the range with no gadget row would build a ROP chain out of
+// The floor is 9.00 because that is where slopkit's WebKit stage starts. The
+// ceiling is 12.70, but the set spans TWO different kernel exploits and
+// netctrl-ps5.js picks between them by firmware:
+//   09.00 - 12.00   netcontrol UAF     (seconds)
+//   12.02 - 12.70   p2jb cr_refcnt     (~50 minutes of spinning first)
+// Listing members explicitly rather than testing a range still matters: a
+// firmware inside the range with no gadget row would build a ROP chain out of
 // undefined and take the renderer down. If a row is ever added to GADGETS, add
 // it here too.
 const LAPSE_FIRMWARES = new Set([
-    "09.00", "09.20", "09.40", "09.60",
-    "10.00", "10.01", "10.20", "10.40", "10.60",
-    "11.00", "11.20", "11.40", "11.60",
-    "12.00",
+    "09.00", "09.20", "09.40", "09.60", "10.00",
+    "10.01", "10.20", "10.40", "10.60", "11.00",
+    "11.20", "11.40", "11.60", "12.00", "12.02",
+    "12.20", "12.40", "12.60", "12.70",
 ]);
 
 function fwSupportsLapse(v) {

