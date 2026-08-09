@@ -2177,6 +2177,28 @@ async function handoffToLapse() {
            syscall, longjmp resume. A plausible pid means the primitive works;
            anything else stops here rather than proceeding to the race. */
         if (G) {
+            /* Staged bisect before the first real chain.
+             *
+             * A 12.00 run died inside testGetpid() with no beacon whatsoever —
+             * a dead renderer, not a throw — so the log said only "the chain
+             * killed us", not which part. Each probe below adds one element,
+             * and each beacons BEFORE the next one fires, so the last line in
+             * the log names the first element that does not survive. Every
+             * console attempt costs a reboot; this turns one attempt into an
+             * answer instead of another guess.
+             *
+             * dumpGadgets() is unconditional and comes first: if the run dies
+             * at the pivot, the resolved addresses are already in the log and
+             * can be checked against the modules without another boot. */
+            window.rop_worker.dumpGadgets();
+            mark("ROPW-GADGETS-DUMPED");
+
+            await window.rop_worker.testPivot();
+            mark("ROPW-PIVOT-OK", "pop_rsp/setjmp/longjmp/resume all survive");
+
+            await window.rop_worker.testStore();
+            mark("ROPW-STORE-OK", "mov_qword_rdi_rax + pop_rax/pop_rdi good");
+
             const r = await window.rop_worker.testGetpid();
             mark("ROPW-GETPID", String(r.retval));
             report("ropw_getpid", {pid: String(r.retval), ms: r.ms});

