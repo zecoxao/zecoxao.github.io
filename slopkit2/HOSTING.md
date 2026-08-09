@@ -11,6 +11,10 @@ server (DNS spoof + HTTPS + a beacon sink).
 - `lapse-runtime.js` — slopkit2 WebKit runtime (offsets, primitives).
 - `offsets/` — per-firmware offset tables (slopkit).
 - `elfldr-ps5-1360.elf` — the ELF loader payload written into the console.
+  Despite the name this is **not** a 13.60-only build: it selects its own kernel
+  offsets at runtime from an internal firmware switch covering 1.00–13.60, so
+  the same file serves every firmware below. Do not go looking for a per-version
+  elfldr; there isn't one to build.
 - `index.html`, `notify.html`, `aioshellcode.js`, `cat.jpg`,
   `kexp_2026_05_25.bin` — support assets referenced by the pages.
 
@@ -37,9 +41,24 @@ server (DNS spoof + HTTPS + a beacon sink).
    triplet / make_karw / JAILBROKEN / elfldr / "REBOOT AND TRY AGAIN").
 
 ## Firmware window
-slopkit2 WebKit entry 09.00–13.60; netcontrol bug 4.03–12.00; the bundled
-runtime/offsets here target 10.00. Other firmwares need matching `offsets/` +
-the `fw=` query value.
+slopkit2 WebKit entry 09.00–13.60; netcontrol bug 4.03–12.00. The overlap is
+what this kit can run, and all fourteen retail firmwares in it are now shipped
+with their own verified tables:
+
+    09.00  09.20  09.40  09.60
+    10.00  10.01  10.20  10.40  10.60
+    11.00  11.20  11.40  11.60
+    12.00
+
+`index.html` detects the console's firmware, picks the matching entry out of
+`offsets/offsets.json`, and forwards it in the `fw=` query value; anything not
+in the list above falls through to the notification-only PoC instead of running
+a chain built from missing offsets. 12.02 and later parse as "in range" but the
+netcontrol bug is fixed there, so they are deliberately excluded.
+
+Adding a firmware means adding it in five places, which are checked against each
+other: `GADGETS`, `EXTRA_GADGETS` and `ALLPROC_TO_KDATA` in `netctrl-ps5.js`,
+`LAPSE_FIRMWARES` in `index.html`, and a block in `offsets/lapse-offsets.json`.
 
 ## Reference server
 The bundled reference is a Win32 host (`ps-exploit-host`) run headless:

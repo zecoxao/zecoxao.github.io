@@ -345,11 +345,18 @@ let compositionState = 0;
 let compositionLength = 0;
 let compositionError = null;
 
+/* Zero-padded "MM.mm", because it is used as a KEY into lapse-offsets.json and
+ * netctrl-ps5.js's GADGETS, and both spell single-digit majors "09.00". index
+ * .html pads before putting it in the query string, so the ?fw= path was always
+ * right; this UA fallback (direct navigation to this page) did not, so a 9.x
+ * console landing here without the param looked up "9.00", missed, and reported
+ * POOPS-OFFSETS-MISSING. Harmless while only 10.x was routed here, but the
+ * supported set now includes every 9.x, so pad here too. */
 const FW_LABEL = (function () {
     const p = Q.get("fw");
     if (p) return p;
-    const m = /PlayStation 5\/(\d+\.\d+)/.exec(navigator.userAgent);
-    return m ? m[1] : "??.??";
+    const m = /PlayStation 5\/(\d+)\.(\d+)/.exec(navigator.userAgent);
+    return m ? `${m[1].padStart(2, "0")}.${m[2].padStart(2, "0")}` : "??.??";
 })();
 
 function setCaption(text) {

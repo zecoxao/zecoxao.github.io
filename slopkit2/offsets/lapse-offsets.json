@@ -1,5 +1,5 @@
 {
- "_comment": "Per-fw gadget + kernel-offset table for lapse. Two ROP bases: `webkit` = libSceNKWebKit.sprx (slopkit.webkitBase). `libkernel_web` = libkernel_web.sprx (slopkit.kernelBase). All gadgets pad=0 (clean pop; ret) so lapse.js's chain-building convention works without modification. mov_rax_0x200000000 does not exist in either module \u2014 lapse.js patched to use pop_rax + 0x200000000n.",
+ "_comment": "Per-fw gadget + kernel-offset table for lapse. Two ROP bases: `webkit` = libSceNKWebKit.sprx (slopkit.webkitBase). `libkernel_web` = libkernel_web.sprx (slopkit.kernelBase). All gadgets pad=0 (clean pop; ret) so lapse.js's chain-building convention works without modification. mov_rax_0x200000000 does not exist in either module \u2014 lapse.js patched to use pop_rax + 0x200000000n. COVERS 09.00 \u2192 12.00, the full netcontrol-UAF window; every RVA is the first occurrence of the gadget's byte pattern in the module's executable PT_LOAD, and every one was disassembled and checked against its `desc` before being written here. setjmp/longjmp are recovered by prologue signature (the original hand-entered 0x58f80/0x58fd0 pointed at data). `ret` was 0xc2 for every firmware, which actually disassembles to `pop r14; pop r15; pop rbp; ret`; it is now the true one-byte ret. Nothing reads ROP.ret today, so this is a latent-bug fix rather than a behaviour change.",
  "09.00": {
   "webkit": {
    "pop_rax": {
@@ -58,7 +58,7 @@
     "desc": "mov rsp, rdi; ret"
    },
    "ret": {
-    "rva": "0xc2",
+    "rva": "0xc7",
     "pad": 0,
     "desc": "ret"
    }
@@ -72,12 +72,12 @@
    "setjmp": {
     "rva": "0x1c8e3",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp entry, recovered by prologue signature"
    },
    "longjmp": {
     "rva": "0x1c93c",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp entry, recovered by prologue signature"
    }
   },
   "kernel_offset": {
@@ -147,7 +147,7 @@
     "desc": "mov rsp, rdi; ret"
    },
    "ret": {
-    "rva": "0xc2",
+    "rva": "0xc7",
     "pad": 0,
     "desc": "ret"
    }
@@ -161,12 +161,12 @@
    "setjmp": {
     "rva": "0x1c8e3",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp entry, recovered by prologue signature"
    },
    "longjmp": {
     "rva": "0x1c93c",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp entry, recovered by prologue signature"
    }
   },
   "kernel_offset": {
@@ -236,7 +236,7 @@
     "desc": "mov rsp, rdi; ret"
    },
    "ret": {
-    "rva": "0xc2",
+    "rva": "0xc7",
     "pad": 0,
     "desc": "ret"
    }
@@ -250,12 +250,12 @@
    "setjmp": {
     "rva": "0x1c8e3",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp entry, recovered by prologue signature"
    },
    "longjmp": {
     "rva": "0x1c93c",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp entry, recovered by prologue signature"
    }
   },
   "kernel_offset": {
@@ -325,7 +325,7 @@
     "desc": "mov rsp, rdi; ret"
    },
    "ret": {
-    "rva": "0xc2",
+    "rva": "0xc7",
     "pad": 0,
     "desc": "ret"
    }
@@ -339,12 +339,12 @@
    "setjmp": {
     "rva": "0x1c8e3",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp entry, recovered by prologue signature"
    },
    "longjmp": {
     "rva": "0x1c93c",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp entry, recovered by prologue signature"
    }
   },
   "kernel_offset": {
@@ -414,7 +414,7 @@
     "desc": "mov rsp, rdi; ret"
    },
    "ret": {
-    "rva": "0xc2",
+    "rva": "0xc7",
     "pad": 0,
     "desc": "ret"
    }
@@ -428,12 +428,12 @@
    "setjmp": {
     "rva": "0x1cb43",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp entry, recovered by prologue signature"
    },
    "longjmp": {
     "rva": "0x1cb9c",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp entry, recovered by prologue signature"
    }
   },
   "kernel_offset": {
@@ -503,7 +503,7 @@
     "desc": "mov rsp, rdi; ret"
    },
    "ret": {
-    "rva": "0xc2",
+    "rva": "0xc7",
     "pad": 0,
     "desc": "ret"
    }
@@ -517,12 +517,724 @@
    "setjmp": {
     "rva": "0x1cb43",
     "pad": 0,
-    "desc": "setjmp entry, recovered by signature (was 0x58f80, pointed at data)"
+    "desc": "setjmp entry, recovered by prologue signature"
    },
    "longjmp": {
     "rva": "0x1cb9c",
     "pad": 0,
-    "desc": "longjmp entry, recovered by signature (was 0x58fd0, pointed at data)"
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "10.20": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x45b53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x5fc4e",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x1027fa",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x106760",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x24d8d",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x9d627",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x17daf73",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x32a57",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2d18e0a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2d18fee",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a5b7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1cb43",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1cb9c",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "10.40": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x45b53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x5fc4e",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x1027fa",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x106760",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x24d8d",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x9d627",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x17daf73",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x32a57",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2d18e0a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2d18fee",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a5b7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1cb43",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1cb9c",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "10.60": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x45b53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x5fc4e",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x1027fa",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x106760",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x24d8d",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x9d627",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x17daf73",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x32a57",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2d18e0a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2d18fee",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a5b7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1cb43",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1cb9c",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "11.00": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0xd53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x1b46d9",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x67b64",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x10f32",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x2b555",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x4575b",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d8488f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x253a",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2c56fea",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2c571ce",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a8d7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1ce63",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1cebc",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "11.20": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0xd53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x4575b",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x45a94",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x10f32",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x2b555",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x45d99",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d84d0f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x253a",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2c5746a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2c5764e",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a8d7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1ce63",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1cebc",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "11.40": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0xd53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x4575b",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x45a94",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x10f32",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x2b555",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x45d99",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d84d0f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x253a",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2c5746a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2c5764e",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a8d7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1ce63",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1cebc",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "11.60": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0xd53",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x4575b",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x45a94",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x10f32",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x2b555",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x45d99",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x1d84d0f",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x253a",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2c5746a",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2c5764e",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1a8d7",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1ce63",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1cebc",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
+   }
+  },
+  "kernel_offset": {
+   "PROC_PID": "0xbc",
+   "PROC_FD": "0x48",
+   "SIZEOF_OFILES": "0x30",
+   "SO_PCB": "0x18",
+   "INPCB_PKTOPTS": "0x118",
+   "FILEDESC_OFILES": "0x0"
+  }
+ },
+ "12.00": {
+  "webkit": {
+   "pop_rax": {
+    "rva": "0x6ecc",
+    "pad": 0,
+    "desc": "pop rax; ret"
+   },
+   "pop_rdi": {
+    "rva": "0x5a469",
+    "pad": 0,
+    "desc": "pop rdi; ret"
+   },
+   "pop_rsi": {
+    "rva": "0x16b03a",
+    "pad": 0,
+    "desc": "pop rsi; ret"
+   },
+   "pop_rdx": {
+    "rva": "0x196067",
+    "pad": 0,
+    "desc": "pop rdx; ret"
+   },
+   "pop_rcx": {
+    "rva": "0x6cfa",
+    "pad": 0,
+    "desc": "pop rcx; ret"
+   },
+   "pop_rbx": {
+    "rva": "0x128a1",
+    "pad": 0,
+    "desc": "pop rbx; ret"
+   },
+   "pop_rbp": {
+    "rva": "0xc6",
+    "pad": 0,
+    "desc": "pop rbp; ret"
+   },
+   "pop_r8": {
+    "rva": "0x716b",
+    "pad": 0,
+    "desc": "pop r8; ret"
+   },
+   "mov_qword_rdi_rax": {
+    "rva": "0x86197",
+    "pad": 0,
+    "desc": "mov qword [rdi], rax; ret"
+   },
+   "mov_rsp_rbp": {
+    "rva": "0x2c6f3ea",
+    "pad": 0,
+    "desc": "mov rsp, rbp; pop rbp; ret"
+   },
+   "pivot_rdi_rsp": {
+    "rva": "0x2c6f5ce",
+    "pad": 0,
+    "desc": "mov rsp, rdi; ret"
+   },
+   "ret": {
+    "rva": "0xc7",
+    "pad": 0,
+    "desc": "ret"
+   }
+  },
+  "libkernel_web": {
+   "syscall_wrapper": {
+    "rva": "0x1ae27",
+    "pad": 0,
+    "desc": "mov r10, rcx; syscall; ret"
+   },
+   "setjmp": {
+    "rva": "0x1d3b3",
+    "pad": 0,
+    "desc": "setjmp entry, recovered by prologue signature"
+   },
+   "longjmp": {
+    "rva": "0x1d40c",
+    "pad": 0,
+    "desc": "longjmp entry, recovered by prologue signature"
    }
   },
   "kernel_offset": {

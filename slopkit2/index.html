@@ -35,14 +35,26 @@ const NOTIFY_URL = "notify.html";
 const LAPSE_URL = "netctrl.html";   // netcontrol variant
 const OFFSETS_URL = "offsets/offsets.json";
 
-// Lapse targets FW 9.00 through 10.01 inclusive. Anything else stays on the
-// notification-only PoC.
+// Firmwares the netcontrol chain can actually run on. This is NOT a range test:
+// it is the exact set that has a verified ROP gadget table in netctrl-ps5.js
+// (GADGETS + EXTRA_GADGETS) and a matching block in offsets/lapse-offsets.json.
+//
+// The floor is 9.00 because that is where slopkit's WebKit stage starts; the
+// ceiling is 12.00 because the netcontrol bug is fixed after it (netctrl-ps5.js
+// bails on fw > 12.00 regardless). Listing members explicitly rather than
+// testing a range matters here: 12.02+ parses as "in range" but is patched, and
+// a firmware inside the range with no gadget row would build a ROP chain out of
+// undefined and take the renderer down. If a row is ever added to GADGETS, add
+// it here too.
+const LAPSE_FIRMWARES = new Set([
+    "09.00", "09.20", "09.40", "09.60",
+    "10.00", "10.01", "10.20", "10.40", "10.60",
+    "11.00", "11.20", "11.40", "11.60",
+    "12.00",
+]);
+
 function fwSupportsLapse(v) {
-    if (!v) return false;
-    const [maj, min] = v.split(".").map(Number);
-    if (maj < 9 || maj > 10) return false;
-    if (maj === 9) return true;
-    return min <= 1;
+    return !!v && LAPSE_FIRMWARES.has(v);
 }
 
 const run = document.getElementById("run");
