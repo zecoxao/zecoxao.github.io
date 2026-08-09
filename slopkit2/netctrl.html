@@ -2162,6 +2162,7 @@ async function handoffToLapse() {
             ? window.netctrl_ps5.gadgetsFor(String(sk.FW_VERSION || ""))
             : null;
         window.rop_worker.init({
+            fw: String(sk.FW_VERSION || ""),
             kernelBase: sk.kernelBase,
             webkitBase: sk.webkitBase,
             gadgets: G || {},

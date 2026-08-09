@@ -56,9 +56,16 @@ in the list above falls through to the notification-only PoC instead of running
 a chain built from missing offsets. 12.02 and later parse as "in range" but the
 netcontrol bug is fixed there, so they are deliberately excluded.
 
-Adding a firmware means adding it in five places, which are checked against each
+Adding a firmware means adding it in six places, which are checked against each
 other: `GADGETS`, `EXTRA_GADGETS` and `ALLPROC_TO_KDATA` in `netctrl-ps5.js`,
-`LAPSE_FIRMWARES` in `index.html`, and a block in `offsets/lapse-offsets.json`.
+`LKW_TABLE` in `rop-worker.js`, `LAPSE_FIRMWARES` in `index.html`, and a block
+in `offsets/lapse-offsets.json`. None of them are typed by hand —
+`offsets/extract-gadgets.py` regenerates all of them from retail firmware:
+
+    python extract-gadgets.py --db <system_system_ex_database> --check   # drift vs published
+    python extract-gadgets.py --db <system_system_ex_database> --write   # lapse-offsets.json
+    python extract-gadgets.py --db <system_system_ex_database> --js      # netctrl-ps5.js tables
+    python extract-gadgets.py --db <system_system_ex_database> --ropw    # rop-worker.js LKW_TABLE
 
 ## Reference server
 The bundled reference is a Win32 host (`ps-exploit-host`) run headless:

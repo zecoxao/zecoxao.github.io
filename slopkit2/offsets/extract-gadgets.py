@@ -191,6 +191,64 @@ def extract(db, fw):
     return entry
 
 
+def extract_ropw(db, fw):
+    """rop-worker.js's per-firmware libkernel_web constants.
+
+    These were 10.00-only bare constants until a 12.00 console failed in fire()
+    with "slot holds libkernel+0x6d1d0, expected +0x190db".
+    """
+    base = os.path.join(db, str(int(fw.split(".")[0])), "Firmware %s.00" % fw)
+    lk_path, wk_path = os.path.join(base, LIBK_REL), os.path.join(base, WEBKIT_REL)
+    ld, lsegs = read_segments(lk_path)
+
+    # pop rsp; ret. Absent from libkernel_web on 11.x/12.00 (zero hits), so fall
+    # back to libSceNKWebKit and record which module the RVA belongs to.
+    mod, rva = "lk", first_match(ld, lsegs, b"\x5c\xc3")
+    if rva is None:
+        wd, wsegs = read_segments(wk_path)
+        mod, rva = "wk", first_match(wd, wsegs, b"\x5c\xc3")
+        got = disasm_gadget(wd, wsegs, rva) if rva is not None else None
+    else:
+        got = disasm_gadget(ld, lsegs, rva)
+    if rva is None or got != "pop rsp; ret":
+        sys.exit("%s: pop_rsp not found in either module (got %r)" % (fw, got))
+
+    sw = first_match(ld, lsegs, SYSCALL_WRAPPER[0])
+    sj = first_match(ld, lsegs, SIG_SETJMP)
+    lj = first_match(ld, lsegs, SIG_LONGJMP)
+
+    # The two `call pthread_cond_wait` return addresses. Same call shape in all
+    # fourteen builds: mov rdi,r14; mov rsi,rbx; mov ecx,1; xor edx,edx;
+    # xor r8d,r8d; call rel32; jmp rel8 — the return address is the `jmp`.
+    import re as _re
+    off, va, fsz = lsegs[0]
+    text = ld[off:off + fsz]
+    pat = _re.compile(rb"\x4c\x89\xf7\x48\x89\xde\xb9\x01\x00\x00\x00"
+                      rb"\x31\xd2\x45\x31\xc0\xe8(....)\xeb", _re.S)
+    cw = [va + m.start() + 21 for m in pat.finditer(text)]
+    if len(cw) < 2:
+        sys.exit("%s: expected 2 cond_wait call sites, found %d" % (fw, len(cw)))
+
+    return collections.OrderedDict([
+        ("pop_rsp_mod", mod), ("pop_rsp", rva), ("text", fsz),
+        ("syscall_wrapper", sw), ("setjmp", sj), ("longjmp", lj),
+        ("cond_wait_ret", cw[0]), ("cond_wait_ret2", cw[1]),
+    ])
+
+
+def emit_ropw(db):
+    print("const LKW_TABLE = {")
+    for fw in FIRMWARES:
+        r = extract_ropw(db, fw)
+        print('    "%s": { pop_rsp: { mod: "%s", rva: 0x%05Xn }, text: 0x%Xn, '
+              'syscall_wrapper: 0x%Xn, setjmp: 0x%Xn, longjmp: 0x%Xn, '
+              'cond_wait_ret: 0x%Xn, cond_wait_ret2: 0x%Xn },'
+              % (fw, r["pop_rsp_mod"], r["pop_rsp"], r["text"],
+                 r["syscall_wrapper"], r["setjmp"], r["longjmp"],
+                 r["cond_wait_ret"], r["cond_wait_ret2"]))
+    print("};")
+
+
 def emit_js(table):
     """Print the netctrl-ps5.js GADGETS / EXTRA_GADGETS literals."""
     print("const GADGETS = {")
@@ -221,7 +279,14 @@ def main():
                     help="compare against the existing lapse-offsets.json and exit nonzero on drift")
     ap.add_argument("--js", action="store_true",
                     help="print the netctrl-ps5.js table literals")
+    ap.add_argument("--ropw", action="store_true",
+                    help="print the rop-worker.js LKW_TABLE literal")
     args = ap.parse_args()
+
+    if args.ropw:
+        emit_ropw(args.db)
+        if not (args.write or args.check or args.js):
+            return 0
 
     table = collections.OrderedDict()
     for fw in FIRMWARES:
