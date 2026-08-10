@@ -60,6 +60,37 @@
     pointer-events: none;
   }
   #status { min-height: 1.5em; color: #9fb1c3; font-size: 18px; }
+
+  #cache {
+    box-sizing: border-box; width: 420px; max-width: 88vw;
+    min-height: 34px; color: #8b9aad; font-size: 15px; letter-spacing: .02em;
+  }
+  #cache .cacheHead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; margin-bottom: 6px;
+  }
+  #cache .cachePct { font-weight: 700; color: #c8d4e4; font-variant-numeric: tabular-nums; }
+  #cache .cacheTrack {
+    height: 6px; border-radius: 3px; overflow: hidden;
+    background: rgba(255,255,255,.08);
+  }
+  #cache .cacheFill {
+    height: 100%; width: 0;
+    background: linear-gradient(90deg, #3b8cff, #5bb0ff);
+    transition: width .2s ease;
+  }
+  /* Diagnostics. Deliberately readable from a phone photo of the TV -- it is
+     the only debug channel a console browser has. */
+  #cache .cacheInfo {
+    margin-top: 6px; font-size: 14px; line-height: 1.35; color: #8794a6;
+    letter-spacing: .03em; word-break: break-word;
+    font-family: "Consolas", "DejaVu Sans Mono", monospace;
+  }
+  #cache.done .cachePct, #cache.done .cacheLabel { color: #8fe0ab; }
+  #cache.done .cacheFill { background: linear-gradient(90deg, #239d52, #47c76a); }
+  #cache.fail .cachePct, #cache.fail .cacheLabel { color: #ffb3ba; }
+  #cache.fail .cacheFill { background: linear-gradient(90deg, #a33, #d9534f); }
+
   @media (max-width: 650px) {
     #actions { width: 82vw; }
     .action { width: 100%; }
@@ -72,10 +103,11 @@
   <img id="cat" src="slopkit/cat.jpg" alt="">
   <div id="actions">
     <a id="start" class="action"
-       href="slopkit/poops.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;payload=1&amp;v=17"
+       href="slopkit/poops.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;payload=1"
        tabindex="0">RUN</a>
   </div>
   <div id="status"></div>
+  <div id="cache"></div>
 </div>
 
 <script>try {
@@ -90,6 +122,8 @@ try {
     });
 } catch (e) {}
 </script>
+
+<script src="cache-ui.js"></script>
 
 </body>
 </html>
