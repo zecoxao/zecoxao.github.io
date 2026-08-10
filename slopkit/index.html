@@ -60,6 +60,30 @@
     pointer-events: none;
   }
   #status { min-height: 1.5em; color: #9fb1c3; font-size: 18px; }
+
+  #cache {
+    box-sizing: border-box; width: 300px; max-width: 82vw;
+    min-height: 34px; color: #8b9aad; font-size: 15px; letter-spacing: .02em;
+  }
+  #cache .cacheHead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; margin-bottom: 6px;
+  }
+  #cache .cachePct { font-weight: 700; color: #c8d4e4; font-variant-numeric: tabular-nums; }
+  #cache .cacheTrack {
+    height: 6px; border-radius: 3px; overflow: hidden;
+    background: rgba(255,255,255,.08);
+  }
+  #cache .cacheFill {
+    height: 100%; width: 0;
+    background: linear-gradient(90deg, #3b8cff, #5bb0ff);
+    transition: width .2s ease;
+  }
+  #cache.done .cachePct, #cache.done .cacheLabel { color: #8fe0ab; }
+  #cache.done .cacheFill { background: linear-gradient(90deg, #239d52, #47c76a); }
+  #cache.fail .cachePct, #cache.fail .cacheLabel { color: #ffb3ba; }
+  #cache.fail .cacheFill { background: linear-gradient(90deg, #a33, #d9534f); }
+
   @media (max-width: 650px) {
     #actions { width: 82vw; }
     .action { width: 100%; }
@@ -76,6 +100,7 @@
        tabindex="0">RUN</a>
   </div>
   <div id="status"></div>
+  <div id="cache"></div>
 </div>
 
 <script>try {
@@ -90,6 +115,9 @@ try {
     });
 } catch (e) {}
 </script>
+
+<script src="slopkit-cache.js"></script>
+<script src="cache-ui.js"></script>
 
 </body>
 </html>
