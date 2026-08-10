@@ -1,105 +1,95 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>PS5</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>slopkit</title>
+<link rel="preload" href="slopkit/cat.jpg" as="image">
+<link rel="preload" href="slopkit/mmhmm-cats-ps5.gif" as="image">
 <style>
-body{
-    user-select:none; -webkit-user-select:none;
-    background-color:#0c0c0f; color:#fff; font-family:Arial;
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    height:100vh; margin:0; padding:0; overflow:hidden; box-sizing:border-box;
-}
-#cat{ width:240px; max-width:66vw; border-radius:10px; margin-bottom:26px;
-      box-shadow:0 0 0 2px #2a2a2e, 0 0 20px 4px #2a2a2e; }
-.btn{
-    padding:1rem 2rem; text-align:center; cursor:pointer;
-    min-width:12rem; border-radius:1.25rem; background-color:#202125;
-    border:none; color:#fff; font-size:1.5rem; font-weight:800;
-    transition:background-color 0.25s ease;
-}
-.btn:hover{ background-color:#a2a2a6; color:#202020; }
-.btn.disabled{ opacity:0.4; pointer-events:none; }
-#msg{ color:#888; font-size:0.8rem; margin-top:14px; min-height:1em; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: radial-gradient(circle at 50% 28%, #18233a 0, #0c111b 44%, #07090e 100%);
+    color: #c8ced8;
+    font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #wrap {
+    height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 22px;
+  }
+  #cat {
+    box-sizing: border-box; width: 150px; height: 150px; object-fit: cover;
+    max-width: 34vw; max-height: 34vw;
+    border: 4px solid #343c49; border-radius: 18px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.5);
+  }
+
+  #actions {
+    display: flex; flex-direction: column; gap: 14px;
+    align-items: center; justify-content: center;
+  }
+  .action {
+    box-sizing: border-box; display: inline-block; min-width: 185px;
+    padding: 17px 30px; border: 1px solid rgba(255,255,255,.22);
+    border-radius: 15px; color: #fff;
+    background: linear-gradient(135deg, #3b8cff, #1957c8);
+    box-shadow: 0 12px 30px rgba(18,79,190,.32), inset 0 1px rgba(255,255,255,.22);
+    font: 700 20px/1 "Segoe UI", system-ui, sans-serif;
+    letter-spacing: .025em; text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  }
+
+  .action:focus {
+    outline: none; transform: translateY(-3px);
+    border-color: #fff; box-shadow: 0 0 0 4px rgba(91,158,255,.3), 0 16px 36px rgba(18,79,190,.45);
+  }
+  .action:active { transform: translateY(1px); }
+  .action.secondary {
+    color: #eaf2ff; background: linear-gradient(135deg, #273850, #172235);
+    box-shadow: 0 12px 30px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.12);
+  }
+  .action.secondary:focus { box-shadow: 0 0 0 4px rgba(91,158,255,.25), 0 16px 36px rgba(0,0,0,.38); }
+  .action.done {
+    color: #effff4; background: linear-gradient(135deg, #239d52, #126531);
+    border-color: rgba(123,255,162,.55); box-shadow: 0 12px 30px rgba(24,142,67,.26);
+    pointer-events: none;
+  }
+  #status { min-height: 1.5em; color: #9fb1c3; font-size: 18px; }
+  @media (max-width: 650px) {
+    #actions { width: 82vw; }
+    .action { width: 100%; }
+  }
 </style>
 </head>
 <body>
-<img id="cat" src="cat.jpg" alt="">
-<a tabindex="0" class="btn disabled" id="run">RUN</a>
-<div id="msg"></div>
 
-<script>
-"use strict";
-const EXPLOIT_URL = "notify.html";
-const OFFSETS_URL = "offsets/offsets.json";
+<div id="wrap">
+  <img id="cat" src="slopkit/cat.jpg" alt="">
+  <div id="actions">
+    <a id="start" class="action"
+       href="slopkit/poops.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;payload=1&amp;v=17"
+       tabindex="0">RUN</a>
+  </div>
+  <div id="status"></div>
+</div>
 
-const run = document.getElementById("run");
-const msg = document.getElementById("msg");
+<script>try {
+    var q = new URLSearchParams(location.search);
+    var start = document.getElementById("start");
+    start.focus();
+} catch (e) {}
 
-const m = /PlayStation 5\/(\d+)\.(\d+)/.exec(navigator.userAgent);
-const fw = m ? `${m[1].padStart(2, "0")}.${m[2].padStart(2, "0")}` : null;
-
-let entry = null;
-
-function fwNum(s) {
-    const p = s.split(".");
-    return parseInt(p[0], 10) * 100 + parseInt(p[1], 10);
-}
-
-// Nearest known firmware within the SAME major. Offsets are usually stable
-// across a major; if the build shifted, the kernel-base cross-check fails safe
-// (it simply won't fire rather than crashing).
-function nearest(data, target) {
-    const want = fwNum(target);
-    const maj = target.split(".")[0];
-    let best = null, bestd = 1e9;
-    for (const k in data) {
-        if (k.split(".")[0] !== maj) continue;
-        const d = Math.abs(fwNum(k) - want);
-        if (d < bestd) { bestd = d; best = k; }
-    }
-    return best;
-}
-
-fetch(OFFSETS_URL, { cache: "no-store" })
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-        if (!fw) { msg.textContent = "not a PS5 browser"; return; }
-        entry = data[fw];
-        if (entry) {
-            run.classList.remove("disabled");
-            return;
-        }
-        const near = nearest(data, fw);
-        if (near) {
-            entry = data[near];
-            msg.textContent = `${fw}: no exact offsets, trying ${near} (unverified)`;
-            run.classList.remove("disabled");
-        } else {
-            msg.textContent = `firmware ${fw} not supported`;
-        }
-    })
-    .catch(function () {
-        msg.textContent = "failed to load offsets";
+try {
+    document.getElementById("cat").addEventListener("error", function () {
+        this.style.display = "none";
     });
-
-run.addEventListener("click", function () {
-    if (!entry) return;
-    const q = new URLSearchParams();
-    q.set("go", "1");
-    q.set("fw", fw);
-    q.set("hc", entry.hc.join(","));
-    q.set("gd", entry.gd);
-    q.set("notify", entry.nt);
-    q.set("gps", entry.gps);
-    q.set("gpe", entry.gpe);
-    q.set("cls", entry.cls);
-    q.set("cle", entry.cle);
-    q.set("ers", entry.ers);
-    q.set("ere", entry.ere);
-    location.href = `${EXPLOIT_URL}?${q.toString()}`;
-});
+} catch (e) {}
 </script>
+
 </body>
 </html>
