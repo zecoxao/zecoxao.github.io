@@ -66,17 +66,17 @@ payloads/kexp_2026_05_25.bin
 payloads/elfldr-ps5-1360.elf
 
 # --- tier 2 (OFF) -- 0.96 MB -- the cat gif -- decorative only
-# running total if enabled: 2.10 MB
+# turning on every tier through 2 totals 2.10 MB
 #slopkit/mmhmm-cats-ps5.gif
 
 # --- tier 3 (OFF) -- 0.48 MB -- small sendable payloads: ftp, gdb, klog
-# running total if enabled: 1.62 MB
+# turning on every tier through 3 totals 2.58 MB
 #payloads/ftpsrv-ps5.elf
 #payloads/gdbsrv-ps5.elf
 #payloads/klogsrv-ps5.elf
 
 # --- tier 4 (OFF) -- 3.96 MB -- big sendable payloads: kstuff, shsrv, websrv
-# running total if enabled: 5.11 MB
+# turning on every tier through 4 totals 6.54 MB
 #payloads/kstuff.elf
 #payloads/shsrv-ps5.elf
 #payloads/websrv-ps5.elf

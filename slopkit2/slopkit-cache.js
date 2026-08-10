@@ -7,7 +7,7 @@
 (function (g) {
     "use strict";
 
-    var VERSION = "1";
+    var VERSION = "2";
     var PREFIX = "slopkit-";
     var CACHE_NAME = PREFIX + VERSION;
 
