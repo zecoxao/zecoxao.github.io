@@ -60,14 +60,37 @@
     }
 
     /* Small diagnostic readout -- on a console there is no dev tools window, so
-       this line is the only way to see which strategy actually engaged. */
+       this line is the only way to see which strategy actually engaged. The
+       trail is persisted because the interesting run is the one BEFORE the
+       reload that failed. */
+    var TRAIL_KEY = "slopkit-trail";
+    var trail = [];
+    var extraNote = "";
+
+    function mark(step) {
+        if (trail[trail.length - 1] !== step) trail.push(step);
+        else return;
+        try { localStorage.setItem(TRAIL_KEY, trail.join(">")); } catch (e) { }
+        info();
+    }
+
+    function prevTrail() {
+        try { return localStorage.getItem(TRAIL_KEY) || ""; } catch (e) { return ""; }
+    }
+
     function info(extra) {
         if (!els) return;
-        var bits = [];
+        if (extra) extraNote = extra;
+        var bits = ["rev" + C.VERSION];
         bits.push("sw:" + (("serviceWorker" in navigator) ? "y" : "n"));
         bits.push("cacheapi:" + (self.caches ? "y" : "n"));
-        bits.push("appcache:" + acStatus());
-        if (extra) bits.push(extra);
+        bits.push("ac:" + acStatus());
+        if (trail.length) bits.push("now:" + trail.join(">"));
+        else {
+            var p = prevTrail();
+            if (p) bits.push("last:" + p);
+        }
+        if (extraNote) bits.push(extraNote);
         els.info.textContent = bits.join("  ");
     }
 
@@ -188,10 +211,12 @@
 
         on("checking", function () {
             sawEvent = true;
+            mark("chk");
             paint("checking cache...", "busy", true);
         });
         on("downloading", function () {
             sawEvent = true;
+            mark("dl");
             paint("caching...", "busy", true);
         });
         on("progress", function (e) {
@@ -208,20 +233,28 @@
             var f = total ? loaded / total : 0;
             if (f > 0.99) f = 0.99;   /* 100% belongs to the cached event */
             setFrac(f);
+            /* Record only the latest count, not one trail entry per file. */
+            if (trail[trail.length - 1] &&
+                trail[trail.length - 1].indexOf("p") === 0) trail.pop();
+            mark("p" + loaded + "/" + total);
             /* One event per file, so paint every one rather than coalescing. */
             paint("caching " + loaded + " / " + total + " files", "busy", true);
         });
         on("cached", function () {
+            mark("ok");
             finish("cached - offline ready", "done");
         });
         on("noupdate", function () {
+            mark("noupd");
             finish("cached - offline ready", "done");
         });
         on("updateready", function () {
+            mark("upd");
             try { ac.swapCache(); } catch (e) { }
             finish("updated - reload to apply", "done");
         });
         on("obsolete", function () {
+            mark("obs");
             settled = true;
             setFrac(0);
             paint("cache removed by server", "fail", true);
@@ -230,15 +263,26 @@
             /* AppCache is all-or-nothing and gives no reason. The usual causes
                are a listed file that 404s, or the console refusing the total
                size -- both leave nothing cached. */
+            mark("err");
             if (settled) return;
             settled = true;
-            paint("cache failed - see offline.appcache", "fail", true);
+            paint("cache failed - too big, or a file 404s", "fail", true);
             retryButton("RETRY CACHE", function () {
                 try { ac.update(); } catch (e) { }
                 settled = false;
                 paint("retrying...", "busy", true);
             });
         });
+
+        /* Status the page saw at boot, before any event of ours could fire. */
+        mark("s" + ac.status);
+
+        /* Keep the status text live -- it changes without always firing an
+           event we listen for. */
+        var tick = setInterval(function () {
+            info();
+            if (settled) setTimeout(function () { clearInterval(tick); }, 3000);
+        }, 1000);
 
         switch (ac.status) {
             case 1:  /* IDLE       */ finish("cached - offline ready", "done"); return;

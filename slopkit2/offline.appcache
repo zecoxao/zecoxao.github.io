@@ -1,12 +1,16 @@
 CACHE MANIFEST
 # slopkit offline cache
-# rev 1   <-- BUMP THIS LINE whenever any cached file changes,
-#            otherwise the console keeps serving the old copy.
+# rev 2   <-- BUMP THIS NUMBER whenever any cached file changes, or
+#            the console keeps serving the copy it already has.
+#
+# AppCache is all-or-nothing: if the console rejects the total size,
+# NOTHING is cached and the page dies offline. Tiers are enabled
+# smallest-first -- uncomment a whole tier to add it, and bump the rev.
 
 CACHE:
 ./
 
-# page + code
+# --- tier 1 (ON) -- 1.14 MB -- everything the exploit chain needs to run offline
 index.html
 slopkit/poops.html
 slopkit/poops.js
@@ -18,10 +22,7 @@ slopkit/rop.js
 slopkit/rop_slave.js
 slopkit/syscalls.js
 slopkit/cat.jpg
-slopkit/mmhmm-cats-ps5.gif
 document/en/ps5/index.html
-
-# firmware offsets
 offsets/9.00.js
 offsets/9.20.js
 offsets/9.40.js
@@ -36,8 +37,6 @@ offsets/11.20.js
 offsets/11.40.js
 offsets/11.60.js
 offsets/12.00.js
-
-# payload menu art
 ui/payload-menu-title.png
 ui/payload-ftp-default.png
 ui/payload-ftp-sending.png
@@ -63,24 +62,30 @@ ui/payload-web-default.png
 ui/payload-web-sending.png
 ui/payload-web-sent.png
 ui/payload-web-failed.png
-
-# needed by the exploit chain
 payloads/kexp_2026_05_25.bin
 payloads/elfldr-ps5-1360.elf
 
-# Sendable payload extras (~4.6 MB). AppCache is all-or-nothing:
-# if the console rejects the cache on size, comment out these six
-# lines and bump the rev above -- everything else still works offline.
-payloads/ftpsrv-ps5.elf
-payloads/gdbsrv-ps5.elf
-payloads/klogsrv-ps5.elf
-payloads/kstuff.elf
-payloads/shsrv-ps5.elf
-payloads/websrv-ps5.elf
+# --- tier 2 (OFF) -- 0.96 MB -- the cat gif -- decorative only
+# running total if enabled: 2.10 MB
+#slopkit/mmhmm-cats-ps5.gif
+
+# --- tier 3 (OFF) -- 0.48 MB -- small sendable payloads: ftp, gdb, klog
+# running total if enabled: 1.62 MB
+#payloads/ftpsrv-ps5.elf
+#payloads/gdbsrv-ps5.elf
+#payloads/klogsrv-ps5.elf
+
+# --- tier 4 (OFF) -- 3.96 MB -- big sendable payloads: kstuff, shsrv, websrv
+# running total if enabled: 5.11 MB
+#payloads/kstuff.elf
+#payloads/shsrv-ps5.elf
+#payloads/websrv-ps5.elf
+
+# total enabled: 1.14 MB in 53 files
 
 FALLBACK:
-# Serve these from the cache for ANY query string, but only when
-# the network is unreachable.  Covers ?v=16, ?go=1&auto=1&... etc.
+# Serve these from the cache for ANY query string, but only when the
+# network is unreachable. Covers ?v=16, ?go=1&auto=1&... and friends.
 index.html index.html
 slopkit/poops.html slopkit/poops.html
 slopkit/poops.js slopkit/poops.js
