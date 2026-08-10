@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" manifest="offline.appcache">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -78,6 +78,9 @@
     height: 100%; width: 0;
     background: linear-gradient(90deg, #3b8cff, #5bb0ff);
     transition: width .2s ease;
+  }
+  #cache .cacheInfo {
+    margin-top: 5px; font-size: 12px; color: #5b6675; letter-spacing: .04em;
   }
   #cache.done .cachePct, #cache.done .cacheLabel { color: #8fe0ab; }
   #cache.done .cacheFill { background: linear-gradient(90deg, #239d52, #47c76a); }

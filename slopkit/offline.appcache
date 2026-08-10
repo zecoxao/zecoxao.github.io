@@ -1,0 +1,111 @@
+CACHE MANIFEST
+# slopkit offline cache
+# rev 1   <-- BUMP THIS LINE whenever any cached file changes,
+#            otherwise the console keeps serving the old copy.
+
+CACHE:
+./
+
+# page + code
+index.html
+slopkit/poops.html
+slopkit/poops.js
+slopkit/main.js
+slopkit/core.js
+slopkit/mem.js
+slopkit/int64.js
+slopkit/rop.js
+slopkit/rop_slave.js
+slopkit/syscalls.js
+slopkit/cat.jpg
+slopkit/mmhmm-cats-ps5.gif
+document/en/ps5/index.html
+
+# firmware offsets
+offsets/9.00.js
+offsets/9.20.js
+offsets/9.40.js
+offsets/9.60.js
+offsets/10.00.js
+offsets/10.01.js
+offsets/10.20.js
+offsets/10.40.js
+offsets/10.60.js
+offsets/11.00.js
+offsets/11.20.js
+offsets/11.40.js
+offsets/11.60.js
+offsets/12.00.js
+
+# payload menu art
+ui/payload-menu-title.png
+ui/payload-ftp-default.png
+ui/payload-ftp-sending.png
+ui/payload-ftp-sent.png
+ui/payload-ftp-failed.png
+ui/payload-gdb-default.png
+ui/payload-gdb-sending.png
+ui/payload-gdb-sent.png
+ui/payload-gdb-failed.png
+ui/payload-klog-default.png
+ui/payload-klog-sending.png
+ui/payload-klog-sent.png
+ui/payload-klog-failed.png
+ui/payload-kstuff-default.png
+ui/payload-kstuff-sending.png
+ui/payload-kstuff-sent.png
+ui/payload-kstuff-failed.png
+ui/payload-shell-default.png
+ui/payload-shell-sending.png
+ui/payload-shell-sent.png
+ui/payload-shell-failed.png
+ui/payload-web-default.png
+ui/payload-web-sending.png
+ui/payload-web-sent.png
+ui/payload-web-failed.png
+
+# needed by the exploit chain
+payloads/kexp_2026_05_25.bin
+payloads/elfldr-ps5-1360.elf
+
+# Sendable payload extras (~4.6 MB). AppCache is all-or-nothing:
+# if the console rejects the cache on size, comment out these six
+# lines and bump the rev above -- everything else still works offline.
+payloads/ftpsrv-ps5.elf
+payloads/gdbsrv-ps5.elf
+payloads/klogsrv-ps5.elf
+payloads/kstuff.elf
+payloads/shsrv-ps5.elf
+payloads/websrv-ps5.elf
+
+FALLBACK:
+# Serve these from the cache for ANY query string, but only when
+# the network is unreachable.  Covers ?v=16, ?go=1&auto=1&... etc.
+index.html index.html
+slopkit/poops.html slopkit/poops.html
+slopkit/poops.js slopkit/poops.js
+slopkit/main.js slopkit/main.js
+slopkit/core.js slopkit/core.js
+slopkit/mem.js slopkit/mem.js
+slopkit/int64.js slopkit/int64.js
+slopkit/rop.js slopkit/rop.js
+slopkit/rop_slave.js slopkit/rop_slave.js
+slopkit/syscalls.js slopkit/syscalls.js
+document/en/ps5/index.html document/en/ps5/index.html
+offsets/9.00.js offsets/9.00.js
+offsets/9.20.js offsets/9.20.js
+offsets/9.40.js offsets/9.40.js
+offsets/9.60.js offsets/9.60.js
+offsets/10.00.js offsets/10.00.js
+offsets/10.01.js offsets/10.01.js
+offsets/10.20.js offsets/10.20.js
+offsets/10.40.js offsets/10.40.js
+offsets/10.60.js offsets/10.60.js
+offsets/11.00.js offsets/11.00.js
+offsets/11.20.js offsets/11.20.js
+offsets/11.40.js offsets/11.40.js
+offsets/11.60.js offsets/11.60.js
+offsets/12.00.js offsets/12.00.js
+
+NETWORK:
+*

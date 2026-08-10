@@ -1,14 +1,21 @@
 /* slopkit offline cache -- page side.
 
-   Drives the precache itself (rather than letting the service worker do it on
-   install) so every byte can be counted and shown as a percentage. Registers
-   sw.js when available; if the browser has no service worker or no Cache API it
-   degrades to simply warming the HTTP cache, and the percentage still works.
+   Three strategies, picked by what the browser actually has:
 
-   Renders into #cache when that element exists, and appends a focusable retry
-   button to #actions if anything failed. Requires slopkit-cache.js first.
+     1. AppCache (window.applicationCache).  This is the one that matters: the
+        PS5 browser has no service workers but does have the old HTML5
+        Application Cache -- it is what writes webkit/shell/appcache/
+        ApplicationCache.db, which main.js knows how to delete.  The download is
+        driven by the manifest attribute on <html>, so all this file does is
+        report its progress events as a percentage.
+     2. Service worker + Cache API, for desktop browsers where AppCache is gone.
+        Here we fetch every asset ourselves so bytes can be counted.
+     3. No offline support at all -- just warm the HTTP cache, and say so
+        instead of claiming the page is offline ready.
 
-   Query flags:  ?nocache=1  purge everything and unregister the worker
+   Renders into #cache when that element exists. Requires slopkit-cache.js.
+
+   Query flags:  ?nocache=1  purge the Cache API copy and unregister the worker
                  ?recache=1  force a fresh download of every asset */
 (function () {
     "use strict";
@@ -19,8 +26,8 @@
     var CONCURRENCY = 3;
     var WARM_FLAG = "slopkit-warmed-" + C.VERSION;
 
-    var mode = "warm";          // "cache" once the Cache API is confirmed
-    var offline = false;        // true once a service worker controls the scope
+    var mode = "warm";          // "appcache" | "cache" | "warm"
+    var offline = false;        // true only when the page really works offline
     var doneBytes = 0;
     var credited = Object.create(null);
     var failed = [];
@@ -37,12 +44,14 @@
         host.innerHTML =
             '<div class="cacheHead"><span class="cacheLabel"></span>'
             + '<span class="cachePct">0%</span></div>'
-            + '<div class="cacheTrack"><div class="cacheFill"></div></div>';
+            + '<div class="cacheTrack"><div class="cacheFill"></div></div>'
+            + '<div class="cacheInfo"></div>';
         return {
             host: host,
             label: host.querySelector(".cacheLabel"),
             pct: host.querySelector(".cachePct"),
-            fill: host.querySelector(".cacheFill")
+            fill: host.querySelector(".cacheFill"),
+            info: host.querySelector(".cacheInfo")
         };
     }
 
@@ -50,14 +59,49 @@
         return (n / 1048576).toFixed(1);
     }
 
+    /* Small diagnostic readout -- on a console there is no dev tools window, so
+       this line is the only way to see which strategy actually engaged. */
+    function info(extra) {
+        if (!els) return;
+        var bits = [];
+        bits.push("sw:" + (("serviceWorker" in navigator) ? "y" : "n"));
+        bits.push("cacheapi:" + (self.caches ? "y" : "n"));
+        bits.push("appcache:" + acStatus());
+        if (extra) bits.push(extra);
+        els.info.textContent = bits.join("  ");
+    }
+
+    var pendingPaint = null;
+    var pendingTimer = 0;
+
     function paint(text, state, force) {
         if (!els) return;
         var now = Date.now();
-        if (!force && now - lastPaint < 80) return;
+        if (!force && now - lastPaint < 80) {
+            /* Coalesce, but never drop the newest value: without this trailing
+               repaint a burst of events inside one window leaves the bar
+               showing whatever it happened to say before the burst. */
+            pendingPaint = [text, state];
+            if (!pendingTimer) {
+                pendingTimer = setTimeout(function () {
+                    pendingTimer = 0;
+                    var a = pendingPaint;
+                    pendingPaint = null;
+                    if (a) paint(a[0], a[1], true);
+                }, 80 - (now - lastPaint));
+            }
+            return;
+        }
+        if (pendingTimer) {
+            clearTimeout(pendingTimer);
+            pendingTimer = 0;
+            pendingPaint = null;
+        }
         lastPaint = now;
 
         var frac = C.TOTAL_BYTES ? doneBytes / C.TOTAL_BYTES : 1;
         if (frac > 1) frac = 1;
+        if (frac < 0) frac = 0;
         var pct = Math.floor(frac * 100);
         if (pct === 100 && doneBytes < C.TOTAL_BYTES) pct = 99;
 
@@ -65,9 +109,14 @@
         els.fill.style.width = (frac * 100) + "%";
         els.label.textContent = text;
         els.host.className = state || "";
+        info();
     }
 
-    function retryButton() {
+    function setFrac(f) {
+        doneBytes = Math.max(0, Math.min(1, f)) * C.TOTAL_BYTES;
+    }
+
+    function retryButton(label, fn) {
         if (document.getElementById("cacheRetry")) return;
         var actions = document.getElementById("actions");
         if (!actions) return;
@@ -76,11 +125,11 @@
         a.className = "action secondary";
         a.href = "#";
         a.tabIndex = 0;
-        a.textContent = "RETRY CACHE";
+        a.textContent = label;
         a.addEventListener("click", function (e) {
             e.preventDefault();
             a.parentNode.removeChild(a);
-            run(true);
+            fn();
         });
         actions.appendChild(a);
     }
@@ -92,6 +141,124 @@
             else localStorage.removeItem(WARM_FLAG);
         } catch (e) { }
         return false;
+    }
+
+    /* ------------------------------------------------------------ appcache */
+
+    var AC_NAMES = ["uncached", "idle", "checking", "downloading",
+                    "updateready", "obsolete"];
+
+    function appCache() {
+        try {
+            var ac = self.applicationCache;
+            return (ac && typeof ac.addEventListener === "function") ? ac : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function acStatus() {
+        var ac = appCache();
+        if (!ac) return "-";
+        var s = ac.status;
+        return AC_NAMES[s] !== undefined ? AC_NAMES[s] : String(s);
+    }
+
+    /* The browser is already downloading (the manifest attribute on <html>
+       started it before this script ran); we only translate its events. */
+    function startAppCache() {
+        var ac = appCache();
+        mode = "appcache";
+
+        var loaded = 0;
+        var total = C.URLS.length;
+        var sawEvent = false;
+        var settled = false;
+
+        function finish(label, state) {
+            settled = true;
+            offline = (state === "done");
+            setFrac(1);
+            paint(label, state, true);
+        }
+
+        function on(name, fn) {
+            try { ac.addEventListener(name, fn, false); } catch (e) { }
+        }
+
+        on("checking", function () {
+            sawEvent = true;
+            paint("checking cache...", "busy", true);
+        });
+        on("downloading", function () {
+            sawEvent = true;
+            paint("caching...", "busy", true);
+        });
+        on("progress", function (e) {
+            sawEvent = true;
+            if (e && e.total) {
+                total = e.total;
+                loaded = e.loaded;
+            } else {
+                /* Older WebKit fires bare progress events with no counts, so
+                   tally them ourselves against the manifest entry count. */
+                loaded++;
+                if (loaded > total) total = loaded;
+            }
+            var f = total ? loaded / total : 0;
+            if (f > 0.99) f = 0.99;   /* 100% belongs to the cached event */
+            setFrac(f);
+            /* One event per file, so paint every one rather than coalescing. */
+            paint("caching " + loaded + " / " + total + " files", "busy", true);
+        });
+        on("cached", function () {
+            finish("cached - offline ready", "done");
+        });
+        on("noupdate", function () {
+            finish("cached - offline ready", "done");
+        });
+        on("updateready", function () {
+            try { ac.swapCache(); } catch (e) { }
+            finish("updated - reload to apply", "done");
+        });
+        on("obsolete", function () {
+            settled = true;
+            setFrac(0);
+            paint("cache removed by server", "fail", true);
+        });
+        on("error", function () {
+            /* AppCache is all-or-nothing and gives no reason. The usual causes
+               are a listed file that 404s, or the console refusing the total
+               size -- both leave nothing cached. */
+            if (settled) return;
+            settled = true;
+            paint("cache failed - see offline.appcache", "fail", true);
+            retryButton("RETRY CACHE", function () {
+                try { ac.update(); } catch (e) { }
+                settled = false;
+                paint("retrying...", "busy", true);
+            });
+        });
+
+        switch (ac.status) {
+            case 1:  /* IDLE       */ finish("cached - offline ready", "done"); return;
+            case 4:  /* UPDATEREADY*/ finish("updated - reload to apply", "done"); return;
+            case 5:  /* OBSOLETE   */ paint("cache removed by server", "fail", true); return;
+            case 2:  /* CHECKING   */
+            case 3:  /* DOWNLOADING*/ paint("caching...", "busy", true); break;
+            default: /* UNCACHED   */ paint("checking cache...", "busy", true); break;
+        }
+
+        /* If the manifest never applied -- wrong MIME type, 404, whatever -- no
+           event ever arrives and the status stays UNCACHED. Fall back rather
+           than leaving the bar spinning forever. */
+        setTimeout(function () {
+            if (settled || sawEvent) return;
+            if (ac.status !== 0) return;
+            info("manifest-not-applied");
+            mode = "warm";
+            run(false);
+        }, 8000);
     }
 
     /* ------------------------------------------------------------ progress */
@@ -215,7 +382,7 @@
             /* No Cache API: assume the HTTP cache still holds the last warm-up
                rather than pulling several megabytes again on every visit. */
             doneBytes = C.TOTAL_BYTES;
-            paint("cached (browser cache)", "done", true);
+            paint("warmed (not offline capable)", "done", true);
             running = false;
             return;
         }
@@ -238,7 +405,7 @@
 
         if (!todo.length) {
             doneBytes = C.TOTAL_BYTES;
-            paint(offline ? "cached - offline ready" : "cached", "done", true);
+            paint(doneLabel(), "done", true);
             running = false;
             return;
         }
@@ -268,13 +435,19 @@
         if (failed.length) {
             paint(failed.length + " file" + (failed.length > 1 ? "s" : "")
                 + " failed", "fail", true);
-            retryButton();
+            retryButton("RETRY CACHE", function () { run(true); });
         } else {
             doneBytes = C.TOTAL_BYTES;
             if (mode === "warm") warmFlag(true);
-            paint(offline ? "cached - offline ready" : "cached", "done", true);
+            paint(doneLabel(), "done", true);
         }
         running = false;
+    }
+
+    function doneLabel() {
+        if (offline) return "cached - offline ready";
+        if (mode === "cache") return "cached (no worker, online only)";
+        return "warmed (not offline capable)";
     }
 
     async function purge() {
@@ -297,13 +470,16 @@
         }
         doneBytes = 0;
         credited = Object.create(null);
-        paint("cache cleared", "", true);
+        /* An AppCache cannot be dropped from script -- only by the site serving
+           a 404 for the manifest, or the kit's own appcache-remove tile. */
+        paint(appCache() ? "cleared (appcache kept)" : "cache cleared", "", true);
     }
 
     self.SlopkitCache = {
         run: run,
         purge: purge,
-        progress: function () { return doneBytes / (C.TOTAL_BYTES || 1); }
+        progress: function () { return doneBytes / (C.TOTAL_BYTES || 1); },
+        mode: function () { return mode; }
     };
 
     function boot() {
@@ -316,6 +492,11 @@
             return;
         }
         paint("checking cache...", "busy", true);
+
+        if (appCache()) {
+            startAppCache();
+            return;
+        }
         run(!!(q && q.get("recache") === "1"));
     }
 
