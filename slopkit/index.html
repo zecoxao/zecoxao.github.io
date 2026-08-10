@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" manifest="offline.appcache">
+<html lang="en" manifest="cache.manifest">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -103,7 +103,7 @@
   <img id="cat" src="slopkit/cat.jpg" alt="">
   <div id="actions">
     <a id="start" class="action"
-       href="slopkit/poops.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;payload=1&amp;v=17"
+       href="slopkit/poops.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;payload=1"
        tabindex="0">RUN</a>
   </div>
   <div id="status"></div>
@@ -123,7 +123,6 @@ try {
 } catch (e) {}
 </script>
 
-<script src="slopkit-cache.js"></script>
 <script src="cache-ui.js"></script>
 
 </body>

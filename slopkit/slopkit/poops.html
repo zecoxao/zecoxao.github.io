@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" manifest="../offline.appcache">
+<html lang="en" manifest="../cache.manifest">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -220,7 +220,7 @@ otherwise.</div>
 <div id="console" hidden></div>
 
 <script src="rop.js"></script>
-<script src="main.js?v=16"></script>
+<script src="main.js"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="../offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -233,19 +233,19 @@ otherwise.</div>
 </script>
 <script src="syscalls.js"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=10";
-import { installWindowP, pairStatus } from "./mem.js?v=10";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js";
+import { installWindowP, pairStatus } from "./mem.js";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=16";
+    from "./poops.js";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=16");
+    const lib = await import("./poops.js");
 
-    await import("./poops.js?v=16");
-    const st = await import("./poops.js?v=16");
+    await import("./poops.js");
+    const st = await import("./poops.js");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -556,8 +556,7 @@ async function sendPayloadToElfldr(name) {
     if (!payloadIsListed(name))
         throw new Error("payload is not listed in this menu");
 
-    const response = await fetch("../payloads/" + encodeURIComponent(name),
-        { cache: "no-store" });
+    const response = await fetch("../payloads/" + encodeURIComponent(name));
     if (!response.ok)
         throw new Error("payload fetch failed: HTTP " + response.status);
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -1014,7 +1013,7 @@ async function preflight() {
 
     let verdict = "ok";
     try {
-        const r = await fetch("rop_slave.js", { cache: "no-store" });
+        const r = await fetch("rop_slave.js");
         if (!r.ok) verdict = "http-" + r.status;
     } catch (err) { verdict = "fetch-threw"; }
     if (verdict === "ok") {

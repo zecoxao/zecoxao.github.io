@@ -1,88 +1,65 @@
-import os
-import hashlib
+"""Generate cache.manifest for slopkit.
+
+Same scheme as ntfonto2: walk the directory, and emit one line per file as
+
+    path/to/file #<sha256 of the file>
+
+The trailing "#..." is a manifest comment, so the browser ignores it when
+resolving the URL. Its job is to change the manifest's own bytes whenever any
+cached file changes -- that is what makes the console re-download the cache.
+It replaces "?v=16" style cache-busting entirely, so asset URLs must stay
+query-free or AppCache will not match them.
+
+Deliberately no CACHE: / FALLBACK: / NETWORK: sections -- the implicit section
+is the explicit (cache) one, exactly as in ntfonto2.
+
+Usage:  python appcache_manifest_generator.py [directory]
+"""
 import argparse
+import hashlib
+import os
 
-def calculate_file_hash(file_path):
-    sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        data = f.read()
-        sha256_hash.update(data)
-    return sha256_hash.hexdigest()
+# Never cached: the manifest itself, and files the pages never request.
+SKIP_NAMES = {"cache.manifest", "README.md", "readme.png",
+              ".nojekyll", ".gitignore"}
+# Stale duplicates of slopkit/poops.* that reference paths which do not resolve
+# from the directory root; caching them would only waste quota.
+SKIP_PATHS = {"poops.html", "poops.js"}
 
-def generate_cache_manifest(directory_path, include_directory_path=True, include_payloads=True):
-    manifest = ["CACHE MANIFEST"]
-    
-    for root, _, files in os.walk(directory_path):
-        for file in files:
-            if '.manifest' in file:
+
+def file_hash(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def generate(directory):
+    lines = ["CACHE MANIFEST"]
+    total = 0
+    for root, dirs, files in os.walk(directory):
+        dirs.sort()
+        for name in sorted(files):
+            if name in SKIP_NAMES or name.endswith(".manifest"):
                 continue
-            file_path = os.path.join(root, file)
-
-            if not include_payloads and 'payload' in root:
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, directory).replace("\\", "/")
+            if rel in SKIP_PATHS:
                 continue
-            file_hash = calculate_file_hash(file_path)
-            
-            if args.cloudflare_workaround and file == 'index.html':
-                file_path = file_path.replace("index.html","")
-                if file_path.isspace() or file_path == '':
-                    file_path = '/'
+            lines.append(rel + " #" + file_hash(full))
+            total += os.path.getsize(full)
+    return lines, total
 
-            if include_directory_path:
-                manifest_path = file_path
-            else:
-                manifest_path = os.path.relpath(file_path, directory_path)
-                if manifest_path.isspace() or manifest_path == '' or manifest_path == '.':
-                    manifest_path = '/'
-                
-            manifest_path = manifest_path.replace("\\","/")
-            manifest.append(manifest_path + " #" + file_hash)
 
-    return manifest
-
-parser = argparse.ArgumentParser(description="Generate an appcache file.")
-parser.add_argument("directory_path", nargs='?', default='./',
-                    help="The directory to generate the appcache for (default: './').")
-parser.add_argument("-a", "--root-appcache",action="store_true",
-                    help="Generate appcache if your index.html is at root")
-parser.add_argument("-b", "--sub-appcache", action="store_true",
-                    help="Generate appcache if your index.html is at document/en/ps5/index.html")
-parser.add_argument("-ab", "--both-appcache", action="store_true",
-                    help="Generate both appcache files. (Default)")
-# parser.add_argument("-p", "--include-payloads", action="store_true",
-#                     help="Include files with 'payload' in its path. (Payload caching is handled in js)")
-parser.add_argument("-cf", "--cloudflare-workaround", action="store_true",
-                    help="Cloudflare responds with 308 redirect to root when fetching index.html. Causing the appcache to error out.")
+parser = argparse.ArgumentParser(description="Generate cache.manifest.")
+parser.add_argument("directory_path", nargs="?", default="./",
+                    help="Directory to generate the manifest for (default './').")
 args = parser.parse_args()
 
-if args.root_appcache or args.sub_appcache:
-    args.both_appcache = False
-else:
-    args.root_appcache = True
-    args.sub_appcache = True
-   
+manifest, total_bytes = generate(args.directory_path)
+out = os.path.join(args.directory_path, "cache.manifest").replace("\\", "/")
+with open(out, "w", newline="\n") as f:
+    f.write("\n".join(manifest) + "\n")
 
-if args.sub_appcache:
-    # cache_manifest = generate_cache_manifest(args.directory_path, True, args.include_payloads)
-    cache_manifest = generate_cache_manifest(args.directory_path, True)
-
-    output_path = "cache.manifest"
-    output_path = output_path.replace("\\","/")
-
-    with open(output_path, "w") as manifest_file:
-        manifest_file.write("\n".join(cache_manifest))
-
-    print(f"Cache manifest generated in path: '{output_path}'")
-
-
-if args.root_appcache:
-    # cache_manifest = generate_cache_manifest(args.directory_path, False, args.include_payloads)
-    cache_manifest = generate_cache_manifest(args.directory_path, False)
-
-    output_path = "cache.manifest"
-    output_path = os.path.join(args.directory_path, output_path)
-    output_path = output_path.replace("\\","/")
-
-    with open(output_path, "w") as manifest_file:
-        manifest_file.write("\n".join(cache_manifest))
-
-    print(f"Cache manifest generated in path: '{output_path}'")
+print("%s: %d files, %.2f MB" % (out, len(manifest) - 1, total_bytes / 1048576.0))
