@@ -8178,7 +8178,7 @@ export function makePoopsEngine(X) {
   }
 
   async function fetchInto(url, sink) {
-    const r = await fetch(url);
+    const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     if (!r.body || typeof r.body.getReader !== "function") {
       const buf = new Uint8Array(await r.arrayBuffer());
@@ -8298,7 +8298,9 @@ export function makePoopsEngine(X) {
     try {
       const name = o.elfName || "elfldr-ps5-1360.elf";
       flushMark("STAGE5-ELF-FETCH-PRE", "url=../payloads/" + name);
-      const response = await fetch("../payloads/" + name);
+      const response = await fetch("../payloads/" + name, {
+        cache: "no-store",
+      });
       if (!response.ok)
         throw new Error("elfldr fetch failed: HTTP " + response.status);
       const elfBytes = new Uint8Array(await response.arrayBuffer());

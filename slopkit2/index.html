@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" manifest="cache.appcache">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -60,32 +60,6 @@
     pointer-events: none;
   }
   #status { min-height: 1.5em; color: #9fb1c3; font-size: 18px; }
-
-  #cache {
-    box-sizing: border-box; width: 330px; max-width: 82vw;
-    opacity: 0; transition: opacity .3s ease;
-  }
-  #cache.on { opacity: 1; }
-  #cacheBar {
-    height: 12px; border-radius: 999px; overflow: hidden;
-    background: #131c29; border: 1px solid rgba(255,255,255,.14);
-    box-shadow: inset 0 1px 3px rgba(0,0,0,.5);
-  }
-  #cacheFill {
-    height: 100%; width: 0; border-radius: 999px;
-    background: linear-gradient(90deg, #1957c8, #4fa3ff);
-    transition: width .18s linear;
-  }
-  #cacheText {
-    margin-top: 9px; text-align: center; font-size: 17px; color: #9fb1c3;
-    min-height: 1.4em;
-  }
-  #cachePct { color: #eaf2ff; font-weight: 700; }
-  #cache.done #cacheFill { background: linear-gradient(90deg, #126531, #47c76a); }
-  #cache.done #cachePct { color: #b8f0c6; }
-  #cache.err  #cacheFill { background: linear-gradient(90deg, #7e2029, #e74856); }
-  #cache.err  #cachePct { color: #ffc9cf; }
-
   @media (max-width: 650px) {
     #actions { width: 82vw; }
     .action { width: 100%; }
@@ -98,14 +72,10 @@
   <img id="cat" src="slopkit/cat.jpg" alt="">
   <div id="actions">
     <a id="start" class="action"
-       href="slopkit/poops.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;payload=1"
+       href="slopkit/poops.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;payload=1&amp;v=17"
        tabindex="0">RUN</a>
   </div>
   <div id="status"></div>
-  <div id="cache">
-    <div id="cacheBar"><div id="cacheFill"></div></div>
-    <div id="cacheText"><span id="cachePct">0%</span> <span id="cacheMsg">starting...</span></div>
-  </div>
 </div>
 
 <script>try {
@@ -119,78 +89,6 @@ try {
         this.style.display = "none";
     });
 } catch (e) {}
-
-/* offline cache (appcache) -- progress is reported as a percentage */
-(function () {
-    var box = document.getElementById("cache");
-    var fill = document.getElementById("cacheFill");
-    var pct = document.getElementById("cachePct");
-    var msg = document.getElementById("cacheMsg");
-    var appCache = window.applicationCache;
-    var hideTimer = null;
-
-    if (!appCache || !document.documentElement.hasAttribute("manifest")) return;
-
-    function show(percent, text, cls) {
-        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-        box.className = "on" + (cls ? " " + cls : "");
-        if (percent !== null) {
-            if (percent < 0) percent = 0;
-            if (percent > 100) percent = 100;
-            fill.style.width = percent + "%";
-            pct.textContent = percent + "%";
-        }
-        msg.textContent = text;
-    }
-    function fade(delay) {
-        if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(function () { box.className = ""; }, delay);
-    }
-
-    if (!navigator.onLine) show(100, "offline -- using the cache", "done");
-    else show(0, "checking for updates...");
-
-    appCache.addEventListener("checking", function () {
-        show(0, "checking for updates...");
-    }, false);
-
-    appCache.addEventListener("downloading", function () {
-        show(0, "caching for offline use...");
-    }, false);
-
-    appCache.addEventListener("progress", function (e) {
-        if (!e || !e.total) { show(null, "caching for offline use..."); return; }
-        var percent = Math.round((e.loaded / e.total) * 100);
-        show(percent, "caching " + e.loaded + " / " + e.total + " files");
-
-        /* the final entry takes an unreasonably long time to settle */
-        if (e.loaded + 1 == e.total)
-            show(percent, "processing... nearly done");
-    }, false);
-
-    appCache.addEventListener("cached", function () {
-        show(100, "cached -- works offline", "done");
-        fade(4000);
-    }, false);
-
-    appCache.addEventListener("noupdate", function () {
-        show(100, "cache is up to date", "done");
-        fade(2500);
-    }, false);
-
-    appCache.addEventListener("updateready", function () {
-        show(100, "update ready -- reload", "done");
-    }, false);
-
-    appCache.addEventListener("obsolete", function () {
-        show(0, "the cache was removed", "err");
-    }, false);
-
-    appCache.addEventListener("error", function () {
-        if (navigator.onLine) { show(null, "cache error", "err"); fade(6000); }
-        else { show(100, "offline -- using the cache", "done"); fade(3000); }
-    }, false);
-})();
 </script>
 
 </body>
