@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Navigation.navigate() Zero Args — Standalone</title>
+<style>
+body { font-family: monospace; padding: 20px; max-width: 800px; margin: 0 auto; }
+#log { white-space: pre-wrap; background: #111; color: #0f0; padding: 15px; 
+       margin-top: 15px; border-left: 4px solid #0f0; }
+.fail { color: #f44; }
+.pass { color: #0f0; font-weight: bold; }
+.info { color: #0ff; }
+.warn { color: #ff0; }
+</style>
+</head>
+<body>
+
+<h2>Navigation.navigate() Zero Args — Type Confusion Test</h2>
+<div id="log">[*] Initializing...</div>
+
+<script>
+const logEl = document.getElementById('log');
+const log = (msg, cls) => {
+   const line = document.createElement('div');
+   line.textContent = msg;
+   if (cls) line.className = cls;
+   logEl.appendChild(line);
+   console.log(msg);
+};
+
+if (typeof gc !== 'function') {
+   window.gc = () => {
+       try {
+           let trash = [];
+           for (let i = 0; i < 200; i++) 
+               trash.push(new Array(500000).fill(0x41));
+           trash = null;
+           if (window.GCController) GCController.collect();
+       } catch(e) {}
+   };
+}
+
+window.onload = async () => {
+   log('[*] Navigation API Zero-Args Test');
+   log('[*] User-Agent: ' + navigator.userAgent.substring(0, 80));
+
+   if (typeof navigator === 'undefined') {
+       log('[-] FAIL: navigator is not defined', 'fail');
+       log('[-] This test requires a browser environment with navigator object.', 'fail');
+       return;
+   }
+   log('[+] navigator is defined');
+
+   if (!window.navigation) {
+       log('[-] SKIP: window.navigation is not supported', 'warn');
+       log('[-] This test requires the Navigation API (Chrome 102+, Safari 17+).', 'warn');
+       log('[-] Your browser does not implement navigation.navigate().', 'warn');
+       return;
+   }
+   log('[+] window.navigation is supported');
+
+   if (typeof navigation.navigate !== 'function') {
+       log('[-] FAIL: navigation.navigate is not a function', 'fail');
+       return;
+   }
+   log('[+] navigation.navigate is a function');
+
+   log('[*] Calling navigation.navigate() with ZERO arguments...', 'info');
+   
+   let result;
+   try {
+       result = navigation.navigate();
+   } catch (e) {
+       log('[-] navigate() threw synchronously: ' + e, 'fail');
+       return;
+   }
+
+   log('[*] Checking result type...');
+   if (typeof result !== 'object') {
+       log('[-] FAIL: typeof result === "' + typeof result + '" (expected "object")', 'fail');
+       return;
+   }
+   log('[+] typeof result === "object"');
+
+   if (!('committed' in result)) {
+       log('[-] FAIL: "committed" not in result', 'fail');
+       return;
+   }
+   log('[+] "committed" in result: true');
+
+   if (!('finished' in result)) {
+       log('[-] FAIL: "finished" not in result', 'fail');
+       return;
+   }
+   log('[+] "finished" in result: true');
+
+   if (!(result.committed instanceof Promise)) {
+       log('[-] FAIL: result.committed is not a Promise', 'fail');
+       return;
+   }
+   log('[+] result.committed instanceof Promise: true');
+
+   if (!(result.finished instanceof Promise)) {
+       log('[-] FAIL: result.finished is not a Promise', 'fail');
+       return;
+   }
+   log('[+] result.finished instanceof Promise: true');
+
+   let committedError, finishedError;
+
+   try {
+       await result.committed;
+       log('[-] FAIL: committed promise should be rejected', 'fail');
+       return;
+   } catch (e) {
+       committedError = e;
+       log('[+] committed rejected: ' + e.constructor.name + ': ' + e.message);
+   }
+
+   try {
+       await result.finished;
+       log('[-] FAIL: finished promise should be rejected', 'fail');
+       return;
+   } catch (e) {
+       finishedError = e;
+       log('[+] finished rejected: ' + e.constructor.name + ': ' + e.message);
+   }
+
+   if (committedError.constructor.name !== 'TypeError') {
+       log('[-] FAIL: committedError.constructor.name === "' + committedError.constructor.name + '" (expected "TypeError")', 'fail');
+       return;
+   }
+   log('[+] committedError is TypeError');
+
+   if (finishedError.constructor.name !== 'TypeError') {
+       log('[-] FAIL: finishedError.constructor.name === "' + finishedError.constructor.name + '" (expected "TypeError")', 'fail');
+       return;
+   }
+   log('[+] finishedError is TypeError');
+
+   log('[*] Setting result.foo = 0xdead (potential corruption trigger)...', 'info');
+   result.foo = 0xdead;
+   
+   if (result.foo !== 0xdead) {
+       log('[-] FAIL: result.foo !== 0xdead', 'fail');
+       return;
+   }
+   log('[+] result.foo === 0xdead');
+
+   log('[*] Forcing GC...', 'info');
+   gc();
+   log('[+] GC completed without crash');
+
+   log('\n[PASS] Navigation API handled zero-args correctly.', 'pass');
+   log('[*] No type confusion detected. Raw JSC::Exception cell was NOT exposed.', 'pass');
+};
+</script>
+</body>
+</html>
