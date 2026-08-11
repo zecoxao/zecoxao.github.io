@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PS5</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{
+    user-select:none; -webkit-user-select:none;
+    background-color:#0c0c0f; color:#fff; font-family:Arial;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    height:100vh; margin:0; padding:0; overflow:hidden; box-sizing:border-box;
+}
+#cat{ width:240px; max-width:66vw; border-radius:10px; margin-bottom:26px;
+      box-shadow:0 0 0 2px #2a2a2e, 0 0 20px 4px #2a2a2e; }
+.btn{
+    padding:1rem 2rem; text-align:center; cursor:pointer;
+    min-width:12rem; border-radius:1.25rem; background-color:#202125;
+    border:none; color:#fff; font-size:1.5rem; font-weight:800;
+    transition:background-color 0.25s ease;
+}
+.btn:hover{ background-color:#a2a2a6; color:#202020; }
+.btn.disabled{ opacity:0.4; pointer-events:none; }
+#msg{ color:#888; font-size:0.8rem; margin-top:14px; min-height:1em; }
+</style>
+</head>
+<body>
+<img id="cat" src="cat.jpg" alt="">
+<a tabindex="0" class="btn disabled" id="run">RUN</a>
+<div id="msg"></div>
+
+<script>
+"use strict";
+const EXPLOIT_URL = "notify.html";
+const OFFSETS_URL = "offsets/offsets.json";
+
+const run = document.getElementById("run");
+const msg = document.getElementById("msg");
+
+const m = /PlayStation 5\/(\d+)\.(\d+)/.exec(navigator.userAgent);
+const fw = m ? `${m[1].padStart(2, "0")}.${m[2].padStart(2, "0")}` : null;
+
+let entry = null;
+
+function fwNum(s) {
+    const p = s.split(".");
+    return parseInt(p[0], 10) * 100 + parseInt(p[1], 10);
+}
+
+// Nearest known firmware within the SAME major. Offsets are usually stable
+// across a major; if the build shifted, the kernel-base cross-check fails safe
+// (it simply won't fire rather than crashing).
+function nearest(data, target) {
+    const want = fwNum(target);
+    const maj = target.split(".")[0];
+    let best = null, bestd = 1e9;
+    for (const k in data) {
+        if (k.split(".")[0] !== maj) continue;
+        const d = Math.abs(fwNum(k) - want);
+        if (d < bestd) { bestd = d; best = k; }
+    }
+    return best;
+}
+
+fetch(OFFSETS_URL, { cache: "no-store" })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+        if (!fw) { msg.textContent = "not a PS5 browser"; return; }
+        entry = data[fw];
+        if (entry) {
+            run.classList.remove("disabled");
+            return;
+        }
+        const near = nearest(data, fw);
+        if (near) {
+            entry = data[near];
+            msg.textContent = `${fw}: no exact offsets, trying ${near} (unverified)`;
+            run.classList.remove("disabled");
+        } else {
+            msg.textContent = `firmware ${fw} not supported`;
+        }
+    })
+    .catch(function () {
+        msg.textContent = "failed to load offsets";
+    });
+
+run.addEventListener("click", function () {
+    if (!entry) return;
+    const q = new URLSearchParams();
+    q.set("go", "1");
+    q.set("fw", fw);
+    q.set("hc", entry.hc.join(","));
+    q.set("gd", entry.gd);
+    q.set("notify", entry.nt);
+    q.set("gps", entry.gps);
+    q.set("gpe", entry.gpe);
+    q.set("cls", entry.cls);
+    q.set("cle", entry.cle);
+    q.set("ers", entry.ers);
+    q.set("ere", entry.ere);
+    location.href = `${EXPLOIT_URL}?${q.toString()}`;
+});
+</script>
+</body>
+</html>
