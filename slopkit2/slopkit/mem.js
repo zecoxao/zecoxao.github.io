@@ -3,7 +3,7 @@ import { int64 } from "./int64.js";
 import {
     releaseFakeCell, fakeCellReleased,
     carrierHeaderCopy, carrierHomeVector
-} from "./core.js?v=10";
+} from "./core.js";
 
 let carrier = null;
 
