@@ -1,3 +1,12 @@
+// Where the engine's own files (rop_slave.js, core.js, ...) live, and where the
+// site root (offsets/, payloads/, ui/) lives, both relative to the *document*.
+// slopkit/poops.html is inside slopkit/ so it keeps the historical defaults;
+// the unified index.html at the site root overrides them before loading this.
+var SLOPKIT_DIR = (typeof window !== "undefined" && window.SLOP_DIR !== undefined)
+    ? window.SLOP_DIR : "";
+var SLOPKIT_ROOT = (typeof window !== "undefined" && window.SLOP_ROOT !== undefined)
+    ? window.SLOP_ROOT : "../";
+
 if (!navigator.userAgent.includes('PlayStation 5')) {
     alert(`This is a PlayStation 5 Exploit. => ${navigator.userAgent}`);
     throw new Error("");
@@ -227,7 +236,7 @@ async function prepare(p) {
 
     }
 
-    let worker = new Worker("rop_slave.js");
+    let worker = new Worker(SLOPKIT_DIR + "rop_slave.js");
 
     jbmark("PREP-PRE-WORKER-AWAIT", "next=await-wait_for_worker()-first-yield");
     await wait_for_worker();
@@ -342,4 +351,5 @@ async function prepare(p) {
 let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
-fwScript.setAttribute('src', `../offsets/${window.fw_str}.js?v=19`);
+window.__offsetsScript = fwScript;
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=19`);

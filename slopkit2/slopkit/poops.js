@@ -1,5 +1,11 @@
 // @egycnq (I rewrote egys impli of poops but 90% of his code is likely still factored in)
 
+// Site root (the folder holding payloads/) relative to the *document* that
+// loaded this module. slopkit/poops.html keeps the historical "../"; the
+// unified index.html at the site root sets window.SLOP_ROOT = "".
+const SITE_ROOT = (typeof window !== "undefined" && window.SLOP_ROOT !== undefined)
+  ? window.SLOP_ROOT : "../";
+
 export const ERRNO = {
   1: "EPERM",
   2: "ENOENT",
@@ -7805,12 +7811,12 @@ export function makePoopsEngine(X) {
 
     flushMark(
       "STAGE5-FETCH-BIN-PRE",
-      "url=../payloads/" + (o.binName || "kexp_2026_05_25.bin"),
+      "url=" + SITE_ROOT + "payloads/" + (o.binName || "kexp_2026_05_25.bin"),
     );
     try {
       const parts = [];
       const g = await fetchInto(
-        "../payloads/" + (o.binName || "kexp_2026_05_25.bin"),
+        SITE_ROOT + "payloads/" + (o.binName || "kexp_2026_05_25.bin"),
         (off, chunk) => { parts.push(chunk); },
       );
       binBytes = new Uint8Array(g.total);
@@ -7835,8 +7841,8 @@ export function makePoopsEngine(X) {
 
     try {
       const name = o.elfName || "elfldr-ps5-1360.elf";
-      flushMark("STAGE5-ELF-FETCH-PRE", "url=../payloads/" + name);
-      const response = await fetch("../payloads/" + name, {
+      flushMark("STAGE5-ELF-FETCH-PRE", "url=" + SITE_ROOT + "payloads/" + name);
+      const response = await fetch(SITE_ROOT + "payloads/" + name, {
         cache: "no-store",
       });
       if (!response.ok)
