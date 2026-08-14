@@ -3,17 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>slopkit2</title>
-<link rel="stylesheet" href="main.css">
-<link rel="preload" href="slopkit/cat.jpg" as="image">
-<link rel="preload" href="slopkit/mmhmm-cats-ps5.gif" as="image">
-
-<script>
-// index.html sits at the site root, so offsets/, payloads/ and ui/ are
-// alongside it while the engine's own files live in slopkit/.
-window.SLOP_ROOT = "";
-window.SLOP_DIR = "slopkit/";
-</script>
+<title>slopkit</title>
+<link rel="preload" href="cat.jpg" as="image">
+<link rel="preload" href="mmhmm-cats-ps5.gif" as="image">
 
 <script>(function () {
     var pending = [];
@@ -41,103 +33,202 @@ window.SLOP_DIR = "slopkit/";
 })();
 </script>
 
+<style>
+  html, body { margin: 0; padding: 0; min-height:100%;
+    background: radial-gradient(circle at 50% 28%, #18233a 0, #0c111b 44%, #07090e 100%);
+    color: #d8dee9; }
+  body { box-sizing:border-box; min-height:100vh;
+    font: 22px/1.35 "Consolas", "DejaVu Sans Mono", monospace;
+    padding: 24px 20px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; }
+  h1 { font-size: 30px; margin: 0 0 2px; color: #eceff4; font-weight: 600; }
+  .sub { font-size: 18px; color: #7c8795; margin: 0 0 12px; }
+  #stage { font-size: 24px; padding: 9px 13px; border-radius: 6px;
+           margin-bottom: 12px; background: #1b2430; border-left: 8px solid #5e81ac; }
+  #stage.ok  { background: #16281c; border-left-color: #47c76a; color: #b8f0c6; }
+  #stage.bad { background: #1b2430; border-left-color: #5e81ac; color: #d8dee9; }
+  #danger, #reboot, #verdict { display:none !important; }
+
+  #reboot { display: none; font-size: 34px; font-weight: 800; padding: 20px 18px;
+            margin-bottom: 14px; border-radius: 8px; background: #4a0d10;
+            border: 5px solid #ff5566; color: #ffe3e6; white-space: pre-wrap;
+            line-height: 1.25; }
+  #reboot.on { display:none; }
+  #reboot.fine { display:none; }
+
+  #verdict { display: none; font-size: 26px; font-weight: 700; padding: 16px 18px;
+             margin-bottom: 14px; border-radius: 8px; background: #101a26;
+             border: 4px solid #6d7788; color: #dfe7f0; white-space: pre-wrap;
+             line-height: 1.3; }
+  #verdict.on   { display:none; }
+  #verdict.good { background: #0f2c17; border-color: #47c76a; color: #d4f7de; }
+  #verdict.bad  { background: #101a26; border-color: #6d7788; color: #dfe7f0; }
+  #verdict.warn { background: #2e2413; border-color: #ebcb8b; color: #f6e6bd; }
+  #vitals { display: none; font-size: 24px; padding: 10px 14px; margin-bottom: 12px;
+            border-radius: 6px; background: #17212e; border-left: 8px solid #ebcb8b;
+            color: #e8dcb6; white-space: pre-wrap; }
+  #vitals.on { display: block; }
+  #cfg { font-size: 22px; color: #9fb1c3; background: #131922; padding: 10px 13px;
+         border-radius: 6px; margin-bottom: 12px; white-space: pre-wrap; }
+  #scr, #early { font-size: 15px; color: #6d7788; margin: 0 0 10px;
+                 white-space: pre; overflow: hidden; min-height: 1.3em; }
+  #nav { display:none !important; margin: 0 0 14px; }
+  #nav a { display: inline-block; margin: 0 12px 8px 0; padding: 10px 18px;
+           background: #1b2430; border: 2px solid #3b4756; border-radius: 6px;
+           color: #d8dee9; text-decoration: none; font-size: 20px; }
+  #nav a.primary { border-color: #5e81ac; background: #223146; color: #cfe3ff; }
+  #nav a.hot { border-color: #52647c; background: #202d40; color: #dce8f7; }
+
+  #nav a.one { display: block; font-size: 30px; font-weight: 700;
+               padding: 20px 26px; margin: 0 0 12px;
+               border-color: #5e81ac; background: #223146; color: #cfe3ff; }
+  #nav a.one.hot { border-color: #52647c; background: #202d40; color: #dce8f7; }
+
+  body.quiet #nav a.extra { display: none; }
+  #nav a:focus { outline: 3px solid #ebcb8b; }
+  #arm { font-size: 26px; padding: 24px 6px; color: #ebcb8b; }
+  #wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; }
+  thead th { position: sticky; top: 0; background: #131922; color: #8fa1b3;
+             text-align: left; font-size: 17px; padding: 8px 10px;
+             border-bottom: 2px solid #2a3340; z-index: 2; }
+  td { padding: 9px 10px; vertical-align: top; border-bottom: 1px solid #1d232c; }
+  td.n  { width: 2.6em; color: #55606e; font-size: 17px; }
+  td.k  { width: 12em; color: #cfd8e3; font-weight: 700; }
+  td.k .cls { display: block; color: #61708a; font-weight: 400; font-size: 15px; }
+  td.st { width: 4.6em; font-weight: 700; font-size: 25px; }
+  td.st.PASS { color: #47c76a; }
+  td.st.FAIL { color: #cfd8e3; }
+  td.st.SKIP { color: #8f7a3f; }
+  td.st.RUN  { color: #ebcb8b; }
+  td.d { color: #aeb8c6; font-size: 19px; word-break: break-word;
+         white-space: pre-wrap; }
+  td.d .why  { color: #aeb8c6; }
+  td.d .note { color: #7fb7d4; display: block; font-size: 17px; }
+  td.d .pu   { color: #6b7a8c; display: block; font-size: 15px; margin-top: 3px; }
+  td.d .ev   { color: #5a6472; display: block; font-size: 15px; margin-top: 3px; }
+  #tally { margin-top: 18px; font-size: 30px; font-weight: 700; }
+  #summary { margin-top: 10px; font-size: 20px; color: #9fb1c3;
+             white-space: pre-wrap; }
+
+  #dt { position: fixed; top: 10px; right: 12px; z-index: 9;
+        font: 700 18px ui-monospace, Menlo, Consolas, monospace;
+        padding: 10px 16px; border-radius: 6px; cursor: pointer;
+        background: #1b2430; border: 2px solid #3b4756; color: #9fb1c3; }
+  #dt:focus { outline: 3px solid #ebcb8b; }
+  body.quiet #dt { color: #61708a; }
+
+  body.quiet h1,
+  body.quiet .sub,
+  body.quiet #cfg,
+  body.quiet #summary,
+  body.quiet #tally,
+  body.quiet #wrap,
+  body.quiet #early,
+  body.quiet #vitals,
+  body.quiet #verdict,
+  body.quiet #danger,
+  body.quiet #stage,
+  body.quiet td.d .pu,
+  body.quiet td.d .ev                     { display: none; }
+
+  body.quiet #reboot { font-size: 26px; }
+
+  body.quiet #scr {
+        box-sizing: border-box; width:88vw; max-width:680px; height:150px;
+        overflow: auto; font-size: 14px; line-height: 1.3; color: #b8c4d2;
+        background: rgba(12,18,28,.88); border: 1px solid #344258;
+        box-shadow: 0 18px 42px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.04);
+        border-radius: 14px; padding: 13px 15px; margin: 10px auto 0; }
+
+  body.loader-ready #scr { display:none; }
+
+  body.quiet tr:not(.r-FAIL) td.d .note   { display: none; }
+
+  body.quiet tr:not(.r-FAIL) td.d > span:first-child {
+        display: -webkit-box; display: box; overflow: hidden;
+        -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+
+  body.quiet #stage { font-size: 34px; }
+
+  #cat { box-sizing:border-box; display:block; margin:0 auto 12px;
+         width:150px; height:150px; max-width:34vw; max-height:34vw;
+         border:4px solid #343c49; border-radius:18px;
+         box-shadow:0 24px 70px rgba(0,0,0,.5); overflow:hidden; }
+  #cat img { display:block; width:100%; height:100%; object-fit:cover; }
+  #cat.ok  { border-color:#16c60c; }
+  #cat.bad { border-color:#e74856; }
+  #failureMessage { display:none; margin:0 auto 12px; color:#ff6473;
+    font-size:25px; font-weight:800; text-align:center; letter-spacing:.02em; }
+  #failureMessage.on { display:block; }
+
+  body.loader-ready { justify-content:flex-start; overflow-y:auto; padding-top:22px; }
+  body.loader-ready #cat { width:112px; height:112px; margin-bottom:6px; }
+  body.loader-ready #nav { display:none !important; }
+  #payloadMenu { display:none; width:1356px; max-width:94vw; margin:4px auto 24px; }
+  #payloadMenu.on { display:block; }
+  #payloadMenu .menuTitle { display:block; width:330px; height:56px;
+    max-width:100%; margin:0 auto 12px; }
+  #payloadMenu .payloadGrid { display:flex; flex-wrap:wrap;
+    justify-content:center; }
+  #payloadMenu .payloadTile {
+    box-sizing:border-box; display:block; flex:0 0 calc(25% - 12px);
+    width:330px; min-width:0; max-width:330px; margin:6px; padding:0;
+    border:0; border-radius:13px;
+    background:transparent; text-decoration:none !important;
+  }
+  #payloadMenu .payloadTile:focus { outline:3px solid #fff; outline-offset:2px; }
+  #payloadMenu .payloadTile img { display:block; width:330px; height:72px;
+    max-width:100%; margin:0 auto; }
+  #payloadMenu .payloadTile.busy { opacity:.42; }
+
+  #wrap { display:none !important; }
+</style>
 </head>
-<body>
+<body class="quiet">
+<div id="failureMessage">UNLUCKY &mdash; YOU NEED TO REBOOT</div>
+<div id="cat">
+  <img id="catImage" src="mmhmm-cats-ps5.gif" alt="">
+</div>
+<h1>poops</h1>
+<div id="reboot"></div>
+<div id="verdict"></div>
+<div id="danger"></div>
+<div id="stage">idle</div>
+<div id="vitals"></div>
+<div id="cfg"></div>
+<pre id="early"></pre>
+<pre id="scr"></pre>
+<div id="payloadMenu">
+  <img class="menuTitle" data-src="../ui/payload-menu-title.png" alt="">
+  <div class="payloadGrid">
+    <a class="payloadTile" href="#" data-name="ftpsrv-ps5.elf" data-key="ftp"><img data-src="../ui/payload-ftp-default.png" alt=""></a>
+    <a class="payloadTile" href="#" data-name="gdbsrv-ps5.elf" data-key="gdb"><img data-src="../ui/payload-gdb-default.png" alt=""></a>
+    <a class="payloadTile" href="#" data-name="klogsrv-ps5.elf" data-key="klog"><img data-src="../ui/payload-klog-default.png" alt=""></a>
+    <a class="payloadTile" href="#" data-name="shsrv-ps5.elf" data-key="shell"><img data-src="../ui/payload-shell-default.png" alt=""></a>
+    <a class="payloadTile" href="#" data-name="websrv-ps5.elf" data-key="web"><img data-src="../ui/payload-web-default.png" alt=""></a>
+    <a class="payloadTile" href="#" data-name="kstuff.elf" data-key="kstuff"><img data-src="../ui/payload-kstuff-default.png" alt="KStuff"></a>
+    <a class="payloadTile" href="#" data-name="PLK.elf" data-key="plk"><img data-src="../ui/payload-plk-default.png" alt="PLK PLD Manager"></a>
+  </div>
+</div>
+<div id="nav"></div>
+<div id="arm" hidden>Open this page with <b>?go=1</b> to arm it. Nothing runs
+otherwise.</div>
+<div id="wrap">
+<table>
+  <thead><tr><th>#</th><th>test</th><th>st</th><th>result</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+</div>
+<div id="tally"></div>
+<div id="summary"></div>
 
-    <!-- Row 1 -->
-    <div class="p-2">
-        <h1 class="text-center">slopkit2</h1>
-        <p class="text-center" id="top-bar-text">Current firmware: <span class="fw-bold" id="current-fw"></span></p>
+<div id="console" hidden></div>
 
-        <!-- This is absolute positioned to the body -->
-        <div id="toast-container"></div>
-    </div>
-
-    <!-- Row 2 -->
-    <div id="main-content">
-        <div id="pre-jb-view" class="d-flex align-items-center justify-content-center flex-direction-column selected">
-            <div id="cat"><img id="catImage" src="slopkit/mmhmm-cats-ps5.gif" alt=""></div>
-            <a tabindex="0" class="btn fw-bold" id="run-jb">Jailbreak</a>
-            <a tabindex="0" class="btn" style="padding: 0.5rem 2rem; font-size: 1rem;" id="run-wk-only">Webkit-only (sender)</a>
-            <p class="text-secondary mt-2" id="pre-jb-note">A fresh reboot is required before Jailbreak</p>
-        </div>
-
-        <div id="console-view">
-            <div id="console" class="log"></div>
-            <div id="choice"></div>
-        </div>
-
-        <div id="payloads-view">
-            <div id="payloadMenu">
-                <img class="menuTitle" data-src="ui/payload-menu-title.png" alt="">
-                <div class="payloadGrid">
-                    <a class="payloadTile" href="#" data-name="kstuff.elf" data-key="kstuff"><img data-src="ui/payload-kstuff-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="shadowmountplus.elf" data-key="shadowmountplus"><img data-src="ui/payload-shadowmountplus-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="autoloader.elf" data-key="autoloader"><img data-src="ui/payload-autoloader-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="ftpsrv-ps5.elf" data-key="ftp"><img data-src="ui/payload-ftp-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="pldmgr.elf" data-key="plk"><img data-src="ui/payload-plk-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="gdbsrv-ps5.elf" data-key="gdb"><img data-src="ui/payload-gdb-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="klogsrv-ps5.elf" data-key="klog"><img data-src="ui/payload-klog-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="shsrv-ps5.elf" data-key="shell"><img data-src="ui/payload-shell-default.png" alt=""></a>
-                    <a class="payloadTile" href="#" data-name="websrv-ps5.elf" data-key="web"><img data-src="ui/payload-web-default.png" alt=""></a>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Row 3 -->
-    <div class="position-relative text-center p-2 mb-2">
-        <p class="text-secondary" id="version">slopkit2</p>
-        <p class="text-secondary">creds &amp; greetz</p>
-        <h3 class="text-secondary mt-2">
-            Egy,
-            Sonic,
-            Yenyen,
-            <a href="https://twitter.com/notnotzecoxao">@notnotzecoxao</a>,
-            Gezine,
-            EchoStretch,
-            Ufm42,
-            <br />
-            <a href="https://twitter.com/theflow0">TheFloW</a>,
-            <a href="https://github.com/john-tornblom">John Tornblom</a>,
-            <a href="https://twitter.com/flat_z">@flat_z</a>,
-            <a href="https://discord.gg/kbrzGuH3F6">PS5 R&amp;D Discord</a>
-        </h3>
-
-        <div class="position-absolute d-flex align-items-center bottom-0 left-0 m-4">
-            <div class="l2-redirect-box">L2</div>
-            <span class="ml-2">Redirect</span>
-        </div>
-    </div>
-
-    <!-- The engine keeps its own bookkeeping DOM. It is never shown: everything
-         the user sees goes through the three views above. -->
-    <div id="engine-chrome" hidden>
-      <div id="failureMessage">UNLUCKY &mdash; YOU NEED TO REBOOT</div>
-      <div id="reboot"></div>
-      <div id="verdict"></div>
-      <div id="danger"></div>
-      <div id="stage">idle</div>
-      <div id="vitals"></div>
-      <div id="cfg"></div>
-      <pre id="early"></pre>
-      <pre id="scr"></pre>
-      <div id="nav"></div>
-      <div id="arm" hidden></div>
-      <div id="wrap">
-        <table>
-          <thead><tr><th>#</th><th>test</th><th>st</th><th>result</th></tr></thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-      <div id="tally"></div>
-      <div id="summary"></div>
-    </div>
-
-<script src="slopkit/rop.js"></script>
-<script src="slopkit/main.js?v=19"></script>
+<script src="rop.js"></script>
+<script src="main.js?v=19"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
-    var s = window.__offsetsScript;
+    var s = document.querySelector('script[src^="../offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
     if (typeof OFFSET_wk_vtable_first_element !== "undefined") return res(s.src);
     s.addEventListener("load", function () { res(s.src); });
@@ -146,18 +237,18 @@ window.SLOP_DIR = "slopkit/";
     });
 });
 </script>
-<script src="slopkit/syscalls.js"></script>
+<script src="syscalls.js"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./slopkit/core.js?v=10";
-import { installWindowP, pairStatus } from "./slopkit/mem.js?v=10";
-import { int64 } from "./slopkit/int64.js";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=10";
+import { installWindowP, pairStatus } from "./mem.js?v=10";
+import { int64 } from "./int64.js";
 
 let BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList;
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./slopkit/poops.js?v=37");
+    const lib = await import("./poops.js?v=37");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
@@ -185,19 +276,7 @@ async function loadPoopsModules() {
         + "-pthreadJoinOff=0x" + (PK.LK_PTHREAD_JOIN >>> 0).toString(16));
 }
 
-// The landing page used to hand the engine its configuration through the query
-// string. There is no landing page any more, so the canonical production run is
-// spelled out here verbatim -- byte for byte what the old RUN link carried, so
-// every gate below (exactQuery/PRODUCTION_RUN) still validates it.
-const RUN_QUERY = "go=1&auto=1&production=1&trigger=netcontrol&attempts=8"
-    + "&only=ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,ps5_stage1,"
-    + "ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5"
-    + "&log=debug&payload=1&v=41";
-const Q = new URLSearchParams(RUN_QUERY);
-
-// Set by the "Webkit-only (sender)" button, or by choosing to skip the kernel
-// exploit once an ELF loader has been found already listening on port 9021.
-let WK_ONLY = false;
+const Q = new URLSearchParams(location.search);
 const LOG_DEBUG = Q.get("log") === "debug";
 const ARMED = Q.get("go") === "1";
 const CLEARLATCH = Q.get("clear") === "1";
@@ -431,57 +510,8 @@ let screenDirty = false;
 const SCREEN_MS = 250;
 let lastPaint = 0;
 
-// ---------------------------------------------------------------------------
-// The scrolling console the user actually reads. The engine's own 12-line
-// #scr buffer is kept as-is (it is cheap and other code reads it), and every
-// line it produces is mirrored here as a permanent, classed log entry.
-// ---------------------------------------------------------------------------
-const logEl = document.getElementById("console");
-const LOG_MAX_LINES = 500;
-let pendingLog = [];
-
-const LOG_ERROR_RE = /FAIL|FAILED|REFUS|ERROR|DEAD|STALLED|LATCHED|REBOOT|UNUSABLE/i;
-const LOG_SUCCESS_RE = /READY|SUCCESS|COMPLETE|-OK\b|PASS|SENT\b|JAILBROKEN/i;
-
-function logClassFor(text) {
-    if (LOG_ERROR_RE.test(text)) return "LOG-ERROR";
-    if (LOG_SUCCESS_RE.test(text)) return "LOG-SUCCESS";
-    return "LOG-INFO";
-}
-
-function uiLogFlush() {
-    if (!pendingLog.length) return;
-    const frag = document.createDocumentFragment();
-    for (const item of pendingLog) {
-        const div = document.createElement("div");
-        div.className = item.cls;
-        div.textContent = item.text;
-        frag.appendChild(div);
-    }
-    pendingLog = [];
-    try {
-        logEl.appendChild(frag);
-        while (logEl.childNodes.length > LOG_MAX_LINES)
-            logEl.removeChild(logEl.firstChild);
-        logEl.scrollTop = logEl.scrollHeight;
-    } catch (e) { }
-}
-
-let lastLogged = null;
-function uiLog(text, cls) {
-    text = String(text);
-    // stage() and the mark stream often say the same thing back to back
-    if (text === lastLogged) return;
-    lastLogged = text;
-    pendingLog.push({ text, cls: cls || logClassFor(text) });
-    if (pendingLog.length > LOG_MAX_LINES)
-        pendingLog.splice(0, pendingLog.length - LOG_MAX_LINES);
-    if (!raceMode) uiLogFlush();
-}
-
 const CRITICAL_MARKS = { "TRIGGER-ARMED": 1, "LATCH-ESCALATE": 1 };
 function repaintScreen() {
-    uiLogFlush();
     if (!screenDirty) return;
     screenDirty = false;
     try { scrEl.textContent = screenLines.join("\n"); } catch { }
@@ -496,7 +526,6 @@ function screenLine(text) {
     screenLines.push(text.length > 120 ? text.slice(0, 117) + "..." : text);
     if (screenLines.length > SCREEN_LINES)
         screenLines.splice(0, screenLines.length - SCREEN_LINES);
-    uiLog(text);
 
     if (raceMode) {
         screenDirty = true;
@@ -505,7 +534,6 @@ function screenLine(text) {
         lastPaint = nowMs;
         screenDirty = false;
     }
-    uiLogFlush();
     try { scrEl.textContent = screenLines.join("\n"); } catch { }
 }
 
@@ -722,100 +750,6 @@ const latch = {
     }
 };
 
-// ---------------------------------------------------------------------------
-// The three views: the jailbreak chooser, the console, and the payload chooser.
-// ---------------------------------------------------------------------------
-// The fade is a nicety; never let a missing transitionend strand the user on a
-// blank view, so every wait for one is capped.
-function transitionEnd(element, budgetMs = 1000) {
-    return new Promise(resolve => {
-        const timer = setTimeout(finish, budgetMs);
-        function finish() {
-            clearTimeout(timer);
-            element.removeEventListener("transitionend", handler);
-            resolve();
-        }
-        function handler(event) {
-            // children fire it too, and we only want our own
-            if (event.target === element) finish();
-        }
-        element.addEventListener("transitionend", handler);
-    });
-}
-
-async function switchPage(id, animate = true) {
-    const parentElement = document.getElementById("main-content");
-    const targetElement = document.getElementById(id);
-    if (!targetElement || targetElement.parentElement !== parentElement)
-        throw new Error("Invalid target element");
-
-    const oldSelectedElement = parentElement.querySelector(".selected");
-    if (oldSelectedElement === targetElement) return;
-
-    if (oldSelectedElement) {
-        const done = animate ? transitionEnd(oldSelectedElement) : null;
-        oldSelectedElement.classList.remove("selected");
-        if (done) await done;
-    }
-
-    const done = animate ? transitionEnd(targetElement) : null;
-    targetElement.classList.add("selected");
-    if (done) await done;
-}
-
-const TOAST_SUCCESS_TIMEOUT = 2000;
-const TOAST_ERROR_TIMEOUT = 5000;
-
-function showToast(message, timeout = TOAST_SUCCESS_TIMEOUT) {
-    const toast = document.createElement("div");
-    toast.className = "toast";
-    toast.textContent = message;
-    document.getElementById("toast-container").appendChild(toast);
-    toast.offsetHeight; // reflow, so the transition actually runs
-    toast.classList.add("show");
-    if (timeout > 0) setTimeout(() => removeToast(toast), timeout);
-    return toast;
-}
-
-function updateToastMessage(toast, message) {
-    if (toast) toast.textContent = message;
-}
-
-function removeToast(toast) {
-    if (!toast) return;
-    toast.classList.add("hide");
-    toast.addEventListener("transitionend", () => toast.remove());
-}
-
-// A two-button question asked inside the console view, used instead of
-// confirm() because the early hook above deliberately neuters modal dialogs.
-const choiceEl = document.getElementById("choice");
-function askChoice(question, options) {
-    return new Promise(resolve => {
-        choiceEl.textContent = "";
-        const q = document.createElement("p");
-        q.className = "choice-question";
-        q.textContent = question;
-        choiceEl.appendChild(q);
-        for (const option of options) {
-            const button = document.createElement("a");
-            button.className = "btn" + (option.primary ? " fw-bold" : "");
-            button.tabIndex = 0;
-            button.textContent = option.label;
-            button.onclick = () => {
-                choiceEl.className = "";
-                choiceEl.textContent = "";
-                uiLog("> " + option.label, "LOG-LOG");
-                resolve(option.value);
-            };
-            choiceEl.appendChild(button);
-        }
-        choiceEl.className = "on";
-        const first = choiceEl.getElementsByTagName("a")[0];
-        if (first) try { first.focus(); } catch (e) { }
-    });
-}
-
 const stageEl = document.getElementById("stage");
 const dangerEl = document.getElementById("danger");
 const rebootEl = document.getElementById("reboot");
@@ -838,15 +772,10 @@ let payloadSocketOptionStore = null;
 let payloadSendTimeoutStore = null;
 let payloadSenderBlocked = "";
 
-// True once payloads can be sent: either this run spawned the ELF loader, or
-// one was already listening on 9021 and the kernel exploit was skipped.
-let senderReady = false;
-
 function showPayloadMenu() {
     navEl.textContent = "";
     navEl.style.display = "none";
     payloadMenuEl.className = "on";
-    switchPage("payloads-view");
     const title = payloadMenuEl.getElementsByClassName("menuTitle")[0];
     if (title && !title.getAttribute("src"))
         title.setAttribute("src", title.getAttribute("data-src"));
@@ -864,7 +793,7 @@ function setPayloadTileState(tile, state) {
     const image = tile.getElementsByTagName("img")[0];
     const key = tile.getAttribute("data-key");
     if (image && key)
-        image.setAttribute("src", "ui/payload-" + key + "-" + state + ".png");
+        image.setAttribute("src", "../ui/payload-" + key + "-" + state + ".png");
 }
 
 function payloadIsListed(name) {
@@ -912,7 +841,7 @@ function preparePayloadSender() {
 }
 
 async function sendPayloadToElfldr(name) {
-    if (!elfldrSpawned && !senderReady)
+    if (!elfldrSpawned)
         throw new Error("ELF loader is not ready");
     if (!P || !chain)
         throw new Error("the post-jailbreak ROP runtime is unavailable");
@@ -923,7 +852,7 @@ async function sendPayloadToElfldr(name) {
     if (!payloadIsListed(name))
         throw new Error("payload is not listed in this menu");
 
-    const response = await fetch("payloads/" + encodeURIComponent(name),
+    const response = await fetch("../payloads/" + encodeURIComponent(name),
         { cache: "no-store" });
     if (!response.ok)
         throw new Error("payload fetch failed: HTTP " + response.status);
@@ -1074,8 +1003,6 @@ function stage(text, cls) {
     if (elfldrSpawned && cls === "bad") return;
     stageEl.textContent = text;
     stageEl.className = cls || "";
-    uiLog(text, cls === "ok" ? "LOG-SUCCESS"
-        : cls === "bad" ? "LOG-ERROR" : "LOG-LOG");
 }
 function danger(text) {
     if (elfldrSpawned) return;
@@ -1099,7 +1026,7 @@ function setCatResult(success) {
         cat.className = success ? "ok" : "bad";
         if (success) {
             const image = document.getElementById("catImage");
-            if (image) image.src = "slopkit/cat.jpg";
+            if (image) image.src = "cat.jpg";
         }
     }
 }
@@ -1379,13 +1306,13 @@ async function preflight() {
 
     if (!wk_gadgetmap || !Object.keys(wk_gadgetmap).length
         || !syscall_map || !Object.keys(syscall_map).length)
-        throw new Error("offsets/" + window.fw_str + ".js loaded but is empty: "
+        throw new Error("../offsets/" + window.fw_str + ".js loaded but is empty: "
             + Object.keys(wk_gadgetmap || {}).length + " gadgets, "
             + Object.keys(syscall_map || {}).length + " syscalls.");
 
     let verdict = "ok";
     try {
-        const r = await fetch("slopkit/rop_slave.js", { cache: "no-store" });
+        const r = await fetch("rop_slave.js", { cache: "no-store" });
         if (!r.ok) verdict = "http-" + r.status;
     } catch (err) { verdict = "fetch-threw"; }
     if (verdict === "ok") {
@@ -1400,7 +1327,7 @@ async function preflight() {
             };
             const t = setTimeout(() => finish("timeout"), 4000);
             try {
-                w = new Worker("slopkit/rop_slave.js");
+                w = new Worker("rop_slave.js");
                 w.onmessage = () => { clearTimeout(t); finish("ok"); };
                 w.onerror = () => { clearTimeout(t); finish("worker-error"); };
                 w.postMessage(0);
@@ -1843,7 +1770,6 @@ async function runLadder() {
     if (payloadSuccess) {
         flushMark("ELFLDR-MENU-INPAGE",
             "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
-        await announceLoader();
         showPayloadMenu();
     }
 }
@@ -1912,7 +1838,7 @@ async function bootPrimitiveAndChain() {
             beforeCriticalLoad(fake, target) {
                 queueEvent("CRITICAL-LOAD-NEXT", "fake=0x" + fake.toString(16)
                     + "-target=0x" + target.toString(16));
-                void logEl.offsetWidth;
+                void scrEl.offsetWidth;
                 flushQueue(false);
             }
         });
@@ -1972,83 +1898,6 @@ async function bootPrimitiveAndChain() {
     await probeErrnoConvention();
 }
 
-// Is an ELF loader already listening on 127.0.0.1:9021 -- i.e. was this console
-// already jailbroken this boot? Asked the cheap way: bind the port ourselves.
-// A bind that fails with the port in use is the loader answering for itself.
-// This only needs the webkit primitive and the ROP chain, never the kernel.
-const SYS_SOCKET_NUM = 0x061;
-const SYS_BIND_NUM = 0x068;
-const SYS_CLOSE_NUM = 0x006;
-const SYS_NETGETIFLIST_NUM = 0x07D;
-
-async function probeElfldr() {
-    const socketResult = await sys(SYS_SOCKET_NUM, 2 /* AF_INET */,
-        1 /* SOCK_STREAM */, 0);
-    if (socketResult.failed || socketResult.s32 < 0) {
-        flushMark("ELFLDR-PROBE-FAILED", "socket-" + clean(socketResult.errText));
-        return false;
-    }
-    const fd = socketResult.s32;
-    track(fd);
-
-    const addr = mem(0x10);
-    addr.u8.fill(0);
-    addr.u8[0] = 0x10;
-    addr.u8[1] = 0x02;
-    addr.u8[2] = (PAYLOAD_PORT >>> 8) & 0xff;
-    addr.u8[3] = PAYLOAD_PORT & 0xff;
-    addr.u8[4] = 127;
-    addr.u8[7] = 1;
-
-    const bindResult = await sys(SYS_BIND_NUM, fd, addr.ptr, 0x10);
-    const closeResult = await sys(SYS_CLOSE_NUM, fd);
-    if (!closeResult.failed && closeResult.s32 === 0) untrack(fd);
-
-    const listening = bindResult.failed || bindResult.s32 !== 0;
-    flushMark("ELFLDR-PROBE", "port=" + PAYLOAD_PORT + "-listening=" + listening
-        + "-bind=" + clean(bindResult.errText));
-    return listening;
-}
-
-// The console's own address, so the top bar can say where the loader is
-// reachable. Best-effort: a failure here must not stop anything.
-async function localIp() {
-    try {
-        const count = await sys(SYS_NETGETIFLIST_NUM, 0, 10);
-        if (count.failed || count.s32 <= 0) return "";
-        const OBJ_SIZE = 0x3c0;
-        const n = Math.min(count.s32, 10);
-        const list = mem(OBJ_SIZE * n);
-        list.u8.fill(0);
-        const filled = await sys(SYS_NETGETIFLIST_NUM, list.ptr, n);
-        if (filled.failed) return "";
-        for (let i = 0; i < n; ++i) {
-            const base = OBJ_SIZE * i;
-            const ip = list.u8[base + 40] + "." + list.u8[base + 41] + "."
-                + list.u8[base + 42] + "." + list.u8[base + 43];
-            if (ip !== "0.0.0.0") return ip;
-        }
-    } catch (err) {
-        flushMark("LOCAL-IP-FAILED", clean((err && err.message) || err));
-    }
-    return "";
-}
-
-async function announceLoader(present = true) {
-    senderReady = true;
-    const bar = document.getElementById("top-bar-text");
-    if (!present) {
-        bar.innerHTML = 'No ELF loader on <span class="fw-bold">port '
-            + PAYLOAD_PORT + '</span> &mdash; sends will fail';
-        return;
-    }
-    const ip = await localIp();
-    bar.innerHTML = ip
-        ? 'ELF loader on <span class="fw-bold">' + ip + '</span> (port '
-            + PAYLOAD_PORT + ')'
-        : 'ELF loader on <span class="fw-bold">port ' + PAYLOAD_PORT + '</span>';
-}
-
 async function main() {
     flushMark("POOPS-BOOT", "rev=" + REV + "-trigger=" + cfg.trigger
         + "-burn=" + cfg.burn + "-sockets=" + cfg.sockets
@@ -2060,49 +1909,6 @@ async function main() {
     runInFlight = true;
     try {
         await bootChain();
-
-        // The webkit primitive and the ROP chain are up, which is all the
-        // payload sender needs. Ask the console whether it is already
-        // jailbroken before spending anything on the kernel exploit.
-        stage("checking whether an ELF loader is already running");
-        const alreadyJailbroken = await probeElfldr();
-
-        if (WK_ONLY) {
-            if (!alreadyJailbroken) {
-                stage("no ELF loader on port " + PAYLOAD_PORT
-                    + " -- payloads cannot be sent in webkit-only mode", "bad");
-                showToast("Nothing is listening on port " + PAYLOAD_PORT,
-                    TOAST_ERROR_TIMEOUT);
-            } else {
-                stage("ELF LOADER READY -- webkit-only sender mode", "ok");
-            }
-            await announceLoader(alreadyJailbroken);
-            flushMark("ELFLDR-MENU-INPAGE", "webkit-only-sender-listening="
-                + alreadyJailbroken + "-port=" + PAYLOAD_PORT);
-            showPayloadMenu();
-            return;
-        }
-
-        if (alreadyJailbroken) {
-            stage("this console is already jailbroken -- an ELF loader is "
-                + "listening on port " + PAYLOAD_PORT, "ok");
-            const skip = await askChoice(
-                "An ELF loader is already running. Skip the kernel exploit?",
-                [
-                    { label: "Skip to payloads", value: true, primary: true },
-                    { label: "Run the jailbreak anyway", value: false }
-                ]);
-            flushMark("ALREADY-JAILBROKEN", "skip=" + skip);
-            if (skip) {
-                WK_ONLY = true;
-                stage("ELF LOADER READY -- skipped the kernel exploit", "ok");
-                await announceLoader();
-                flushMark("ELFLDR-MENU-INPAGE",
-                    "skipped-kernel-exploit-port=" + PAYLOAD_PORT);
-                showPayloadMenu();
-                return;
-            }
-        }
 
         await chooseCore();
 
@@ -2207,7 +2013,7 @@ function lastRunText() {
             + LAST_RUN.latchDetail : "");
 }
 
-async function entry() {
+(async function entry() {
 
     screenLine("slopkit -- reading the one-shot safety latch");
 
@@ -2217,7 +2023,6 @@ async function entry() {
         summaryEl.textContent = "NOTHING was cleared or executed.";
         flushMark("POOPS-PRODUCTION-REFUSED", PRODUCTION_REQUEST_ERROR);
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
 
@@ -2227,7 +2032,6 @@ async function entry() {
         summaryEl.textContent = "NOTHING was cleared or executed.";
         flushMark("POOPS-STAGE5-REFUSED", STAGE5_REQUEST_ERROR);
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
 
@@ -2235,7 +2039,6 @@ async function entry() {
         renderNav("", false);
         await clearMain();
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
 
@@ -2279,7 +2082,6 @@ async function entry() {
             + " proof refused: clean checkpoint latch is missing", "bad");
         flushMark("POOPS-STAGE5-REFUSED", "checkpoint-latch-missing");
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
     if (proofRequested && !proofReady) {
@@ -2289,7 +2091,6 @@ async function entry() {
         flushMark("POOPS-LATCHED", proofName.toLowerCase().replace(" ", "")
             + "-proof-refused-no-clean-negative-record");
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
 
@@ -2341,7 +2142,6 @@ async function entry() {
         summaryEl.textContent = lastRunText();
         flushMark("POOPS-LATCHED", clean(l.detail || ""));
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
 
@@ -2365,13 +2165,12 @@ async function entry() {
 
             link("?trigger=none", "no -- go back to the negative control",
                 "extra");
-            link("index.html", "back to slopkit", "extra");
+            link("../index.html", "back to slopkit", "extra");
         }
         summaryEl.textContent = lastRunText()
             + "\n\nSAME-process re-arm checks, and their limit stated honestly: " + "this page records the first socket fd it is given and the " + "process's uid, and can therefore notice that THIS WebProcess has " + "already run";
         flushMark("POOPS-IDLE", "rev=" + REV + "-armed=0-trigger=" + cfg.trigger);
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
 
@@ -2383,95 +2182,19 @@ async function entry() {
         summaryEl.textContent = lastRunText();
         flushMark("POOPS-STALLED", STALLED_AT);
         sendRemoteEvents(false);
-        offerReload();
         return;
     }
 
     renderNav("", false);
-    await main().catch(err => {
+    main().catch(err => {
         const m = (err && err.message) || String(err);
         stage("boot failed: " + m, "bad");
         flushMark("POOPS-FAILED", (err && err.name) + ":" + m.slice(0, 160));
         sendRemoteEvents(false);
         runInFlight = false;
         lockNav(false);
-        offerReload();
     });
-}
-
-// A run is one-shot: the safety latch and the kernel state it may have touched
-// both belong to this page load. Starting over means loading the page again.
-function offerReload() {
-    askChoice("This run is over. Load the page again to start another?",
-        [{ label: "Reload", value: true, primary: true }])
-        .then(() => window.location.reload());
-}
-
-// ---------------------------------------------------------------------------
-// Start-up: the jailbreak chooser is the first thing on screen, exactly like
-// the payload chooser is the last. Nothing runs until a button is pressed.
-// ---------------------------------------------------------------------------
-let runStarted = false;
-
-async function startRun(wkOnly) {
-    if (runStarted) return;
-    runStarted = true;
-    WK_ONLY = !!wkOnly;
-    await switchPage("console-view");
-    uiLog(wkOnly ? "webkit-only (sender) mode -- the kernel exploit will not run"
-        : "jailbreak mode", "LOG-LOG");
-    await entry();
-}
-
-document.getElementById("current-fw").textContent = window.fw_str || "unknown";
-
-// main.js refuses unsupported firmware with an alert(), and the early hook
-// above swallows alerts, so say it on the page instead of failing silently.
-let SUPPORTED_LIST = [];
-let FIRMWARE_SUPPORTED = false;
-try {
-    // main.js bails out before this list exists on a non-PlayStation browser
-    SUPPORTED_LIST = supportedFirmwares;
-    FIRMWARE_SUPPORTED = SUPPORTED_LIST.indexOf(window.fw_str) >= 0;
-} catch (e) { }
-
-if (!FIRMWARE_SUPPORTED) {
-    const note = document.getElementById("pre-jb-note");
-    note.className = "mt-2 LOG-ERROR";
-    note.textContent = "Firmware " + (window.fw_str || "?")
-        + " is not supported. Supported: "
-        + (SUPPORTED_LIST.length ? SUPPORTED_LIST.join(", ") : "none");
-    for (const id of ["run-jb", "run-wk-only"]) {
-        const button = document.getElementById(id);
-        button.style.opacity = "0.4";
-        button.removeAttribute("tabindex");
-    }
-}
-
-document.getElementById("run-jb").onclick = function () {
-    if (FIRMWARE_SUPPORTED) startRun(false);
-};
-document.getElementById("run-wk-only").onclick = function () {
-    if (FIRMWARE_SUPPORTED) startRun(true);
-};
-
-// L2 opens a url prompt, same as the reference loader.
-const LOCALSTORE_REDIRECTOR_LAST_URL_KEY = "redirector_last_url";
-document.addEventListener("keydown", function (event) {
-    if (event.keyCode !== 118) return;
-    let last = "http://";
-    try { last = localStorage.getItem(LOCALSTORE_REDIRECTOR_LAST_URL_KEY) || last; }
-    catch (e) { }
-    // the early hook neuters confirm(), but prompt() is untouched
-    const value = prompt("Enter url", last);
-    if (!value || value === "http://") return;
-    try { localStorage.setItem(LOCALSTORE_REDIRECTOR_LAST_URL_KEY, value); }
-    catch (e) { }
-    window.location.href = value;
-});
-
-if (FIRMWARE_SUPPORTED)
-    try { document.getElementById("run-jb").focus(); } catch (e) { }
+})();
 </script>
 </body>
 </html>
