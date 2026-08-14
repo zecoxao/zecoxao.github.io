@@ -7791,7 +7791,7 @@ export function makePoopsEngine(X) {
       "STAGE5-ENTER", "dryRun=" + !!o.dryRun + "-jailbroken=" + S.jailbroken,
     );
     if (!S.jailbroken) {
-      out.why = "stage 4 jailbreak not proved by getuid()";
+      out.why = "stage 4 galberik not proved by getuid()";
       return out;
     }
 
@@ -9785,7 +9785,7 @@ export function buildLadder(X, E) {
     async run() {
       const mode = String(cfg.payload || "");
       if (mode !== "1" && mode !== "dry") return NA("stage 5 runs a payload, opt-in only");
-      if (!E.S.jailbroken) return FAIL("stage 5 needs stage 4's jailbreak (getuid()==0); " +
+      if (!E.S.jailbroken) return FAIL("stage 5 needs stage 4's galberik (getuid()==0); " +
         "jitshm_create and an RWX mmap need it",);
       const r = await E.stage5({ dryRun: mode === "dry" });
       for (const st of r.steps) note(st);

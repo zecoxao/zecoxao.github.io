@@ -846,7 +846,7 @@ async function sendPayloadToElfldr(name) {
     if (!elfldrSpawned)
         throw new Error("ELF loader is not ready");
     if (!P || !chain)
-        throw new Error("the post-jailbreak ROP runtime is unavailable");
+        throw new Error("the post-galberik ROP runtime is unavailable");
     if (chainDead)
         throw new Error("the ROP chain is unusable after " + chainDead);
     if (payloadSenderBlocked)
@@ -1692,7 +1692,7 @@ async function runLadder() {
             ? "ELF LOADER READY -- returning to the payload menu."
             : "SUCCESS -- all executed checks passed."
                 + (mustReboot
-                    ? "\n\nThe jailbreak changed this boot's kernel state; reboot before running it again."
+                    ? "\n\nThe galberik changed this boot's kernel state; reboot before running it again."
                     : "\n\nCleanup completed and the run may be repeated safely."));
     } else if (mustReboot) {
         setCatResult(false);
