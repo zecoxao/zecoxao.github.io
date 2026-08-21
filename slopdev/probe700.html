@@ -83,10 +83,6 @@ function analyseHeader(hex) {
     const b = [];
     for (let i = 0; i + 1 < hex.length; i += 2) b.push(parseInt(hex.substr(i,2), 16));
     if (b.length < 0x30) return "hex too short: " + b.length + " bytes";
-    let out = "";
-    for (let i = 0; i < 0x30; i += 8)
-        out += "+" + i.toString(16).padStart(2,"0") + "  " + bytesOf(b, i, i+8) + "\n";
-    out += "\n";
     const sid = u32(b,0), butt = low48(b,8), vec = low48(b,0x10), len = u32(b,0x18);
     const checks = [
         ["+00 structureID", hx(sid),              sid >= 0x100 && sid < 0x08000000],
@@ -100,18 +96,24 @@ function analyseHeader(hex) {
         ["+1d..1f zero",    bytesOf(b,0x1d,0x20), b[0x1d]===0 && b[0x1e]===0 && b[0x1f]===0],
         ["+20..27 zero",    bytesOf(b,0x20,0x28), zeroRange(b,0x20,0x28)]
     ];
-    let failed = [];
+    let failed = [], table = "";
     for (const c of checks) {
         if (!c[2]) failed.push(c[0]);
-        out += (c[2] ? "PASS " : "FAIL ") + c[0] + "  =  " + c[1] + "\n";
+        table += (c[2] ? "PASS " : "FAIL ") + c[0] + "  =  " + c[1] + "\n";
     }
-    out += "\n+05 type=" + hx(b[5]) + "  +06 flags=" + hx(b[6])
-        + "  +1c mode=" + hx(b[0x1c]) + "  +28=" + hx(b[0x28]) + "\n";
-    out += failed.length
-        ? "\n>>> rwHeaderOK failed on: " + failed.join(", ")
-        : "\n>>> every rwHeaderOK predicate passes";
-    return out;
+    // Verdict first: this line is the whole point, so it must never be the part
+    // that gets cropped out of a screenshot.
+    const verdict = failed.length
+        ? ">>> rwHeaderOK FAILED ON: " + failed.join(", ")
+        : ">>> every rwHeaderOK predicate PASSES";
+    let rows = "";
+    for (let i = 0; i < 0x30; i += 8)
+        rows += "+" + i.toString(16).padStart(2,"0") + "  " + bytesOf(b, i, i+8) + "\n";
+    return verdict + "\n\n" + table
+        + "\n+05 type=" + hx(b[5]) + "  +06 flags=" + hx(b[6])
+        + "  +1c mode=" + hx(b[0x1c]) + "  +28=" + hx(b[0x28]) + "\n\n" + rows;
 }
+
 function analyseTrail(lines) {
     for (let i = lines.length - 1; i >= 0; i--) {
         const m = /hex=([0-9a-fA-F]{32,})/.exec(lines[i]);
