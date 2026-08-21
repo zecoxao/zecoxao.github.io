@@ -247,54 +247,53 @@ async function dumpModuleSlots(core, carrier) {
                        ? " THIS" : "") : "") + "\n";
         out += "\n";
 
-        // No libkernel return addresses exist on the worker stack, only
-        // &__stack_chk_guard spills. That fits WebKit calling a libkernel
-        // SYSCALL STUB directly: the stub does `syscall; ret` and pushes
-        // nothing, so the parked return address is a libSceNKWebKit address,
-        // not a libkernel one. Collect every pointer on the stack by module;
-        // which of the wk ones follows a `call` gets checked offline against
-        // the binary, since text is execute-only and unreadable from here.
+        // Walk the actual frame chain instead of pattern-matching values.
+        // A live frame is a slot S where [S] is a saved rbp (a stack address
+        // ABOVE S) and [S+8] is a return address (in wk text). Chaining those
+        // through the saved-rbp links gives the real call stack; the deepest
+        // link of the longest chain is where the worker is parked, and its
+        // [S+8] is the slot main.js must hijack.
         for (const th of threads) {
             if (th[3] !== 0x80000 || !th[2]) continue;
-            const st = th[2];
-            const wkSeen = {}, otherSeen = {};
-            let wkTot = 0, othTot = 0;
-            for (let off = 0; off < 0x80000; off += 0x100) {
+            const st = th[2], SZ = 0x80000;
+            const frame = {};            // offset -> [savedRbpOff, retRva]
+            for (let off = 0; off < SZ - 0x10; off += 0x100) {
                 carrier.aim(st + off);
                 const v = carrier.view;
-                for (let i = 0; i < 0x100; i += 8) {
-                    const x = qw(v, i);
-                    if (x < 0x100000000 || x > 0xffffffffffff) continue;
-                    if (x >= st && x < st + 0x80000) continue;          // saved rbp
-                    if (x >= lk && x < lk + 0x80000) continue;          // already known
-                    if (x >= base && x < base + 0x3673d22) {            // wk TEXT only
-                        const rva = x - base;
-                        wkTot++;
-                        if (!wkSeen[rva]) wkSeen[rva] = [off + i];
-                        else if (wkSeen[rva].length < 3) wkSeen[rva].push(off + i);
-                    } else if (x < base || x > base + 0x4500000) {
-                        othTot++;
-                        const key = "0x" + x.toString(16);
-                        otherSeen[key] = (otherSeen[key] || 0) + 1;
-                    }
+                for (let i = 0; i < 0x100 && off + i < SZ - 0x10; i += 8) {
+                    const rbp = qw(v, i);
+                    if (rbp <= st + off + i || rbp >= st + SZ) continue;
+                    if ((rbp - st) % 8 !== 0) continue;
+                    let ret;
+                    if (i + 8 < 0x100) ret = qw(v, i + 8);
+                    else continue;
+                    if (ret <= base || ret >= base + 0x3673d22) continue;
+                    frame[off + i] = [rbp - st, ret - base];
                 }
                 carrier.restore();
             }
-            const wkKeys = Object.keys(wkSeen).map(Number).sort(function (x, y) { return x - y; });
-            out += "thread #" + th[0] + " stack " + hx(st) + "\n"
-                 + "  wk-text pointers: " + wkTot + " (" + wkKeys.length + " unique)\n";
-            let shown = 0;
-            for (const k of wkKeys) {
-                if (shown++ >= 70) { out += "  ... " + (wkKeys.length - 70) + " more\n"; break; }
-                out += "    wk+0x" + k.toString(16) + "  x" + wkSeen[k].length
-                     + "  at stack+0x"
-                     + wkSeen[k].map(function (o) { return o.toString(16); }).join(",0x") + "\n";
+            const offs = Object.keys(frame).map(Number).sort(function (x, y) { return x - y; });
+            let best = [], bestStart = -1;
+            for (const o0 of offs) {
+                const chain = [];
+                let o = o0, guard = 0;
+                while (frame[o] && guard++ < 64) {
+                    chain.push(o);
+                    const nxt = frame[o][0];
+                    if (nxt <= o) break;
+                    o = nxt;
+                }
+                if (chain.length > best.length) { best = chain; bestStart = o0; }
             }
-            const oKeys = Object.keys(otherSeen);
-            out += "  pointers in NEITHER wk nor lk: " + othTot
-                 + " (" + oKeys.length + " unique)\n";
-            for (let j = 0; j < oKeys.length && j < 12; j++)
-                out += "    " + oKeys[j] + "  x" + otherSeen[oKeys[j]] + "\n";
+            out += "thread #" + th[0] + ": " + offs.length
+                 + " frame candidates, longest chain " + best.length + " deep\n";
+            for (let j = 0; j < best.length && j < 24; j++) {
+                const o = best[j];
+                out += (j === 0 ? "  INNERMOST " : "             ")
+                     + "rbp@stack+0x" + o.toString(16)
+                     + "   ret slot stack+0x" + (o + 8).toString(16)
+                     + "   wk+0x" + frame[o][1].toString(16) + "\n";
+            }
             out += "\n";
         }
     } catch (e) {
