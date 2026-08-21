@@ -211,6 +211,21 @@ async function dumpModuleSlots(core, carrier) {
             + "lk     = " + hx(lk) + "  aligned=" + (lk % 0x4000 === 0) + "\n"
             + "lc     = " + hx(lc) + "  aligned=" + (lc % 0x4000 === 0) + "\n\n";
 
+    // Identify the 4th module. WebKit imports from libSceNKWebKitRequirements;
+    // its GOT slots (r_offset + the measured 0x4000 page bias) hold addresses
+    // inside that module, which pins its base the same way lk/lc were pinned.
+    out += "libSceNKWebKitRequirements import slots (reloc + 0x4000):\n";
+    for (const sl of [[0x3E18970, "0xb285b805"], [0x3E18A40, "0xe654ca0c"],
+                      [0x3E18B90, "0x7203629f"]]) {
+        try {
+            const val = rd(base + sl[0]);
+            out += "  wk+0x" + sl[0].toString(16) + " (" + sl[1] + ") = " + hx(val)
+                 + "   1MB bucket 0x" + (Math.floor(val / 0x100000) * 0x100000).toString(16)
+                 + "\n";
+        } catch (e) { out += "  wk+0x" + sl[0].toString(16) + " read threw\n"; }
+    }
+    out += "\n";
+
     const sel = rd32(lk + SELECTOR);
     out += "lk+0x64014 (cond_wait selector) = " + sel + "\n"
          + "  pthread_cond_wait therefore calls "
@@ -249,7 +264,20 @@ async function dumpModuleSlots(core, carrier) {
                      [0xC227DA, "poll"],
                      [0x868630, "select"],
                      [0x1604A64, "select"],
-                     [0x868745, "recvmsg"]];
+                     [0x868745, "recvmsg"],
+                     [0x2AFB90, "sleep"],
+                     [0x2AFBB0, "sleep"],
+                     [0x2AFBD0, "sleep"],
+                     [0x6F5686, "sleep"],
+                     [0x15C7D76, "sigsuspend"],
+                     [0x364AA4, "accept"],
+                     [0x4D3244, "accept"],
+                     [0x2B7379, "recv"],
+                     [0x48FE81, "recv"],
+                     [0x7FE596, "recv"],
+                     [0x94F6D, "connect"],
+                     [0x232651, "connect"],
+                     [0x4A3562, "connect"]];
     function listThreads() {
         const r = [];
         let t = rd(lk + THREAD_LIST), n = 0;

