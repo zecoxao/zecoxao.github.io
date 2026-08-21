@@ -221,10 +221,35 @@ async function dumpModuleSlots(core, carrier) {
     // WTF::ParkingLot::parkConditionallyImpl (0x5A55B0), which calls
     // pthread_cond_wait via the PLT thunk at 0x3670D90. So the parked return
     // address is one of these exact values -- no more guessing.
-    const TARGETS = [[0x5A64E9, "ParkingLot cond_wait #1"],
-                     [0x5A666B, "ParkingLot cond_wait #2"],
-                     [0x5A632B, "ParkingLot cond_timedwait"],
-                     [0x0E6D2E, "ThreadCondition::timedWait"]];
+    const TARGETS = [[0x5A64E9, "pthread_cond_wait  (ParkingLot)"],
+                     [0x5A666B, "pthread_cond_wait  (ParkingLot)"],
+                     [0x5A632B, "pthread_cond_timedwait (ParkingLot)"],
+                     [0xE6D2E, "pthread_cond_wait  (ThreadCondition)"],
+                     [0xE6D6A, "pthread_cond_timedwait (ThreadCond)"],
+                     [0x15E9FB, "sem_wait"],
+                     [0x4F2C2B, "sem_wait"],
+                     [0x10AA81A, "sem_wait"],
+                     [0x147E142, "sem_wait"],
+                     [0x1D0C4E, "read"],
+                     [0x1DC28A, "read"],
+                     [0x432B1E, "read"],
+                     [0x64BB7E, "read"],
+                     [0x64C7B0, "read"],
+                     [0x7919AE, "read"],
+                     [0x85831D, "read"],
+                     [0xAFC6BE, "read"],
+                     [0xC5FEAE, "read"],
+                     [0x1588123, "read"],
+                     [0x15E9F2E, "read"],
+                     [0x18B1E7D, "read"],
+                     [0x27D294E, "read"],
+                     [0x2E5C64E, "read"],
+                     [0x3667EC7, "read"],
+                     [0x2B729F, "poll"],
+                     [0xC227DA, "poll"],
+                     [0x868630, "select"],
+                     [0x1604A64, "select"],
+                     [0x868745, "recvmsg"]];
     function listThreads() {
         const r = [];
         let t = rd(lk + THREAD_LIST), n = 0;
@@ -281,7 +306,7 @@ async function dumpModuleSlots(core, carrier) {
                 carrier.restore();
             }
         }
-        if (!any) out += "  (none of the four found on any thread)\n";
+        if (!any) out += "  (none of the 29 blocking-call return addresses found)\n";
     } catch (e) {
         out += "worker probe threw: " + (e && e.message) + "\n";
     }
