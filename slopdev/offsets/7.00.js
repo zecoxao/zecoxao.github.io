@@ -18,8 +18,25 @@ const OFFSET_wk_host_constructor_candidates = [];
  * previous (wrong): 0x0065C4E0 */
 const OFFSET_wk_vtable_first_element     = 0x0003D720;
 
-const OFFSET_wk_memset_import                  = 0x03E16EE0;
-const OFFSET_wk___stack_chk_guard_import       = 0x03E14910;
+// Import GOT slots, MEASURED on the console, not taken from the relocation
+// tables. DT_JMPREL/DT_RELA give r_offset 0x03E16EE0 (memset, 8zTFvBIAIN8#P#Q)
+// and 0x03E14910 (__stack_chk_guard, f7uOxY9mM1U#C#D), but at runtime those
+// two addresses hold WebKit-internal code pointers -- they are in .data.rel.ro
+// among the vtables, not in the import GOT. Sweeping the RW data segments for
+// pointers leaving the module and testing them against the known symbol
+// offsets found the real slots exactly one 16KB page higher, independently for
+// both symbols:
+//   __stack_chk_guard  reloc 0x03E14910 -> real 0x03E18910   (+0x4000)
+//   memset             reloc 0x03E16EE0 -> real 0x03E1AEE0   (+0x4000)
+// Measured values: guard 0x80e5411d0 -> libkernel_web 0x80e4d4000,
+// memset 0x82b9cce70 -> libSceLibcInternal 0x82b9b8000; both 0x4000-aligned and
+// both inside their module's image.  Using the raw r_offset instead produced
+// lk=0x835778020 / lc=0x8356fcd00 on a live 7.00 run -- neither 0x4000-aligned,
+// because both reads landed in .data.rel.ro and returned WebKit-internal
+// pointers.  If another firmware's profile is ever derived from the relocation
+// tables, check for this page bias before trusting r_offset.
+const OFFSET_wk_memset_import                  = 0x03E1AEE0;
+const OFFSET_wk___stack_chk_guard_import       = 0x03E18910;
 
 const OFFSET_lk___stack_chk_guard              = 0x0006D1D0;
 /* __thread_list, derived from this firmware's own libkernel_web.sprx.
