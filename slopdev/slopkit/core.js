@@ -18,7 +18,11 @@ const HOLDER_BYTES = 0x40;
 // storage.  At 9,000,000 slots the corrupted Symbol copy is consistently
 // 924,176 characters.  Reducing it to 2,000,000 changes that copy to a bogus
 // 17,701,392 characters and makes the safe retry exhaust the WebProcess.
-const CARRIER_SLOTS = 9000000;
+// Overridable so a diagnostic page can sweep the geometry on a firmware whose
+// JSC differs from 9.00's. Absent an override this is exactly 9000000.
+const CARRIER_SLOTS = (typeof globalThis.__slopCarrierSlots === "number"
+    && globalThis.__slopCarrierSlots > 0)
+    ? globalThis.__slopCarrierSlots : 9000000;
 const CARRIER_BYTES = CARRIER_SLOTS * 8;
 const CAPTURE_DELAY_MS = 50;
 const COMPOSE_DELAY_MS = 100;

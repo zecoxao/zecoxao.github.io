@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slopkit2 probe</title>
+<style>
+  body { background:#111; color:#ddd; font:14px/1.45 monospace; margin:0; padding:12px; }
+  h2 { font-size:15px; margin:14px 0 6px; color:#8cf; }
+  .btn { display:inline-block; background:#245; color:#fff; padding:8px 16px;
+         margin:4px 6px 4px 0; border:1px solid #58a; cursor:pointer; }
+  .btn:focus { outline:2px solid #8cf; }
+  pre { white-space:pre-wrap; word-break:break-all; margin:0; }
+  .prev { color:#fc6; }
+  .fail { color:#f66; }
+  .ok   { color:#6f6; }
+</style>
+</head>
+<body>
+<h2>previous run (survives the WebProcess crash)</h2>
+<pre id="prev" class="prev">(none recorded)</pre>
+
+<h2>environment</h2>
+<pre id="env"></pre>
+
+<h2>carrier slots</h2>
+<div>
+  <a tabindex="0" class="btn" data-slots="9000000">9,000,000 (9.00 default)</a>
+  <a tabindex="0" class="btn" data-slots="4500000">4,500,000</a>
+  <a tabindex="0" class="btn" data-slots="2000000">2,000,000</a>
+  <a tabindex="0" class="btn" data-slots="1000000">1,000,000</a>
+</div>
+<div><a tabindex="0" class="btn" id="clear">clear recorded trail</a></div>
+
+<h2>live trail</h2>
+<pre id="log"></pre>
+
+<script>
+// The point of this page: every breadcrumb is committed to localStorage BEFORE
+// the next step runs, so when the WebProcess dies the last completed step is
+// still readable after the console reboots and the page is re-opened.
+const TRAIL_KEY = "probe700:trail";
+const logEl = document.getElementById("log");
+const prevEl = document.getElementById("prev");
+const envEl = document.getElementById("env");
+
+function readTrail() {
+    try { return JSON.parse(localStorage.getItem(TRAIL_KEY) || "[]"); }
+    catch (e) { return []; }
+}
+function writeTrail(t) {
+    try { localStorage.setItem(TRAIL_KEY, JSON.stringify(t.slice(-400))); }
+    catch (e) { }
+}
+
+const prev = readTrail();
+if (prev.length) {
+    prevEl.textContent = prev.join("\n")
+        + "\n\n>>> LAST STEP BEFORE THE PROCESS DIED: " + prev[prev.length - 1];
+}
+
+let trail = [];
+function mark(tag, detail) {
+    const line = tag + (detail ? " " + detail : "");
+    trail.push(line);
+    writeTrail(trail);              // commit BEFORE doing anything else
+    logEl.textContent += line + "\n";
+}
+
+const ua = navigator.userAgent;
+const m = /PlayStation 5\/(\d+\.\d+)/.exec(ua);
+window.fw_str = m ? m[1] : "";
+window.fw_float = parseFloat(window.fw_str);
+envEl.textContent =
+    "userAgent : " + ua + "\n" +
+    "fw_str    : " + (window.fw_str || "(NO MATCH -- the UA regex failed)") + "\n" +
+    "profile   : offsets/" + window.fw_str + ".js";
+
+window.SLOP_ROOT = "";
+window.SLOP_DIR = "slopkit/";
+
+document.getElementById("clear").addEventListener("click", function () {
+    try { localStorage.removeItem(TRAIL_KEY); } catch (e) { }
+    prevEl.textContent = "(cleared)";
+});
+
+function loadOffsets() {
+    return new Promise(function (res, rej) {
+        const s = document.createElement("script");
+        s.src = "offsets/" + window.fw_str + ".js?probe=1";
+        s.addEventListener("load", function () { res(s.src); });
+        s.addEventListener("error", function () {
+            rej(new Error("offsets 404: " + s.src));
+        });
+        document.head.appendChild(s);
+    });
+}
+
+async function run(slots) {
+    trail = [];
+    logEl.textContent = "";
+    mark("PROBE-START", "slots=" + slots + " fw=" + window.fw_str);
+
+    if (!window.fw_str) { mark("PROBE-ABORT", "no firmware in userAgent"); return; }
+
+    try {
+        const src = await loadOffsets();
+        mark("OFFSETS-LOADED", src.split("/").pop());
+    } catch (e) {
+        mark("OFFSETS-FAILED", String(e && e.message));
+        return;
+    }
+    mark("OFFSETS-SANITY",
+        "wk_vtable=0x" + (typeof OFFSET_wk_vtable_first_element === "number"
+            ? OFFSET_wk_vtable_first_element.toString(16) : "?")
+        + " lk_thread_list=0x" + (typeof OFFSET_lk__thread_list === "number"
+            ? OFFSET_lk__thread_list.toString(16) : "?"));
+
+    globalThis.__slopCarrierSlots = slots;
+
+    let core;
+    try {
+        core = await import("./slopkit/core.js?probe=1");
+        mark("CORE-IMPORTED", "");
+    } catch (e) {
+        mark("CORE-IMPORT-FAILED", String(e && e.message));
+        return;
+    }
+
+    // Everything past here can take the WebProcess down natively. The trail is
+    // already on disk, so the last mark tells us exactly where.
+    try {
+        await core.establishPrimitive({
+            maxAttempts: 1,
+            onEvent: function (tag, detail) { mark(tag, String(detail || "")); }
+        });
+        mark("PRIMITIVE-OK", "");
+    } catch (e) {
+        mark("PRIMITIVE-THREW", String(e && e.message));
+    }
+}
+
+Array.prototype.forEach.call(document.querySelectorAll("[data-slots]"), function (b) {
+    b.addEventListener("click", function () {
+        run(parseInt(b.getAttribute("data-slots"), 10));
+    });
+});
+</script>
+</body>
+</html>
