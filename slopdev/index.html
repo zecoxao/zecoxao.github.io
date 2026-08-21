@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>slopkit2</title>
-<link rel="stylesheet" href="main.css?v=28">
+<link rel="stylesheet" href="main.css?v=29">
 <link rel="preload" href="slopkit/cat.jpg" as="image">
 <link rel="preload" href="slopkit/mmhmm-cats-ps5.gif" as="image">
 
@@ -135,7 +135,7 @@ window.SLOP_DIR = "slopkit/";
     </div>
 
 <script src="slopkit/rop.js"></script>
-<script src="slopkit/main.js?v=28"></script>
+<script src="slopkit/main.js?v=29"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = window.__offsetsScript;
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -511,6 +511,8 @@ function screenLine(text) {
 
 const CONCISE_SCREEN_SHOW = {
     "PROBE-WAIT": 1,
+    "PROBE-W": 1,
+    "GADGET-AUDIT": 1,
     "PROBE-SJ": 1,
     "PROBE-AUTO": 1,
     "PROBE-VERDICT": 1,
