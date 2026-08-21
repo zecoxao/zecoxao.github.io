@@ -3,10 +3,14 @@
 // file offset = rva + 0x4000
 
 // host-constructor candidates: webkitBase = nativeCtorAddr - hc
-// JSC::callHostFunctionAsConstructor: the only caller of
-// createNotAConstructorError (0x012A16A0) that is a bare
-// (JSGlobalObject*, CallFrame*) tail-call into throwVMError.
-const OFFSET_wk_host_constructor_candidates = [0x003B5780];
+// parseInt's NativeExecutable::m_constructor is callHostFunctionAsConstructor
+// (JSObject.cpp passes it to JSFunction::create for every putDirectNativeFunction).
+// This build has clang CFI, so the *address-taken* value is the function's
+// jump-table entry, NOT its body: the body is at 0x003B5780 and three 8-byte
+// `jmp rel32; int3 int3 int3` slots point at it. Only 0x00010AE8 yields a
+// 0x4000-aligned base (measured ctor 0x835470ae8 -> base 0x835460000); main.js
+// rejects the other two on alignment, exactly as it does for 9.00's three.
+const OFFSET_wk_host_constructor_candidates = [0x00010AE8, 0x00010590, 0x000114C0];
 // Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
 const OFFSET_wk_vtable_first_element     = 0x006E6910;
 // GOT slots: JMPREL entry for memset (8zTFvBIAIN8#P#Q) and the RELA
