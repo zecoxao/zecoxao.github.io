@@ -1,8 +1,18 @@
 // 07.00 -- generated from libSceNKWebKit / libkernel_web /
 // libSceLibcInternal. file offset = rva + 0x4000
 
-// no host-constructor value for this firmware
-const OFFSET_wk_host_constructor_candidates = [];
+// host-constructor candidates: webkitBase = nativeCtorAddr - hc
+// parseInt's NativeExecutable::m_constructor is callHostFunctionAsConstructor
+// (JSObject.cpp passes it to JSFunction::create for every putDirectNativeFunction).
+// This build has clang CFI, so the *address-taken* value is the function's
+// jump-table entry, NOT its body: the body is at 0x003B5780 and three 8-byte
+// `jmp rel32; int3 int3 int3` slots point at it. Only 0x00010AE8 yields a
+// 0x4000-aligned base; main.js rejects the other two on alignment, exactly as
+// it does for 9.00's three.
+// Confirmed twice on a live 7.00 devkit: ctor 0x835470ae8 -> base 0x835460000,
+// and ctor 0x83460cae8 -> base 0x8345fc000, the latter matching the base the
+// vtable path derived in the same run.
+const OFFSET_wk_host_constructor_candidates = [0x00010AE8, 0x00010590, 0x000114C0];
 /* Re-derived 2026-08-21. The previous value came from a 'unique mov eax,0x37; ret'
  * heuristic and was WRONG for this whole range - on 7.00 it pointed at 0x65C4E0,
  * which is slot 0 of a single 3-slot vtable, not a DOM element. main.js does:

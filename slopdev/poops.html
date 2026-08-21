@@ -1231,10 +1231,32 @@ function assertBases() {
         flushMark("BASE-XCHECK-PRE", "slot=0x" + slot.toString() + "-next=read8");
         const seen = P.read8(slot);
         const derived = seen.sub32(OFFSET_lk___stack_chk_guard);
-        const agree = derived.low === P.libKernelBase.low
+        let agree = derived.low === P.libKernelBase.low
             && derived.hi === P.libKernelBase.hi;
         flushMark("BASE-XCHECK", "derived-lk=0x" + derived.toString()
             + "-prepare-lk=0x" + P.libKernelBase.toString() + "-agree=" + agree);
+        // prepare() resolves the import slot with a page-bias search (main.js
+        // resolve_module_base): when a profile's slot rva comes straight from
+        // DT_RELA r_offset it can be a whole 16KB page off, and the real slot
+        // is found nearby. A naive re-read at the profile rva then legitimately
+        // disagrees, so re-check the same window before calling it a failure.
+        if (!agree) {
+            for (let page = 1; page <= 8 && !agree; page++) {
+                for (const dir of [1, -1]) {
+                    const rva = OFFSET_wk___stack_chk_guard_import + dir * page * 0x4000;
+                    if (rva < 0) continue;
+                    const d2 = P.read8(P.libSceNKWebKitBase.add32(rva))
+                        .sub32(OFFSET_lk___stack_chk_guard);
+                    if (d2.low === P.libKernelBase.low && d2.hi === P.libKernelBase.hi) {
+                        flushMark("BASE-XCHECK-BIAS", "profile-rva=0x"
+                            + OFFSET_wk___stack_chk_guard_import.toString(16)
+                            + "-real-rva=0x" + rva.toString(16) + "-agree=true");
+                        agree = true;
+                        break;
+                    }
+                }
+            }
+        }
         if (!agree)
             throw new Error("libkernel base disagreement");
     }

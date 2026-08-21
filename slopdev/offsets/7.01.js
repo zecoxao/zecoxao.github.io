@@ -18,8 +18,16 @@ const OFFSET_wk_host_constructor_candidates = [];
  * previous (wrong): 0x0065C4E0 */
 const OFFSET_wk_vtable_first_element     = 0x0003D720;
 
-const OFFSET_wk_memset_import                  = 0x03E16EE0;
-const OFFSET_wk___stack_chk_guard_import       = 0x03E14910;
+// Import GOT slots. The generator emits DT_JMPREL/DT_RELA r_offset, which on
+// this WebKit build is one 16KB page BELOW the slot the loader actually
+// patched -- see offsets/7.00.js for the measurement. This profile's raw
+// r_offsets (0x03E16EE0 / 0x03E14910) and vtable slot0 (0x3D720) are byte-for-
+// byte identical to 7.00's, i.e. the same data-segment layout, so the same
+// +0x4000 correction is applied here. INFERRED, not measured on a console:
+// main.js's page-bias search will correct it either way and log GOT-PAGE-BIAS
+// if this inference is wrong.
+const OFFSET_wk_memset_import                  = 0x03E1AEE0;
+const OFFSET_wk___stack_chk_guard_import       = 0x03E18910;
 
 const OFFSET_lk___stack_chk_guard              = 0x0006D1D0;
 /* __thread_list, derived from this firmware's own libkernel_web.sprx.
