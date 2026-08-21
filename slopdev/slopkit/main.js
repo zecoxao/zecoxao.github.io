@@ -1271,6 +1271,25 @@ async function prepare(p) {
         };
 
         try {
+            /* Syscalls first, because they are the most informative test left
+               and each crash costs a whole reload.
+               write_result -- `mov [rdi], rax` -- is already trusted: every
+               launch_chain does three push_write8 calls and then longjmp
+               returns through the values they wrote, and the worker comes back
+               correctly, so that store demonstrably works. getpid therefore
+               really did return -1 rather than being mis-captured.
+               getpid/getuid/getgid/getppid cannot fail and have known-shaped
+               results: all four wrong means the calling convention is wrong,
+               one wrong means only that stub is. */
+            for (const [nm, nr, ck] of [
+                ["syscall:getpid", 0x14, (v) => v.hi === 0 && v.low > 0 && v.low < 0x100000],
+                ["syscall:getuid", 0x18, (v) => v.hi === 0 && v.low < 0x100000],
+                ["syscall:getgid", 0x2f, (v) => v.hi === 0 && v.low < 0x100000],
+                ["syscall:getppid", 0x1b, (v) => v.hi === 0 && v.low < 0x100000]]) {
+                if (!(nr in syscall_map)) continue;
+                await runTest(nm, () => { chain.fcall(syscalls[nr]); }, ck);
+            }
+
             p.write8(cell, new int64(0xCAFEBABE, 0x00001234));
             await runTest("mov rax,[rax]", () => {
                 chain.push(gadgets["pop rax"]); chain.push(cell);
@@ -1304,19 +1323,6 @@ async function prepare(p) {
                 chain.push_copy8(out, cell);
             }, (v) => eq(v, 0x55667788, 0x00009900), true);
 
-            /* getpid came back 0xFFFFFFFF. Cross-check the return path with
-               three more syscalls that also cannot fail and have known-shaped
-               results: if all four return -1 the calling convention itself is
-               wrong, whereas one bad answer means just that stub is wrong. */
-            for (const [nm, nr, ck] of [
-                ["syscall:getpid", 0x14, (v) => v.hi === 0 && v.low > 0 && v.low < 0x100000],
-                ["syscall:getuid", 0x18, (v) => v.hi === 0 && v.low < 0x100000],
-                ["syscall:getgid", 0x2f, (v) => v.hi === 0 && v.low < 0x100000],
-                ["syscall:getppid", 0x1b, (v) => v.hi === 0 && v.low < 0x100000]]) {
-                if (!(nr in syscall_map)) continue;
-                await runTest(nm, () => { chain.fcall(syscalls[nr]); }, ck);
-            }
-
             crumb("g:done");
             jbmark("GADGET-SELFTEST", bad.length
                 ? "FAILED " + bad.length + ": " + bad.join("  ")
@@ -1339,4 +1345,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=34`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=35`);

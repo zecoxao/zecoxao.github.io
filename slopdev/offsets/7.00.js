@@ -185,6 +185,8 @@ let wk_gadgetmap = {
 	"shl rax, 3": 0x02488363,
 	"shl rax, 4": 0x00572686,
 	"shr rax, 3": 0x01308FC3,
+	// BROKEN on this build too: crashed the chain at launch #3/9, the test
+	// immediately after shl rax,3 / shr rax,3 were already decided.
 	"shr rax, 4": 0x02D60B54,
 	"infloop": 0x000037D1,
 };
