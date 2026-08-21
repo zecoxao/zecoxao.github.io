@@ -284,6 +284,32 @@ async function prepare(p) {
             + " independent of which store the chain uses)");
     }
 
+    /* Dump everything already known, NOW, before anything can crash.
+       jbmarks are queued and flushed periodically, so every mark emitted after
+       the last flush dies with the process -- which is why TEXT-MAP and the
+       GADGET-SELFTEST summary have never appeared on screen even though they
+       ran. Their results are in localStorage regardless, so replay them at the
+       top of the run where they are guaranteed to be visible. */
+    try {
+        const rd = ps.rd || {};
+        const rdk = Object.keys(rd);
+        if (rdk.length)
+            jbmark("TEXT-MAP", rdk.map(k => k + "=" + rd[k]).join(" ")
+                + " || readable => DATA (no gadget up there is real);"
+                + " FAULT => execute-only code");
+        const gt = ps.gt || {};
+        const gk = Object.keys(gt);
+        if (gk.length) {
+            const okN = gk.filter(k => gt[k] === "ok");
+            const badN = gk.filter(k => gt[k] !== "ok");
+            jbmark("GADGET-STATE", "ok=" + okN.length + " bad=" + badN.length
+                + " | BAD: " + (badN.map(k => k.replace(/^exec:|^syscall:/, "")
+                    + "=" + gt[k]).join(" ") || "none"));
+            jbmark("GADGET-OKLIST", okN.map(k =>
+                k.replace(/^exec:|^syscall:/, "")).join(" ") || "none yet");
+        }
+    } catch (e) {  }
+
     const verdictOf = (st) => ps.done[st] || ((ps.tries[st] || 0) >= 2 ? "CRASH" : null);
     const G = (n) => "0x" + wk_gadgetmap[n].toString(16);
     const say = (m) => jbmark("PROBE-VERDICT", m);
@@ -383,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=41 | if this is not the version just"
+    jbmark("BUILD", "main.js v=42 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1504,4 +1530,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=41`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=42`);
