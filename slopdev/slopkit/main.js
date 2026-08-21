@@ -1275,6 +1275,41 @@ async function prepare(p) {
         };
 
         try {
+            /* Where does executable text actually end?
+               -----------------------------------------------------------
+               Everything <= 0x12A439 executes, everything >= 0x214613 faults.
+               Two very different explanations fit that, and they call for
+               opposite fixes:
+                 (a) text ends around there and the rest of the image is data,
+                     so those "gadgets" are not code at all and no address in
+                     that region is usable;
+                 (b) it IS code, but the profile's file->rva conversion drifts
+                     past some point -- exactly what the import GOT did when it
+                     needed +0x4000 -- so the addresses are merely biased.
+               Text is execute-only and data is readable, so a single read
+               separates them: if the address reads back, it is data and (a) is
+               right; if the read faults, it is executable and (b) is.
+               Resumable like the gadget tests -- a faulting read kills the
+               process, and the pending mark records that as FAULT. */
+            ps.rd = ps.rd || {};
+            for (const k in ps.rd) if (ps.rd[k] === "pending") ps.rd[k] = "FAULT";
+            psSave();
+            for (const rva of [0x214613, 0x572686, 0x35F9049]) {
+                const key = "0x" + rva.toString(16);
+                if (ps.rd[key]) continue;
+                crumb("rd:" + key);
+                ps.rd[key] = "pending";
+                psSave();
+                const v = p.read8(libSceNKWebKitBase.add32(rva));
+                ps.rd[key] = "readable:" + (v.low & 0xffff).toString(16);
+                psSave();
+                break;                       // one per run; a fault ends it anyway
+            }
+            jbmark("TEXT-MAP", Object.keys(ps.rd).map(k => k + "=" + ps.rd[k]).join(" ")
+                + " || readable => that region is DATA, so no gadget there is"
+                + " usable; FAULT => it is execute-only code and the addresses"
+                + " are merely biased");
+
             /* Syscalls first, because they are the most informative test left
                and each crash costs a whole reload.
                write_result -- `mov [rdi], rax` -- is already trusted: every
@@ -1401,4 +1436,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=36`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=37`);

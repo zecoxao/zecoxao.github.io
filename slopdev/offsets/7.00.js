@@ -161,6 +161,8 @@ let wk_gadgetmap = {
 	"ret": 0x00000042,
 	"pop rdi": 0x00031434,
 	"pop rsi": 0x000B7098,
+	// BROKEN: crashed at launch #7/10. With mov rax,[rax] 0x12A439 working,
+	// this brackets the executable boundary to 0x12A439 .. 0x214613.
 	"pop rdx": 0x00214613,
 	"pop rcx": 0x00032473,
 	"pop rax": 0x000A6CAB,
