@@ -121,7 +121,8 @@ function analyseHeader(hex) {
 
 function analyseTrail(lines) {
     for (let i = lines.length - 1; i >= 0; i--) {
-        const m = /hex=([0-9a-fA-F]{32,})/.exec(lines[i]);
+        const m = /hex=([0-9a-fA-F]{32,})/.exec(lines[i])
+            || /RW-HEADER-HEX\s+([0-9a-fA-F]{32,})/.exec(lines[i]);
         if (m) return analyseHeader(m[1]);
     }
     return null;
@@ -139,7 +140,7 @@ function mark(tag, detail) {
     trail.push(line);
     writeTrail(trail);              // commit BEFORE doing anything else
     logEl.textContent += line + "\n";
-    if (/hex=[0-9a-fA-F]{32,}/.test(line)) {
+    if (/(hex=|RW-HEADER-HEX\s+)[0-9a-fA-F]{32,}/.test(line)) {
         try {
             hdrEl.textContent = analyseTrail([line]);
             localStorage.setItem(HDR_KEY, hdrEl.textContent);
