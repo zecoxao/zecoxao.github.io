@@ -228,7 +228,7 @@ otherwise.</div>
 <div id="console" hidden></div>
 
 <script src="rop.js"></script>
-<script src="main.js?v=21"></script>
+<script src="main.js?v=22"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="../offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -540,6 +540,8 @@ function screenLine(text) {
 }
 
 const CONCISE_SCREEN_SHOW = {
+    "PREV-CRUMBS": 1,
+    "WORKER-RET-FINGERPRINT": 1,
     "POOPS-BOOT": 1,
     "OFFSETS-READY": 1,
     "TRIGGER-ARMED": 1,
