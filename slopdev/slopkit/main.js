@@ -259,10 +259,12 @@ async function prepare(p) {
         const cand = [];   // callee-slot hits with their CallFrame fields
 
         // Is v a pointer into some thread stack (a plausible callerFrame)?
+        // int64 has no 64-bit subtract, so compare hi/low by hand.
         function inAnyStack(v) {
             for (const [b, sz] of stacks) {
-                const rel = v.sub32(b);
-                if (rel.hi === 0 && (rel.low >>> 0) < sz && (v.low & 7) === 0) return true;
+                if ((v.hi >>> 0) !== (b.hi >>> 0)) continue;
+                const rel = (v.low >>> 0) - (b.low >>> 0);   // exact JS integer
+                if (rel >= 0 && rel < sz && (v.low & 7) === 0) return true;
             }
             return false;
         }
@@ -310,6 +312,8 @@ async function prepare(p) {
             const argcLow = c.argc.low >>> 0;
             // a real comparator CallFrame: callerFrame is a stack ptr above cf,
             // argumentCountIncludingThis is small (3 = this,a,b).
+            const argIsMarker = (c.arg0.hi >>> 0) === 0xffff0000
+                && ((c.arg0.low >>> 0) === (M0 >>> 0) || (c.arg0.low >>> 0) === (M1 >>> 0));
             const looksReal = callerStack && argcLow >= 1 && argcLow <= 0x10;
             jbmark("SELF-CAND-F", "#" + n + "-cf=0x" + c.cf.toString()
                 + "-caller=0x" + c.caller.toString() + (callerStack ? "(stk)" : "")
@@ -317,7 +321,9 @@ async function prepare(p) {
                 + "-argc=0x" + c.argc.toString()
                 + "-arg0=0x" + c.arg0.toString()
                 + "-looksReal=" + looksReal);
-            if (looksReal && !good) good = c;
+            // an arg-confirmed frame wins outright; else first structural match.
+            if (looksReal && argIsMarker) good = c;
+            else if (looksReal && !good) good = c;
         }
         if (!good)
             throw new Error("selfstack: " + cand.length + " callee refs, none with "
