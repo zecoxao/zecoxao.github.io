@@ -224,48 +224,57 @@ async function dumpModuleSlots(core, carrier) {
             worker.onmessage = function () { res(1); };
             worker.postMessage(0);
         });
-        let t = rd(lk + THREAD_LIST), stack = 0, n = 0;
-        while (t && n++ < 64) {
+        // main.js's find_worker() takes the FIRST thread with a 0x80000
+        // stack. Enumerate the whole list instead and show, per thread, how
+        // many libkernel pointers its stack holds -- a thread parked inside
+        // libkernel has return addresses there, an unparked one does not.
+        const threads = [];
+        let t = rd(lk + THREAD_LIST), n = 0;
+        while (t && n < 64) {
             carrier.aim(t);
             const v = carrier.view;
             const nxt = qw(v, 0x38), sa = qw(v, 0xA8), sz = qw(v, 0xB0);
             carrier.restore();
-            if (sz === 0x80000) { stack = sa; break; }
-            t = nxt;
+            threads.push([n, t, sa, sz]);
+            t = nxt; n++;
         }
-        out += "worker stack = " + hx(stack) + "  (walked " + n + " threads)\n\n";
-        if (stack) {
-            // Do not guess where the parked frames are: memory below the
-            // live RSP is not zeroed, so "deepest non-zero" is only a
-            // high-water mark. Sweep the WHOLE stack for libkernel pointers
-            // and report every one with its offset; the return address we want
-            // is whichever of them follows a call instruction, checked offline.
-            const rows = [];
+        out += "thread list (" + threads.length + " entries):\n";
+        for (const th of threads)
+            out += "  #" + th[0] + "  pthread=" + hx(th[1])
+                 + "  stack=" + hx(th[2]) + "  size=" + hx(th[3])
+                 + (th[3] === 0x80000 ? "   <= find_worker would pick"
+                    + (th[0] === threads.findIndex(function (q) { return q[3] === 0x80000; })
+                       ? " THIS" : "") : "") + "\n";
+        out += "\n";
+
+        for (const th of threads) {
+            if (th[3] !== 0x80000 || !th[2]) continue;
+            const st = th[2];
             const seen = {};
-            let lkTotal = 0;
+            let tot = 0;
             for (let off = 0; off < 0x80000; off += 0x100) {
-                carrier.aim(stack + off);
+                carrier.aim(st + off);
                 const v = carrier.view;
                 for (let i = 0; i < 0x100; i += 8) {
                     const x = qw(v, i);
                     if (x >= lk && x < lk + 0x80000) {
+                        tot++;
                         const rva = x - lk;
-                        lkTotal++;
-                        seen[rva] = (seen[rva] || 0) + 1;
-                        if (rows.length < 110)
-                            rows.push("  stack+0x" + (off + i).toString(16)
-                                      + "   lk+0x" + rva.toString(16));
+                        if (rva !== 0x6D1D0) {
+                            if (!seen[rva]) seen[rva] = [];
+                            if (seen[rva].length < 3) seen[rva].push(off + i);
+                        }
                     }
                 }
                 carrier.restore();
             }
-            out += "FULL-STACK sweep for libkernel pointers\n"
-                 + "  total found: " + lkTotal + "\n\n"
-                 + rows.join("\n") + "\n\n";
-            out += "unique RVAs (count), lowest first:\n";
+            out += "thread #" + th[0] + " stack " + hx(st)
+                 + ": " + tot + " libkernel pointers\n";
             const keys = Object.keys(seen).map(Number).sort(function (x, y) { return x - y; });
             for (const k of keys)
-                out += "  lk+0x" + k.toString(16) + "   x" + seen[k] + "\n";
+                out += "    lk+0x" + k.toString(16) + "  at stack+0x"
+                     + seen[k].map(function (o) { return o.toString(16); }).join(",0x") + "\n";
+            out += "\n";
         }
     } catch (e) {
         out += "worker probe threw: " + (e && e.message) + "\n";
