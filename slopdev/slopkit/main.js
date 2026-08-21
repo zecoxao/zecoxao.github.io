@@ -204,135 +204,113 @@ function crumbsTake() {
 
 async function prepare(p) {
 
-    const attempts = (function () {
-        try { return JSON.parse(localStorage.getItem("slopkit-probe-tries") || "{}"); }
-        catch (e) { return {}; }
-    })();
-    const noteAttempt = (k) => {
-        attempts[k] = (attempts[k] || 0) + 1;
-        try { localStorage.setItem("slopkit-probe-tries", JSON.stringify(attempts)); }
-        catch (e) {  }
+    /* Persistent ladder state.
+       -----------------------------------------------------------------------
+       The crumb trail only describes the LAST run, so any run that does not
+       itself execute a probe -- a verdict run, or one that falls through to the
+       normal chain -- overwrites it and the ladder restarts from the beginning.
+       That is exactly what happened after the probe=w verdict: the next trail
+       was a plain null-chain death and the ladder went back to probe=pivot,
+       re-answering three settled questions.
+       So fold each trail into a persistent record and decide from THAT. Each
+       stage ends up either decided (SILENT/ANSWERED, or CRASH after two
+       unfinished attempts) or untried, and the ladder simply runs the first
+       undecided stage. Monotonic, and immune to intervening runs. */
+    const PS_KEY = "slopkit-probe-state";
+    const STAGES = ["pivot", "rsp", "w", "p", "g1", "g2", "sj"];
+    let ps;
+    try { ps = JSON.parse(localStorage.getItem(PS_KEY) || "{}"); } catch (e) { ps = {}; }
+    ps.done = ps.done || {};
+    ps.tries = ps.tries || {};
+    const psSave = () => {
+        try { localStorage.setItem(PS_KEY, JSON.stringify(ps)); } catch (e) {  }
     };
 
     const prevCrumbs = crumbsTake();
     if (prevCrumbs) {
         const parts = prevCrumbs.split(">");
-        const last = parts[parts.length - 1];
         jbmark("PREV-CRUMBS", "died-after=" + parts.slice(-5).reverse().join(" <= ")
             + " (" + parts.length + " steps)");
-        /* Self-sequencing bisect. renderNav() is stubbed in this build, so the
-           console has no way to reach a ?probe= URL -- escalate automatically
-           on the run after a crash instead, driven by where the last one died. */
-        /* The null chain is bracketed by nc .. nc-ok, and launch_chain writes
-           its own crumbs (w1/w2/armed/pm) in between -- so a dead null chain
-           ends the trail at 'pm', not at 'nc'. Test for the missing CLOSING
-           crumb, not for the last one. */
-        /* Ladder by the FURTHEST stage already attempted. Every probe runs
-           inside launch_chain, which is reached from chain.run(), so every
-           probe trail also contains 'nc' with no 'nc-ok'. Matching on that
-           first sent a run that had already reached probe=sj back to
-           probe=pivot. Rank the stages and advance from the highest seen. */
-        const stageOf = (x) =>
-            x.indexOf("probe-g2") === 0 ? 7
-            : x.indexOf("probe-g1") === 0 ? 6
-            : x.indexOf("probe-p") === 0 ? 5
-            : x.indexOf("probe-sj") === 0 ? 4
-            : x.indexOf("probe-w") === 0 ? 3
-            : x.indexOf("probe-rsp") === 0 ? 2
-            : x.indexOf("probe-pivot") === 0 ? 1 : 0;
-        const maxStage = parts.reduce((m, x) => Math.max(m, stageOf(x)), 0);
-        const diedInNullChain = parts.indexOf("nc") !== -1
-            && parts.indexOf("nc-ok") === -1;
-        const sawSilent = (pfx) => parts.indexOf(pfx + "-SILENT") !== -1;
-        const sjFinished = parts.some(x => x.indexOf("probe-sj-SILENT") === 0
-            || x.indexOf("probe-sj-ANSWERED") === 0);
-
-        const wFinished = parts.some(x => x.indexOf("probe-w-SILENT") === 0
-            || x.indexOf("probe-w-ANSWERED") === 0);
-        const fin = (pfx) => parts.some(x => x.indexOf(pfx + "-SILENT") === 0
-            || x.indexOf(pfx + "-ANSWERED") === 0);
-        const crashedTwice = (k, pfx) => (attempts[k] || 0) >= 2 && !fin(pfx);
-
-        // --- sub-bisect of the three write gadgets --------------------------
-        if (!PROBE && maxStage === 7) {
-            jbmark("PROBE-VERDICT", fin("probe-g2")
-                ? "pop rdi, pop rsi and infloop are ALL individually correct, so"
-                + " `mov [rdi], rsi` (0x" + wk_gadgetmap["mov [rdi], rsi"].toString(16)
-                + ") is the broken gadget in offsets/" + window.fw_str + ".js."
-                : "pop rsi (0x" + wk_gadgetmap["pop rsi"].toString(16) + ") is the"
-                + " broken gadget: alone with infloop after it, it still crashes.");
-        } else if (!PROBE && maxStage === 6 && crashedTwice("g1", "probe-g1")) {
-            jbmark("PROBE-VERDICT", "pop rdi (0x" + wk_gadgetmap["pop rdi"].toString(16)
-                + ") is the broken gadget: alone with infloop after it, it still"
-                + " crashes -- it is not `5F C3`, most likely it pops more than"
-                + " one register and desyncs the chain.");
-        } else if (!PROBE && maxStage === 6 && fin("probe-g1")) {
-            PROBE = "g2";
-            jbmark("PROBE-AUTO", "pop rdi is fine on its own -- testing pop rsi alone");
-        } else if (!PROBE && maxStage === 6) {
-            PROBE = "g1";
-            jbmark("PROBE-AUTO", "repeating probe=g1");
-        } else if (!PROBE && maxStage === 5 && fin("probe-p")) {
-            jbmark("PROBE-VERDICT", "both pops are correct (probe=p parked cleanly),"
-                + " so `mov [rdi], rsi` (0x"
-                + wk_gadgetmap["mov [rdi], rsi"].toString(16) + ") is the broken"
-                + " gadget in offsets/" + window.fw_str + ".js. Re-derive it.");
-        } else if (!PROBE && maxStage === 5 && crashedTwice("p", "probe-p")) {
-            PROBE = "g1";
-            jbmark("PROBE-AUTO", "both pops together crash -- testing pop rdi alone");
-        } else if (!PROBE && maxStage === 5) {
-            PROBE = "p";
-            jbmark("PROBE-AUTO", "repeating probe=p");
-        } else if (!PROBE && maxStage === 3 && !wFinished && (attempts["w"] || 0) >= 2) {
-            PROBE = "p";
-            jbmark("PROBE-AUTO", "probe=w crashed twice, so one of pop rdi / pop rsi"
-                + " / mov [rdi],rsi is wrong -- sub-bisecting: probe=p runs the two"
-                + " pops with infloop straight after, which also catches a gadget"
-                + " that pops more registers than the profile claims");
-        } else if (!PROBE && maxStage === 4 && !sjFinished
-            && (attempts["sj"] || 0) >= 2 && wFinished) {
-            jbmark("PROBE-VERDICT", "probe=sj has CRASHED twice while probe=w"
-                + " reported cleanly, so the write gadgets are fine and setjmp"
-                + " (libc+0x" + OFFSET_lc_setjmp.toString(16) + ") is the"
-                + " culprit -- wrong address, or not setjmp at all.");
-        } else if (!PROBE && maxStage === 4 && !sjFinished) {
-            /* probe=sj = probe=rsp + write gadgets + setjmp, and it crashed
-               rather than reporting. Drop back one rung and run the writes on
-               their own, which separates the two. */
-            PROBE = "w";
-            jbmark("PROBE-AUTO", "probe=sj CRASHED instead of reporting, so the"
-                + " fault is in the write gadgets or setjmp -- dropping to"
-                + " probe=w, which runs the writes alone");
-        } else if (!PROBE && maxStage === 3 && !parts.some(x =>
-            x.indexOf("probe-w-SILENT") === 0 || x.indexOf("probe-w-ANSWERED") === 0)) {
-            PROBE = "w";
-            jbmark("PROBE-AUTO", "probe=w was interrupted -- repeating it");
-        } else if (!PROBE && maxStage === 3) {
-            PROBE = "sj";
-            jbmark("PROBE-AUTO", "the write gadgets are settled -- re-running"
-                + " probe=sj to read the jmp_buf back");
-        } else if (!PROBE && maxStage === 2 && sawSilent("probe-rsp")) {
-            PROBE = "w";
-            jbmark("PROBE-AUTO", "pop rsp and the stack switch both work, so the"
-                + " fault is the write gadgets or setjmp -- escalating to probe=w,"
-                + " which tests the writes alone");
-        } else if (!PROBE && maxStage === 1 && sawSilent("probe-pivot")) {
-            PROBE = "rsp";
-            jbmark("PROBE-AUTO", "the hijacked return address executes cleanly"
-                + " (infloop parked the worker, no crash) -- escalating to"
-                + " probe=rsp to test `pop rsp` and the stack switch");
-        } else if (!PROBE && maxStage === 0 && diedInNullChain) {
-            PROBE = "pivot";
-            jbmark("PROBE-AUTO", "the EMPTY chain died (nc with no nc-ok), so the"
-                + " syscall stub is exonerated -- setjmp/longjmp or the pivot"
-                + " itself is at fault. Escalating to probe=pivot this run");
-        } else if (!PROBE && maxStage >= 1 && !sawSilent("probe-pivot")
-            && !sawSilent("probe-rsp") && !sjFinished) {
-            jbmark("PROBE-VERDICT", "a probe run CRASHED at '" + parts[parts.length - 1]
-                + "' -- that stage is the culprit; see its comment in main.js");
+        if (parts.indexOf("nc-ok") !== -1) ps.ncDied = false;
+        else if (parts.indexOf("nc") !== -1) ps.ncDied = true;
+        for (const st of STAGES) {
+            const pfx = "probe-" + st + "-";
+            if (!parts.some(x => x.indexOf(pfx) === 0)) continue;
+            const end = parts.find(x => x === pfx + "SILENT" || x === pfx + "ANSWERED"
+                || x.indexOf(pfx + "SILENT-") === 0 || x.indexOf(pfx + "ANSWERED-") === 0);
+            if (end) ps.done[st] = end.indexOf("-SILENT") !== -1 ? "SILENT" : "ANSWERED";
+            else ps.tries[st] = (ps.tries[st] || 0) + 1;
         }
+        psSave();
     }
-    if (PROBE) noteAttempt(PROBE);
+
+    /* Seed the ladder with what this console has ALREADY answered, so the
+       persistent-state fix does not cost three runs re-deriving them. Every
+       value below was observed on hardware and is in the commit history:
+         probe=pivot SILENT  -- infloop parked the worker, no crash
+         probe=rsp   SILENT  -- pop rsp 0x6eee1 + stack switch both work
+         probe=w     CRASH   -- crashed twice without reporting
+       Deliberately does NOT seed ncDied: on a firmware where the chain works
+       the null chain succeeds, ncDied stays false and no probe ever runs, so a
+       stale seed cannot disturb a healthy profile. ?probe=reset clears it. */
+    if (PROBE === "reset") {
+        try { localStorage.removeItem(PS_KEY); } catch (e) {  }
+        ps = { done: {}, tries: {} };
+        PROBE = "";
+        jbmark("PROBE-RESET", "ladder state cleared");
+    } else if (window.fw_str === "7.00" && !ps.seeded) {
+        ps.seeded = 1;
+        ps.done.pivot = ps.done.pivot || "SILENT";
+        ps.done.rsp = ps.done.rsp || "SILENT";
+        ps.tries.w = Math.max(ps.tries.w || 0, 2);
+        psSave();
+        jbmark("PROBE-SEED", "pivot=SILENT rsp=SILENT w=CRASH carried over from"
+            + " the runs already done on this console");
+    }
+
+    const verdictOf = (st) => ps.done[st] || ((ps.tries[st] || 0) >= 2 ? "CRASH" : null);
+    const G = (n) => "0x" + wk_gadgetmap[n].toString(16);
+    const say = (m) => jbmark("PROBE-VERDICT", m);
+
+    if (!PROBE) {
+        const pivot = verdictOf("pivot"), rsp = verdictOf("rsp"), w = verdictOf("w");
+        const pp = verdictOf("p"), g1 = verdictOf("g1"), g2 = verdictOf("g2");
+        if (!ps.ncDied) {
+            /* nothing to bisect yet */
+        } else if (!pivot) { PROBE = "pivot"; }
+        else if (pivot !== "SILENT") {
+            say("probe=pivot did not park the worker (" + pivot + "). Only a single"
+                + " store happened, so the hijacked slot is not a live return"
+                + " address -- the FRAME is wrong. Re-rank OFFSET_lk_worker_wait_return.");
+        } else if (!rsp) { PROBE = "rsp"; }
+        else if (rsp !== "SILENT") {
+            say("`pop rsp` " + G("pop rsp") + " is broken: infloop alone works but"
+                + " pivoting through pop rsp does not. Re-derive it.");
+        } else if (!w) { PROBE = "w"; }
+        else if (w === "SILENT") { PROBE = "sj"; }
+        else if (!pp) { PROBE = "p"; }
+        else if (pp === "SILENT") {
+            say("both pops park cleanly, so `mov [rdi], rsi` " + G("mov [rdi], rsi")
+                + " is the broken gadget in offsets/" + window.fw_str + ".js.");
+        } else if (!g1) { PROBE = "g1"; }
+        else if (g1 !== "SILENT") {
+            say("`pop rdi` " + G("pop rdi") + " is broken: alone, with infloop"
+                + " directly after the popped value, it still crashes -- it is not"
+                + " `5F C3`, most likely it pops more than one register and"
+                + " desyncs the chain.");
+        } else if (!g2) { PROBE = "g2"; }
+        else if (g2 !== "SILENT") {
+            say("`pop rsi` " + G("pop rsi") + " is broken (same test as pop rdi,"
+                + " which passed).");
+        } else {
+            say("pop rdi, pop rsi and infloop are each correct on their own, so"
+                + " `mov [rdi], rsi` " + G("mov [rdi], rsi") + " is the broken one.");
+        }
+        if (PROBE)
+            jbmark("PROBE-AUTO", "stage=" + PROBE + " | decided so far: "
+                + STAGES.map(x => x + "=" + (verdictOf(x) || "-")).join(" "));
+    }
+
     crumb("prep");
 
     let textArea = document.createElement("textarea");
@@ -1204,4 +1182,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=30`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=31`);

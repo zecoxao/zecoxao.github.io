@@ -228,7 +228,7 @@ otherwise.</div>
 <div id="console" hidden></div>
 
 <script src="rop.js"></script>
-<script src="main.js?v=30"></script>
+<script src="main.js?v=31"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="../offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -543,6 +543,8 @@ const CONCISE_SCREEN_SHOW = {
     "PROBE-WAIT": 1,
     "PROBE-W": 1,
     "GADGET-AUDIT": 1,
+    "PROBE-SEED": 1,
+    "PROBE-RESET": 1,
     "PROBE-SJ": 1,
     "PROBE-AUTO": 1,
     "PROBE-VERDICT": 1,
