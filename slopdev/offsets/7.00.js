@@ -157,16 +157,26 @@ const OFFSET_wk_vtable_trigger            = "";
 // here instead of the m_byteOffset that this version does not have.
 const OFFSET_jsc_abv_mode_at_0x20        = true;
 
+/* VERIFIED byte-for-byte on 2026-08-21 against
+ * PS5UPDATE-devkit-7_00_00_44 .. system_ex_b/common_ex/lib/libSceNKWebKit.sprx
+ * (PT_LOAD[0]: vaddr 0, file offset 0x4000, so file = rva + 0x4000).
+ * Every entry below decodes to exactly the instruction its name claims, with
+ * two deliberate exceptions, both already flagged above:
+ *   pop r9        0x010BF949 = 45 31 c9 4d 85 c9 0f 95 c0 c3  (the zeroing
+ *                 stand-in; OFFSET_wk_r9_zero_only)
+ *   cmp [rcx],eax 0x035F9049 = 3b 01 c3  (operands reversed;
+ *                 OFFSET_wk_cmp_operands_reversed)
+ * The executable segment runs 0x0 .. 0x3673D22 (54.5 MB), so every address
+ * here is inside it. An earlier reading of the probe results -- that text
+ * ended near 1.2 MB and the high gadgets pointed into data -- was WRONG;
+ * the chain crashes have another cause. */
 let wk_gadgetmap = {
 	"ret": 0x00000042,
 	"pop rdi": 0x00031434,
 	"pop rsi": 0x000B7098,
-	// BOTH 0x00214613 and 0x0021461C crash the chain (launches #7/10 and
-	// #3/10). Two addresses nine bytes apart failing the same way is not a
-	// mislocated gadget -- it looks like the whole region is not executable.
-	// Confirmed working: everything <= 0x0012A439. Confirmed crashing:
-	// everything >= 0x00214613. The TEXT-MAP probe reads one of these
-	// addresses to settle whether it is data (readable) or execute-only code.
+	// 0x21461C, not the 0x214613 this profile shipped: verified `5a c3` in
+	// system_ex_b/common_ex/lib/libSceNKWebKit.sprx from
+	// PS5UPDATE-devkit-7_00_00_44. 0x214613 is not a pop.
 	"pop rdx": 0x0021461C,
 	"pop rcx": 0x00032473,
 	"pop rax": 0x000A6CAB,
@@ -185,14 +195,9 @@ let wk_gadgetmap = {
 	"sete al": 0x0001CF1F,
 	"setg al": 0x015C5876,
 	"setl al": 0x00681ECF,
-	// BROKEN on this build: the gadget self-test crashed the chain here.
-	// Trail: launch #4/11 (add rax,rcx) answered, then launch #5/9 -- the
-	// shl test, 9 entries -- died. Same class of fault as 0x7527F0.
 	"shl rax, 3": 0x02488363,
 	"shl rax, 4": 0x00572686,
 	"shr rax, 3": 0x01308FC3,
-	// BROKEN on this build too: crashed the chain at launch #3/9, the test
-	// immediately after shl rax,3 / shr rax,3 were already decided.
 	"shr rax, 4": 0x02D60B54,
 	"infloop": 0x000037D1,
 };
