@@ -383,7 +383,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=40 | if this is not the version just"
+    jbmark("BUILD", "main.js v=41 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1313,6 +1313,50 @@ async function prepare(p) {
         };
 
         try {
+            /* Where does executable text actually end?
+               -----------------------------------------------------------
+               Everything <= 0x12A439 executes, everything >= 0x214613 faults.
+               Two very different explanations fit that, and they call for
+               opposite fixes:
+                 (a) text ends around there and the rest of the image is data,
+                     so those "gadgets" are not code at all and no address in
+                     that region is usable;
+                 (b) it IS code, but the profile's file->rva conversion drifts
+                     past some point -- exactly what the import GOT did when it
+                     needed +0x4000 -- so the addresses are merely biased.
+               Text is execute-only and data is readable, so a single read
+               separates them: if the address reads back, it is data and (a) is
+               right; if the read faults, it is executable and (b) is.
+               Resumable like the gadget tests -- a faulting read kills the
+               process, and the pending mark records that as FAULT. */
+            if (!ps.gt["exec:pop rdx"] || ps.gt["exec:pop rdx"] === "ok") {
+                jbmark("TEXT-MAP", ps.gt["exec:pop rdx"] === "ok"
+                    ? "skipped: pop rdx executes at 0x"
+                    + wk_gadgetmap["pop rdx"].toString(16) + ", so that region IS"
+                    + " live code and the addresses are merely inaccurate"
+                    : "deferred: waiting on the pop rdx result first");
+                ps.rd = ps.rd || {};
+            } else {
+            ps.rd = ps.rd || {};
+            for (const k in ps.rd) if (ps.rd[k] === "pending") ps.rd[k] = "FAULT";
+            psSave();
+            for (const rva of [0x214613, 0x572686, 0x35F9049]) {
+                const key = "0x" + rva.toString(16);
+                if (ps.rd[key]) continue;
+                crumb("rd:" + key);
+                ps.rd[key] = "pending";
+                psSave();
+                const v = p.read8(libSceNKWebKitBase.add32(rva));
+                ps.rd[key] = "readable:" + (v.low & 0xffff).toString(16);
+                psSave();
+                break;                       // one per run; a fault ends it anyway
+            }
+            jbmark("TEXT-MAP", Object.keys(ps.rd).map(k => k + "=" + ps.rd[k]).join(" ")
+                + " || readable => that region is DATA, so no gadget there is"
+                + " usable; FAULT => it is execute-only code and the addresses"
+                + " are merely biased");
+            }
+
             /* pop rdx FIRST. Every test costs a reload when it crashes, so the
                open question goes at the front rather than queued behind ones
                whose answers we already have. This decides whether the region
@@ -1437,49 +1481,6 @@ async function prepare(p) {
                 }, (v) => eq(v, MAGIC2.low, MAGIC2.hi));
             }
 
-            /* Where does executable text actually end?
-               -----------------------------------------------------------
-               Everything <= 0x12A439 executes, everything >= 0x214613 faults.
-               Two very different explanations fit that, and they call for
-               opposite fixes:
-                 (a) text ends around there and the rest of the image is data,
-                     so those "gadgets" are not code at all and no address in
-                     that region is usable;
-                 (b) it IS code, but the profile's file->rva conversion drifts
-                     past some point -- exactly what the import GOT did when it
-                     needed +0x4000 -- so the addresses are merely biased.
-               Text is execute-only and data is readable, so a single read
-               separates them: if the address reads back, it is data and (a) is
-               right; if the read faults, it is executable and (b) is.
-               Resumable like the gadget tests -- a faulting read kills the
-               process, and the pending mark records that as FAULT. */
-            if (ps.gt["exec:pop rdx"] === "ok") {
-                jbmark("TEXT-MAP", "skipped: pop rdx now executes at 0x"
-                    + wk_gadgetmap["pop rdx"].toString(16) + ", so that region IS"
-                    + " live code -- the boundary reading was wrong and the"
-                    + " generator's addresses are just locally inaccurate");
-                ps.rd = ps.rd || {};
-            } else {
-            ps.rd = ps.rd || {};
-            for (const k in ps.rd) if (ps.rd[k] === "pending") ps.rd[k] = "FAULT";
-            psSave();
-            for (const rva of [0x214613, 0x572686, 0x35F9049]) {
-                const key = "0x" + rva.toString(16);
-                if (ps.rd[key]) continue;
-                crumb("rd:" + key);
-                ps.rd[key] = "pending";
-                psSave();
-                const v = p.read8(libSceNKWebKitBase.add32(rva));
-                ps.rd[key] = "readable:" + (v.low & 0xffff).toString(16);
-                psSave();
-                break;                       // one per run; a fault ends it anyway
-            }
-            jbmark("TEXT-MAP", Object.keys(ps.rd).map(k => k + "=" + ps.rd[k]).join(" ")
-                + " || readable => that region is DATA, so no gadget there is"
-                + " usable; FAULT => it is execute-only code and the addresses"
-                + " are merely biased");
-            }
-
             crumb("g:done");
             jbmark("GADGET-SELFTEST", bad.length
                 ? "FAILED " + bad.length + ": " + bad.join("  ")
@@ -1503,4 +1504,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=40`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=41`);

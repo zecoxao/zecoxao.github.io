@@ -161,10 +161,12 @@ let wk_gadgetmap = {
 	"ret": 0x00000042,
 	"pop rdi": 0x00031434,
 	"pop rsi": 0x000B7098,
-	// 0x00214613 CRASHED the chain (launch #7/10). Retrying nine bytes on at
-	// 0x0021461C, where `5A C3` is expected. If that executes, the region is
-	// live code after all and the "text ends at ~1.2MB" reading is wrong --
-	// the generator's addresses would just be locally inaccurate.
+	// BOTH 0x00214613 and 0x0021461C crash the chain (launches #7/10 and
+	// #3/10). Two addresses nine bytes apart failing the same way is not a
+	// mislocated gadget -- it looks like the whole region is not executable.
+	// Confirmed working: everything <= 0x0012A439. Confirmed crashing:
+	// everything >= 0x00214613. The TEXT-MAP probe reads one of these
+	// addresses to settle whether it is data (readable) or execute-only code.
 	"pop rdx": 0x0021461C,
 	"pop rcx": 0x00032473,
 	"pop rax": 0x000A6CAB,
