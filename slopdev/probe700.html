@@ -247,33 +247,54 @@ async function dumpModuleSlots(core, carrier) {
                        ? " THIS" : "") : "") + "\n";
         out += "\n";
 
+        // No libkernel return addresses exist on the worker stack, only
+        // &__stack_chk_guard spills. That fits WebKit calling a libkernel
+        // SYSCALL STUB directly: the stub does `syscall; ret` and pushes
+        // nothing, so the parked return address is a libSceNKWebKit address,
+        // not a libkernel one. Collect every pointer on the stack by module;
+        // which of the wk ones follows a `call` gets checked offline against
+        // the binary, since text is execute-only and unreadable from here.
         for (const th of threads) {
             if (th[3] !== 0x80000 || !th[2]) continue;
             const st = th[2];
-            const seen = {};
-            let tot = 0;
+            const wkSeen = {}, otherSeen = {};
+            let wkTot = 0, othTot = 0;
             for (let off = 0; off < 0x80000; off += 0x100) {
                 carrier.aim(st + off);
                 const v = carrier.view;
                 for (let i = 0; i < 0x100; i += 8) {
                     const x = qw(v, i);
-                    if (x >= lk && x < lk + 0x80000) {
-                        tot++;
-                        const rva = x - lk;
-                        if (rva !== 0x6D1D0) {
-                            if (!seen[rva]) seen[rva] = [];
-                            if (seen[rva].length < 3) seen[rva].push(off + i);
-                        }
+                    if (x < 0x100000000 || x > 0xffffffffffff) continue;
+                    if (x >= st && x < st + 0x80000) continue;          // saved rbp
+                    if (x >= lk && x < lk + 0x80000) continue;          // already known
+                    if (x >= base && x < base + 0x3673d22) {            // wk TEXT only
+                        const rva = x - base;
+                        wkTot++;
+                        if (!wkSeen[rva]) wkSeen[rva] = [off + i];
+                        else if (wkSeen[rva].length < 3) wkSeen[rva].push(off + i);
+                    } else if (x < base || x > base + 0x4500000) {
+                        othTot++;
+                        const key = "0x" + x.toString(16);
+                        otherSeen[key] = (otherSeen[key] || 0) + 1;
                     }
                 }
                 carrier.restore();
             }
-            out += "thread #" + th[0] + " stack " + hx(st)
-                 + ": " + tot + " libkernel pointers\n";
-            const keys = Object.keys(seen).map(Number).sort(function (x, y) { return x - y; });
-            for (const k of keys)
-                out += "    lk+0x" + k.toString(16) + "  at stack+0x"
-                     + seen[k].map(function (o) { return o.toString(16); }).join(",0x") + "\n";
+            const wkKeys = Object.keys(wkSeen).map(Number).sort(function (x, y) { return x - y; });
+            out += "thread #" + th[0] + " stack " + hx(st) + "\n"
+                 + "  wk-text pointers: " + wkTot + " (" + wkKeys.length + " unique)\n";
+            let shown = 0;
+            for (const k of wkKeys) {
+                if (shown++ >= 70) { out += "  ... " + (wkKeys.length - 70) + " more\n"; break; }
+                out += "    wk+0x" + k.toString(16) + "  x" + wkSeen[k].length
+                     + "  at stack+0x"
+                     + wkSeen[k].map(function (o) { return o.toString(16); }).join(",0x") + "\n";
+            }
+            const oKeys = Object.keys(otherSeen);
+            out += "  pointers in NEITHER wk nor lk: " + othTot
+                 + " (" + oKeys.length + " unique)\n";
+            for (let j = 0; j < oKeys.length && j < 12; j++)
+                out += "    " + oKeys[j] + "  x" + otherSeen[oKeys[j]] + "\n";
             out += "\n";
         }
     } catch (e) {
