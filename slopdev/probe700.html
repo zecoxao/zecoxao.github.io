@@ -256,7 +256,10 @@ async function run(slots) {
     // already on disk, so the last mark tells us exactly where.
     try {
         const carrier = await core.establishPrimitive({
-            maxAttempts: 1,
+            // placement lands roughly 1 attempt in 3. Retrying is only
+            // affordable because failed() now releases the carrier before
+            // its timer -- otherwise each retry stacked another 100 MB.
+            maxAttempts: 8,
             onEvent: function (tag, detail) { mark(tag, String(detail || "")); }
         });
         mark("PRIMITIVE-OK", "");
