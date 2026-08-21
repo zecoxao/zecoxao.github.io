@@ -53,6 +53,12 @@ const OFFSET_lk__thread_list                   = 0x00064218;
 // the branch pthread_cond_wait takes) -- the saved PC the idle Worker
 // thread parks on.
 const OFFSET_lk_worker_wait_return             = 0x000389B1;
+// Byte that selects WHICH cond_wait_common body pthread_cond_wait calls:
+// 1 -> 0x38840 (the body 0x389B1 above was taken from), 0 -> 0x38BE0.
+// probe700.html reads this too. main.js reports it when the fingerprint scan
+// comes up empty, because a fingerprint from the body that is NOT running can
+// never appear on the stack.
+const OFFSET_lk_cond_wait_selector             = 0x00064014;
 const OFFSET_lk_sleep                          = 0x00025C50;
 const OFFSET_lk_sceKernelGetCurrentCpu         = 0x000028A0;
 

