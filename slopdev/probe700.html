@@ -235,43 +235,37 @@ async function dumpModuleSlots(core, carrier) {
         }
         out += "worker stack = " + hx(stack) + "  (walked " + n + " threads)\n\n";
         if (stack) {
-            // The stack grows DOWN from stack+0x80000, so the blocked syscall's
-            // frames are at the LOWEST used addresses -- not in main.js's
-            // [0x7F000,0x80000) window, which only sees the outermost frames.
-            // Find the deepest touched qword, then dump upward from there.
-            let lowest = -1;
-            for (let off = 0; off < 0x80000 && lowest < 0; off += 0x100) {
+            // Do not guess where the parked frames are: memory below the
+            // live RSP is not zeroed, so "deepest non-zero" is only a
+            // high-water mark. Sweep the WHOLE stack for libkernel pointers
+            // and report every one with its offset; the return address we want
+            // is whichever of them follows a call instruction, checked offline.
+            const rows = [];
+            const seen = {};
+            let lkTotal = 0;
+            for (let off = 0; off < 0x80000; off += 0x100) {
                 carrier.aim(stack + off);
                 const v = carrier.view;
                 for (let i = 0; i < 0x100; i += 8) {
-                    if (qw(v, i) !== 0) { lowest = off + i; break; }
+                    const x = qw(v, i);
+                    if (x >= lk && x < lk + 0x80000) {
+                        const rva = x - lk;
+                        lkTotal++;
+                        seen[rva] = (seen[rva] || 0) + 1;
+                        if (rows.length < 110)
+                            rows.push("  stack+0x" + (off + i).toString(16)
+                                      + "   lk+0x" + rva.toString(16));
+                    }
                 }
                 carrier.restore();
             }
-            out += "deepest non-zero qword: stack+0x" + lowest.toString(16)
-                 + "   (~ the worker's current RSP)\n"
-                 + "used depth = 0x" + (0x80000 - lowest).toString(16) + " bytes\n\n";
-            if (lowest >= 0) {
-                out += "innermost frames, from there upward:\n";
-                let shown = 0;
-                for (let off = lowest; off < lowest + 0x400 && shown < 96; off += 0x100) {
-                    carrier.aim(stack + off);
-                    const v = carrier.view;
-                    for (let i = 0; i < 0x100 && shown < 96; i += 8) {
-                        const x = qw(v, i);
-                        if (x === 0) continue;
-                        let note = "";
-                        if (x >= lk && x < lk + 0x80000) note = "   lk+0x" + (x - lk).toString(16);
-                        else if (x >= base && x < base + 0x4500000) note = "   wk+0x" + (x - base).toString(16);
-                        else if (x >= lc && x < lc + 0x180000) note = "   lc+0x" + (x - lc).toString(16);
-                        else if (x >= stack && x < stack + 0x80000) note = "   stack+0x" + (x - stack).toString(16);
-                        if (!note) continue;
-                        out += "  stack+0x" + (off + i).toString(16) + "  " + hx(x) + note + "\n";
-                        shown++;
-                    }
-                    carrier.restore();
-                }
-            }
+            out += "FULL-STACK sweep for libkernel pointers\n"
+                 + "  total found: " + lkTotal + "\n\n"
+                 + rows.join("\n") + "\n\n";
+            out += "unique RVAs (count), lowest first:\n";
+            const keys = Object.keys(seen).map(Number).sort(function (x, y) { return x - y; });
+            for (const k of keys)
+                out += "  lk+0x" + k.toString(16) + "   x" + seen[k] + "\n";
         }
     } catch (e) {
         out += "worker probe threw: " + (e && e.message) + "\n";
