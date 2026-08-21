@@ -17,6 +17,12 @@
 </style>
 </head>
 <body>
+<p style="background:#432;border:1px solid #a72;padding:8px;margin:0 0 10px">
+<b>Close the browser fully between runs.</b> The WebProcess does not return the
+previous run's memory: a second run starts ~320 MB in, leaves ~70 MB of
+headroom, and the groom needs ~130 MB. That is a plain out-of-memory kill, not
+a finding. One run per browser launch.</p>
+
 <h2>previous run (survives the WebProcess crash)</h2>
 <pre id="prev" class="prev">(none recorded)</pre>
 
@@ -43,6 +49,7 @@
 // the next step runs, so when the WebProcess dies the last completed step is
 // still readable after the console reboots and the page is re-opened.
 const TRAIL_KEY = "probe700:trail";
+const HDR_KEY = "probe700:hdr";
 const logEl = document.getElementById("log");
 const hdrEl = document.getElementById("hdr");
 const prevEl = document.getElementById("prev");
@@ -126,7 +133,10 @@ function mark(tag, detail) {
     writeTrail(trail);              // commit BEFORE doing anything else
     logEl.textContent += line + "\n";
     if (/hex=[0-9a-fA-F]{32,}/.test(line)) {
-        try { hdrEl.textContent = analyseTrail([line]); } catch (e) { }
+        try {
+            hdrEl.textContent = analyseTrail([line]);
+            localStorage.setItem(HDR_KEY, hdrEl.textContent);
+        } catch (e) { }
     }
 }
 
@@ -201,6 +211,9 @@ async function run(slots) {
     } catch (e) {
         mark("PRIMITIVE-THREW", String(e && e.message));
     }
+    // Drop core.js's references to the 72 MB carrier. bmalloc may not return
+    // the pages to the OS, which is exactly why one run per launch is the rule.
+    try { core.releaseFakeCell(); mark("RELEASED", ""); } catch (e) { }
 }
 
 Array.prototype.forEach.call(document.querySelectorAll("[data-slots]"), function (b) {
