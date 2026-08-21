@@ -13,7 +13,7 @@ if (!navigator.userAgent.includes('PlayStation 5')) {
 }
 
 const supportedFirmwares = [
-    "9.00", "9.05", "9.20", "9.40", "9.60", "10.00", "10.01", "10.20",
+    "7.00", "9.00", "9.05", "9.20", "9.40", "9.60", "10.00", "10.01", "10.20",
     "10.40", "10.60", "11.00", "11.20", "11.40", "11.60", "12.00"
 ];
 const fw_match = /PlayStation 5\/(\d+\.\d+)/.exec(navigator.userAgent);
@@ -88,11 +88,13 @@ async function prepare(p) {
     let textAreaVtable = p.read8(textAreaVtPtr);
 
     // 9.00+ has no vtable rva; resolve from the host constructor instead.
+    // 7.00's profile also ships host-constructor candidates, so the gate is
+    // "does this profile have candidates", not a firmware number -- profiles
+    // without them still fall back to the vtable rva below.
     // A candidate is accepted only if it lands page-aligned in the user-module
     // band, so a wrong one is rejected rather than used.
     let libSceNKWebKitBase = null;
-    if (window.fw_float >= 9.00
-        && typeof OFFSET_wk_host_constructor_candidates !== "undefined"
+    if (typeof OFFSET_wk_host_constructor_candidates !== "undefined"
         && OFFSET_wk_host_constructor_candidates.length
         && typeof globalThis.__ps5NativeCtor === "number") {
         const ctor = globalThis.__ps5NativeCtor;
