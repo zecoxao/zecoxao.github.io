@@ -247,8 +247,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=128"></script>
-<script src="main.js?v=128"></script>
+<script src="rop.js?v=129"></script>
+<script src="main.js?v=129"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -259,21 +259,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=128"></script>
+<script src="syscalls.js?v=129"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=128";
-import { installWindowP, pairStatus } from "./mem.js?v=128";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=129";
+import { installWindowP, pairStatus } from "./mem.js?v=129";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=128";
+    from "./poops.js?v=129";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=128");
+    const lib = await import("./poops.js?v=129");
 
-    await import("./poops.js?v=128");
-    const st = await import("./poops.js?v=128");
+    await import("./poops.js?v=129");
+    const st = await import("./poops.js?v=129");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;

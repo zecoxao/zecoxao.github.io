@@ -247,6 +247,11 @@ async function prepare(p) {
        .data.rel.ro reads, which alignment alone does not. */
     const MODULE_BAND_LO = 0x800000000, MODULE_BAND_HI = 0x900000000;
     const wkNum = libSceNKWebKitBase.hi * 0x100000000 + libSceNKWebKitBase.low;
+    // Highest WebKit rva we have actually read without faulting. Everything at
+    // or below it is proven mapped, which is what makes the gadget byte check
+    // below safe to run: a read past the end of the image is a WebProcess
+    // segfault, not a catchable error, and would destroy the diagnostic.
+    let provenMappedRva = 0;
 
     function resolve_module_base(slotRva, symOffset, label) {
         const wkTop = wkNum + slotRva;
@@ -262,6 +267,7 @@ async function prepare(p) {
                 if (n % 0x4000 !== 0) continue;
                 if (n < MODULE_BAND_LO || n >= MODULE_BAND_HI) continue;
                 if (n >= wkNum && n <= wkTop) continue;   // points back into WebKit
+                if (rva > provenMappedRva) provenMappedRva = rva;
                 if (page !== 0)
                     jbmark("GOT-PAGE-BIAS", label + "-profile=0x" + slotRva.toString(16)
                         + "-real=0x" + rva.toString(16)
@@ -336,9 +342,14 @@ async function prepare(p) {
     const r9Stub = (typeof OFFSET_wk_r9_zero_only !== "undefined")
         && OFFSET_wk_r9_zero_only;
     const gadgetBad = [];
+    const gadgetSkipped = [];
     for (const name in GADGET_BYTES) {
         if (!(name in wk_gadgetmap)) continue;
         if (name === "pop r9" && r9Stub) continue;
+        if (wk_gadgetmap[name] > provenMappedRva) {   // unproven -> do not read
+            gadgetSkipped.push(name);
+            continue;
+        }
         const q = p.read8(gadgets[name]);
         const bytes = [];
         for (let i = 0; i < 8; i++)
@@ -365,7 +376,9 @@ async function prepare(p) {
     } else {
         jbmark("GADGET-OK", "verified=" + Object.keys(GADGET_BYTES)
             .filter(n => n in wk_gadgetmap).length
-            + (r9Stub ? "-r9=zero-only-stub" : ""));
+            + (r9Stub ? "-r9=zero-only-stub" : "")
+            + (gadgetSkipped.length
+                ? "-unverified=" + gadgetSkipped.join(",") : ""));
     }
 
     let nogc = [];
@@ -1416,4 +1429,4 @@ async function main(userlandRW, wkOnly = false) {
 let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
-fwScript.setAttribute('src', `offsets/${window.fw_str}.js?v=128`);
+fwScript.setAttribute('src', `offsets/${window.fw_str}.js?v=129`);

@@ -28,6 +28,11 @@ TARGETS = [
     ("poops.html",    r'\.js\?v=(?P<v>\d+)'),
     ("p2jb.html",     r'\.js\?v=(?P<v>\d+)'),
     ("p2jb.js",       r'\bv=(?P<v>\d+)"'),
+    # main.js injects the per-firmware profile: offsets/<fw>.js?v=NNN. It was
+    # missing from this list, so every bump left the OFFSETS FILE cached at the
+    # old version while main.js itself was refetched -- a profile edit then had
+    # no effect on hardware no matter how many times you bumped.
+    ("main.js",       r'\.js\?v=(?P<v>\d+)'),
     # ES module imports inside .js files - the class that caused the split above.
     ("mem.js",        r'\.js\?v=(?P<v>\d+)'),
     ("core.js",       r'\.js\?v=(?P<v>\d+)'),
