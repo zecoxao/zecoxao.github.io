@@ -1242,10 +1242,28 @@ async function prepare(p) {
            A few reloads therefore enumerate every broken gadget instead of
            re-finding the first one forever. */
         ps.gt = ps.gt || {};
-        /* push_write4's recorded failure was my check demanding hi === 0 of a
-           four-byte store. Drop stale verdicts whose test has since changed,
-           rather than leaving a correct gadget marked broken. */
-        if (ps.gtRev !== 2) { delete ps.gt["push_write4"]; ps.gtRev = 2; }
+        /* A verdict is only about the address it was measured against, so
+           fingerprint the whole gadget map and discard every result when any
+           address changes. Otherwise editing one entry leaves it marked CRASH
+           from the previous address and the suite skips the very test the edit
+           was meant to re-run. gtRev covers changes to the TESTS themselves
+           (push_write4's check was wrong, not the gadget). */
+        const gtSig = (function () {
+            const src = Object.keys(wk_gadgetmap).sort()
+                .map(k => k + ":" + wk_gadgetmap[k]).join(",") + "|rev3";
+            let h = 0;
+            for (let z = 0; z < src.length; z++)
+                h = ((h * 31 + src.charCodeAt(z)) & 0x7fffffff);
+            return h;
+        })();
+        if (ps.gtSig !== gtSig) {
+            const n = Object.keys(ps.gt).length;
+            ps.gt = {};
+            ps.gtSig = gtSig;
+            psSave();
+            if (n) jbmark("GADGET-RESET", "the gadget map changed -- discarded "
+                + n + " verdict(s) measured against the old addresses");
+        }
         const gtSave = () => psSave();
         for (const k in ps.gt) if (ps.gt[k] === "pending") {
             ps.gt[k] = "CRASH";
@@ -1275,41 +1293,6 @@ async function prepare(p) {
         };
 
         try {
-            /* Where does executable text actually end?
-               -----------------------------------------------------------
-               Everything <= 0x12A439 executes, everything >= 0x214613 faults.
-               Two very different explanations fit that, and they call for
-               opposite fixes:
-                 (a) text ends around there and the rest of the image is data,
-                     so those "gadgets" are not code at all and no address in
-                     that region is usable;
-                 (b) it IS code, but the profile's file->rva conversion drifts
-                     past some point -- exactly what the import GOT did when it
-                     needed +0x4000 -- so the addresses are merely biased.
-               Text is execute-only and data is readable, so a single read
-               separates them: if the address reads back, it is data and (a) is
-               right; if the read faults, it is executable and (b) is.
-               Resumable like the gadget tests -- a faulting read kills the
-               process, and the pending mark records that as FAULT. */
-            ps.rd = ps.rd || {};
-            for (const k in ps.rd) if (ps.rd[k] === "pending") ps.rd[k] = "FAULT";
-            psSave();
-            for (const rva of [0x214613, 0x572686, 0x35F9049]) {
-                const key = "0x" + rva.toString(16);
-                if (ps.rd[key]) continue;
-                crumb("rd:" + key);
-                ps.rd[key] = "pending";
-                psSave();
-                const v = p.read8(libSceNKWebKitBase.add32(rva));
-                ps.rd[key] = "readable:" + (v.low & 0xffff).toString(16);
-                psSave();
-                break;                       // one per run; a fault ends it anyway
-            }
-            jbmark("TEXT-MAP", Object.keys(ps.rd).map(k => k + "=" + ps.rd[k]).join(" ")
-                + " || readable => that region is DATA, so no gadget there is"
-                + " usable; FAULT => it is execute-only code and the addresses"
-                + " are merely biased");
-
             /* Syscalls first, because they are the most informative test left
                and each crash costs a whole reload.
                write_result -- `mov [rdi], rax` -- is already trusted: every
@@ -1413,6 +1396,49 @@ async function prepare(p) {
                 }, (v) => eq(v, MAGIC2.low, MAGIC2.hi));
             }
 
+            /* Where does executable text actually end?
+               -----------------------------------------------------------
+               Everything <= 0x12A439 executes, everything >= 0x214613 faults.
+               Two very different explanations fit that, and they call for
+               opposite fixes:
+                 (a) text ends around there and the rest of the image is data,
+                     so those "gadgets" are not code at all and no address in
+                     that region is usable;
+                 (b) it IS code, but the profile's file->rva conversion drifts
+                     past some point -- exactly what the import GOT did when it
+                     needed +0x4000 -- so the addresses are merely biased.
+               Text is execute-only and data is readable, so a single read
+               separates them: if the address reads back, it is data and (a) is
+               right; if the read faults, it is executable and (b) is.
+               Resumable like the gadget tests -- a faulting read kills the
+               process, and the pending mark records that as FAULT. */
+            if (ps.gt["exec:pop rdx"] === "ok") {
+                jbmark("TEXT-MAP", "skipped: pop rdx now executes at 0x"
+                    + wk_gadgetmap["pop rdx"].toString(16) + ", so that region IS"
+                    + " live code -- the boundary reading was wrong and the"
+                    + " generator's addresses are just locally inaccurate");
+                ps.rd = ps.rd || {};
+            } else {
+            ps.rd = ps.rd || {};
+            for (const k in ps.rd) if (ps.rd[k] === "pending") ps.rd[k] = "FAULT";
+            psSave();
+            for (const rva of [0x214613, 0x572686, 0x35F9049]) {
+                const key = "0x" + rva.toString(16);
+                if (ps.rd[key]) continue;
+                crumb("rd:" + key);
+                ps.rd[key] = "pending";
+                psSave();
+                const v = p.read8(libSceNKWebKitBase.add32(rva));
+                ps.rd[key] = "readable:" + (v.low & 0xffff).toString(16);
+                psSave();
+                break;                       // one per run; a fault ends it anyway
+            }
+            jbmark("TEXT-MAP", Object.keys(ps.rd).map(k => k + "=" + ps.rd[k]).join(" ")
+                + " || readable => that region is DATA, so no gadget there is"
+                + " usable; FAULT => it is execute-only code and the addresses"
+                + " are merely biased");
+            }
+
             crumb("g:done");
             jbmark("GADGET-SELFTEST", bad.length
                 ? "FAILED " + bad.length + ": " + bad.join("  ")
@@ -1436,4 +1462,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=37`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=38`);
