@@ -319,11 +319,18 @@ function failed() {
     emit("AUTO-RETRY-AFTER-FAILURE", `attempt=${attemptNumber}`);
     stopped = false;
     retryScheduled = false;
+    // Same reasoning as scheduleSafeRetry(): drop the attempt's allocations
+    // before the timer, and give JSC an idle turn to reclaim them. Without
+    // this, a 50ms retry overlaps two carriers (2 x 72MB) plus two copied
+    // strings, and the WebProcess is killed after ~3 attempts. Every binding
+    // released here is re-created by startAttempt() -> resetAttemptState(),
+    // which would have nulled them a moment later anyway.
+    releaseAttemptAllocations();
     setTimeout(() => {
         try { history.replaceState(null, ""); } catch { }
         attemptNumber++;
         startAttempt();
-    }, AUTO_RETRY_DELAY_MS);
+    }, Math.max(AUTO_RETRY_DELAY_MS, 750));
 }
 
 function releaseAttemptAllocations() {
