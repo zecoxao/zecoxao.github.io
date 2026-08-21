@@ -179,6 +179,9 @@ let wk_gadgetmap = {
 	"sete al": 0x0001CF1F,
 	"setg al": 0x015C5876,
 	"setl al": 0x00681ECF,
+	// BROKEN on this build: the gadget self-test crashed the chain here.
+	// Trail: launch #4/11 (add rax,rcx) answered, then launch #5/9 -- the
+	// shl test, 9 entries -- died. Same class of fault as 0x7527F0.
 	"shl rax, 3": 0x02488363,
 	"shl rax, 4": 0x00572686,
 	"shr rax, 3": 0x01308FC3,

