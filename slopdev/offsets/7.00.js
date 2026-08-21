@@ -68,6 +68,17 @@ const OFFSET_wk_r9_zero_only             = true;
 // swapped.  ZF is unaffected by the swap, so branch_types.EQUAL (the only
 // type the engine uses) is exact; rop.js throws on the ordered types.
 const OFFSET_wk_cmp_operands_reversed    = true;
+// 7.00's JSC is 613.1; 9.00+ is 616.1. JSArrayBufferView gained a
+// `size_t m_byteOffset` member between them, so the tail differs:
+//   613: +0x18 size_t m_length, +0x20 uint32 m_mode              sizeof 0x28
+//   616: +0x18 size_t m_length, +0x20 size_t m_byteOffset,
+//        +0x28 uint8  m_mode                                     sizeof 0x30
+// Measured on this console: structureID 0xdc63, butterfly 0x881a24038,
+// m_vector 0x881a7ae00, m_length 0x100, and +0x20 = 02 00 00 00 --
+// TypedArrayMode 2 == WastefulTypedArray, which is exactly what
+// `new Uint8Array(new ArrayBuffer(0x100))` must be. core.js checks m_mode
+// here instead of the m_byteOffset that this version does not have.
+const OFFSET_jsc_abv_mode_at_0x20        = true;
 
 let wk_gadgetmap = {
 	"ret": 0x00000042,

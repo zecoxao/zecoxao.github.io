@@ -144,7 +144,7 @@ const UNSEEN = -1;
 const profile = {
 
     carrierSID: UNSEEN, carrierType: UNSEEN, carrierFlags: UNSEEN,
-    carrierMode: UNSEEN, carrierByte28: UNSEEN,
+    carrierMode: UNSEEN, carrierByte28: UNSEEN, carrierAbvMode: UNSEEN,
     holderSID: UNSEEN, holderType: UNSEEN, holderFlags: UNSEEN,
     functionSID: UNSEEN, functionType: UNSEEN, functionFlags: UNSEEN,
     nativeExecSID: UNSEEN, nativeExecType: UNSEEN, nativeExecFlags: UNSEEN,
@@ -709,13 +709,37 @@ function loadHistoryCritical() {
         const rwLength = uint32At(rwHeader, 0x18);
         rwOriginalVector = low48At(rwHeader, 0x10);
 
+        // JSArrayBufferView's tail is NOT the same shape in the two JSC
+        // versions this engine has to cover (both confirmed against Sony's
+        // published sources):
+        //
+        //   JSC 613 (7.00):  +0x18 size_t m_length
+        //                    +0x20 uint32 m_mode           sizeof 0x28
+        //   JSC 616 (9.00+): +0x18 size_t m_length
+        //                    +0x20 size_t m_byteOffset
+        //                    +0x28 uint8  m_mode           sizeof 0x30
+        //
+        // So "bytes 0x20..0x27 are zero" is m_byteOffset == 0 on 616 -- a real
+        // assertion that the view starts at the head of its buffer. On 613 the
+        // very same bytes are m_mode, and the carrier is built as
+        // `new Uint8Array(new ArrayBuffer(0x100))`, i.e. WastefulTypedArray (2),
+        // so it can never read zero there. Profiles that declare the 613 layout
+        // get the equivalent assertion against m_mode rather than a weaker one.
+        const abvModeAt20 = typeof OFFSET_jsc_abv_mode_at_0x20 !== "undefined"
+            && OFFSET_jsc_abv_mode_at_0x20 === true;
         const rwOffsetZero = allZero(rwHeader, 0x20, 0x28);
+        const rwTailOK = abvModeAt20
+            ? (uint32At(rwHeader, 0x20) === 2 && allZero(rwHeader, 0x24, 0x28))
+            : rwOffsetZero;
 
         profile.carrierSID = rwSID;
         profile.carrierType = rwHeader[5];
         profile.carrierFlags = rwHeader[6];
         profile.carrierMode = rwHeader[0x1c];
         profile.carrierByte28 = rwHeader[0x28];
+        // the real m_mode, wherever this JSC keeps it
+        profile.carrierAbvMode = abvModeAt20
+            ? uint32At(rwHeader, 0x20) : rwHeader[0x28];
 
         rwHeaderOK = rwSID >= 0x100 && rwSID < 0x08000000
             && rwHeader[4] === 0
@@ -727,7 +751,7 @@ function loadHistoryCritical() {
             && rwLength === RW_BUFFER_SIZE
             && rwHeader[0x1d] === 0
             && rwHeader[0x1e] === 0 && rwHeader[0x1f] === 0
-            && rwOffsetZero;
+            && rwTailOK;
 
         if (!rwHeaderOK) {
             zeroHeaderMiss = allZero(rwHeader, 0, CELL_BYTES);

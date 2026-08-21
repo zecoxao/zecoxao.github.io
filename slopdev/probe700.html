@@ -94,7 +94,12 @@ function analyseHeader(hex) {
         ["+10 vector",      hx(vec),              vec > 0x100000000 && vec % 8 === 0],
         ["+18 length",      hx(len),              len === 0x100],
         ["+1d..1f zero",    bytesOf(b,0x1d,0x20), b[0x1d]===0 && b[0x1e]===0 && b[0x1f]===0],
-        ["+20..27 zero",    bytesOf(b,0x20,0x28), zeroRange(b,0x20,0x28)]
+        (typeof OFFSET_jsc_abv_mode_at_0x20 !== "undefined"
+            && OFFSET_jsc_abv_mode_at_0x20 === true)
+            ? ["+20 m_mode (613)", hx(u32(b,0x20)) +
+                 (u32(b,0x20) === 2 ? " WastefulTypedArray" : " UNEXPECTED"),
+               u32(b,0x20) === 2 && zeroRange(b,0x24,0x28)]
+            : ["+20 m_byteOffset", bytesOf(b,0x20,0x28), zeroRange(b,0x20,0x28)]
     ];
     let failed = [], table = "";
     for (const c of checks) {
