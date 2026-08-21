@@ -205,7 +205,10 @@ a:focus {
     flex-grow: 1;
     unicode-bidi: embed;
     font-family: monospace;
-    white-space: pre;
+    /* pre, not pre-wrap, pushed long diagnostics off the right edge behind a
+       horizontal scrollbar -- unreadable on a TV with no pointer to drag it. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     color: var(--text-color-primary);
     background-color: inherit;
     border: var(--surface-color-primary) 1px solid;

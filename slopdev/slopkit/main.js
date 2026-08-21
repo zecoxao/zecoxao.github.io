@@ -120,7 +120,7 @@ async function find_worker_return_slot(p, stacks, libKernelBase) {
     }
     const top = [...seen.entries()]
         .sort((a, b) => b[1].hi - a[1].hi)
-        .slice(0, 14)
+        .slice(0, 24)
         .map(([rva, e]) => "lk+0x" + rva.toString(16)
             + "@0x" + e.hi.toString(16) + (e.n > 1 ? "x" + e.n : ""));
     /* probe700.html established that on this build a byte in libkernel selects
@@ -145,8 +145,9 @@ async function find_worker_return_slot(p, stacks, libKernelBase) {
         + " is not on the worker stack for fw " + window.fw_str + "."
         + " " + stacks.length + " candidate stack(s); "
         + seen.size + " libkernel pointers in the top half,"
-        + " deepest first: " + (top.length ? top.join("  ") : "NONE")
-        + " -- pick the saved PC of the blocking call from this list."
+        + " highest stack offset first (= OLDEST frame; the parked"
+        + " cond_wait PC is among the LOWEST offsets): "
+        + (top.length ? top.join("  ") : "NONE")
         + selNote);
 }
 
