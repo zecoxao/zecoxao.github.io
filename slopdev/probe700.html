@@ -282,6 +282,7 @@ async function dumpModuleSlots(core, carrier) {
         }
         out += "\nscanning every thread stack for the park return addresses:\n";
         let any = false;
+        const worker0 = after[0];
         for (let i = 0; i < after.length; i++) {
             const st = after[i][1], sz = after[i][2];
             if (!st || !sz || sz > 0x400000) continue;
@@ -295,11 +296,8 @@ async function dumpModuleSlots(core, carrier) {
                     for (const tg of TARGETS) {
                         if (rva === tg[0]) {
                             any = true;
-                            out += "  *** thread #" + i + " stack=" + hx(st)
-                                 + " size=" + hx(sz)
-                                 + "  slot stack+0x" + (off + j).toString(16)
-                                 + "  wk+0x" + rva.toString(16)
-                                 + "  " + tg[1] + "\n";
+                            out += "  *** thread #" + i + " slot stack+0x" + (off + j).toString(16)
+                                 + "  wk+0x" + rva.toString(16) + "  " + tg[1] + "\n";
                         }
                     }
                 }
@@ -307,6 +305,45 @@ async function dumpModuleSlots(core, carrier) {
             }
         }
         if (!any) out += "  (none of the 29 blocking-call return addresses found)\n";
+
+        // Every scan so far ignored pointers that are in NO known module. If the
+        // worker parks inside a fourth module (libSceNKWebKitRequirements is
+        // imported), its return address lives there and is invisible above.
+        // Cluster the unknowns by 1MB to expose any such module.
+        if (worker0 && worker0[1]) {
+            const st = worker0[1], sz = worker0[2];
+            const bucket = {};
+            for (let off = 0; off < sz; off += 0x100) {
+                let v;
+                try { carrier.aim(st + off); v = carrier.view; } catch (e) { continue; }
+                for (let j = 0; j < 0x100 && off + j < sz; j += 8) {
+                    const x = qw(v, j);
+                    if (x < 0x100000000 || x > 0xffffffffffff) continue;
+                    if (x >= st && x < st + sz) continue;
+                    if (x >= base && x < base + 0x4500000) continue;
+                    if (x >= lk && x < lk + 0x100000) continue;
+                    if (x >= lc && x < lc + 0x200000) continue;
+                    const k = Math.floor(x / 0x100000);
+                    if (!bucket[k]) bucket[k] = { n: 0, lo: x, hi: x, ex: [] };
+                    const bk = bucket[k];
+                    bk.n++;
+                    if (x < bk.lo) bk.lo = x;
+                    if (x > bk.hi) bk.hi = x;
+                    if (bk.ex.length < 3) bk.ex.push([off + j, x]);
+                }
+                carrier.restore();
+            }
+            const keys = Object.keys(bucket).map(Number)
+                .sort(function (x, y) { return bucket[y].n - bucket[x].n; });
+            out += "\nunknown-module pointers on the Worker stack, by 1MB bucket:\n";
+            for (let i = 0; i < keys.length && i < 10; i++) {
+                const bk = bucket[keys[i]];
+                out += "  0x" + (keys[i] * 0x100000).toString(16) + "  count=" + bk.n
+                     + "  range " + hx(bk.lo) + ".." + hx(bk.hi) + "\n";
+                for (const e of bk.ex)
+                    out += "      stack+0x" + e[0].toString(16) + "  " + hx(e[1]) + "\n";
+            }
+        }
     } catch (e) {
         out += "worker probe threw: " + (e && e.message) + "\n";
     }
