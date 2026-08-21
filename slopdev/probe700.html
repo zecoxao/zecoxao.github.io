@@ -343,8 +343,37 @@ async function dumpModuleSlots(core, carrier) {
                 if (tag) rows.push("  stack+0x" + off.toString(16) + "  " + tag
                     + "+0x" + rva.toString(16));
             }
-            out += "TOP-OF-STACK code pointers (outermost first is highest off):\n"
-                 + (rows.length ? rows.join("\n") : "  (none)") + "\n";
+            out += "TOP-OF-STACK code pointers (top 0x2000):\n"
+                 + (rows.slice(-40).join("\n") || "  (none)") + "\n\n";
+
+            // Search the WHOLE worker stack for the candidate cond_wait parked
+            // returns. When the worker wakes, the syscall stub rets to one of
+            // these; that slot is what the hijack overwrites. Report offset,
+            // count, and the neighbour slot (+8 must be usable for the pivot).
+            const CANDS = [[0x389B1, "sub_38840 cond_wait ret"],
+                           [0x38D3F, "sub_38BE0 cond_wait ret"],
+                           [0x38D56, "sub_38BE0 alt ret"]];
+            out += "candidate parked returns on the worker stack:\n";
+            let anyc = false;
+            for (const [rva, label] of CANDS) {
+                const want = base; // placeholder to keep shape
+                let hits = 0, firstOff = -1, neigh = null;
+                for (let off = 0; off + 0x10 <= SZ; off += 8) {
+                    carrier.aim(st + off); const v = carrier.view;
+                    let q = 0; for (let k = 7; k >= 0; k--) q = q * 256 + v[k];
+                    let n8 = 0; for (let k = 15; k >= 8; k--) n8 = n8 * 256 + v[k];
+                    carrier.restore();
+                    if (q === lk + rva) {
+                        hits++;
+                        if (firstOff < 0) { firstOff = off; neigh = n8; }
+                    }
+                }
+                if (hits) anyc = true;
+                out += "  lk+0x" + rva.toString(16) + " (" + label + "): hits=" + hits
+                     + (hits ? "  firstOff=stack+0x" + firstOff.toString(16)
+                        + "  [slot+8]=0x" + neigh.toString(16) : "") + "\n";
+            }
+            if (!anyc) out += "  (none present -- worker parks via another path)\n";
         }
     } catch (e) {
         out += "worker probe threw: " + (e && e.message) + "\n";
