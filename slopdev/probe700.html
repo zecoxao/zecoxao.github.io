@@ -239,8 +239,62 @@ function dumpModuleSlots(core, carrier) {
         } catch (e) { rows += "  threw: " + (e && e.message) + "\n"; }
         return rows + "\n";
     }
-    out += window("wk+0x03E14900  (__stack_chk_guard slot at +0x10)", base + 0x03E14900, 0x40);
-    out += window("wk+0x03E16EC0  (memset slot at +0x20)", base + 0x03E16EC0, 0x40);
+    out += window("wk+0x03E14900  (relocation says __stack_chk_guard at +0x10)", base + 0x03E14900, 0x40);
+    out += window("wk+0x03E16EC0  (relocation says memset at +0x20)", base + 0x03E16EC0, 0x40);
+
+    // Those offsets came out of the relocation tables but hold WebKit-internal
+    // code pointers, so they are not the import GOT. Find the real slots the
+    // other way round: sweep the RW data segments for pointers that leave this
+    // module, and test each against the symbol offsets we already know. A slot
+    // holding libkernel's __stack_chk_guard must satisfy
+    // (value - 0x6D1D0) % 0x4000 == 0, and likewise memset for libc.
+    out += scanForImports(carrier, base);
+
+    function scanForImports(carrier, base) {
+        const RANGES = [[0x03BFC000, 0x03E17018], [0x03E18000, 0x03E272EC]];
+        const WK_SPAN = 0x4500000;
+        const LK_GUARD = 0x0006D1D0, LC_MEMSET = 0x00014E70;
+        let ext = 0, scanned = 0;
+        const lkHits = [], lcHits = [], sample = [];
+        for (const r of RANGES) {
+            for (let off = r[0]; off < r[1]; off += 0x100) {
+                let v;
+                try { carrier.aim(base + off); v = carrier.view; }
+                catch (e) { continue; }
+                for (let i = 0; i < 0x100 && off + i < r[1]; i += 8) {
+                    let q = 0;
+                    for (let k = i + 7; k >= i; k--) q = q * 256 + v[k];
+                    scanned++;
+                    if (q < 0x100000000 || q > 0xffffffffffff) continue;
+                    if (q >= base && q < base + WK_SPAN) continue;
+                    ext++;
+                    if ((q - LK_GUARD) % 0x4000 === 0 && lkHits.length < 12)
+                        lkHits.push([off + i, q]);
+                    if ((q - LC_MEMSET) % 0x4000 === 0 && lcHits.length < 12)
+                        lcHits.push([off + i, q]);
+                    if (sample.length < 14) sample.push([off + i, q]);
+                }
+                carrier.restore();
+            }
+        }
+        let t = "IMPORT SCAN of the RW data segments\n"
+              + "  qwords scanned      : " + scanned + "\n"
+              + "  pointers outside wk : " + ext + "\n\n";
+        t += "  first external pointers seen:\n";
+        for (const h of sample)
+            t += "    wk+0x" + h[0].toString(16) + "  ->  0x" + h[1].toString(16) + "\n";
+        t += "\n  slots where (value - 0x6D1D0) is 0x4000-aligned  [libkernel_web]:\n";
+        for (const h of lkHits)
+            t += "    wk+0x" + h[0].toString(16) + "  value=0x" + h[1].toString(16)
+               + "  base=0x" + (h[1] - LK_GUARD).toString(16) + "\n";
+        if (!lkHits.length) t += "    (none)\n";
+        t += "\n  slots where (value - 0x14E70) is 0x4000-aligned  [libSceLibcInternal]:\n";
+        for (const h of lcHits)
+            t += "    wk+0x" + h[0].toString(16) + "  value=0x" + h[1].toString(16)
+               + "  base=0x" + (h[1] - LC_MEMSET).toString(16) + "\n";
+        if (!lcHits.length) t += "    (none)\n";
+        return t + "\n";
+    }
 
     modsEl.textContent = out;
     mark("MODPROBE-DONE", "wkBase=" + hex(base));
