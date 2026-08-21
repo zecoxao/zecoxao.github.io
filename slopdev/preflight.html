@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P2JB Preflight</title>
+<style>
+/* Same palette/controls as index.html. Arial deliberately: the PS5 browser has no
+   Segoe UI / system-ui, and a missing family is what once shaped the payload menu to
+   zero-advance glyphs (invisible text). Everything here is STATIC markup - JS only
+   sets textContent/className on nodes that already exist, never builds a text overlay. */
+body{
+    user-select:none; -webkit-user-select:none;
+    background-color:#0c0c0f; color:#fff; font-family:Arial;
+    margin:0; padding:26px 18px 18px; box-sizing:border-box; overflow-y:auto;
+}
+#wrap{ max-width:52rem; margin:0 auto; text-align:center; }
+#title{ font-size:1.05rem; font-weight:800; letter-spacing:.4em;
+        color:#6f7076; margin:0 0 6px 6px; }
+#sub{ color:#5a5b61; font-size:.72rem; letter-spacing:.12em; margin:0 0 22px; }
+#fw{ font-size:1.05rem; font-weight:700; margin:0 0 4px; }
+#fwnote{ color:#888; font-size:.75rem; min-height:1em; margin:0 0 22px; }
+.btn{
+    padding:1rem 2rem; text-align:center; cursor:pointer;
+    min-width:16rem; border-radius:1.25rem; background-color:#202125;
+    border:none; color:#fff; font-size:1.35rem; font-weight:800;
+    text-decoration:none; display:inline-block;
+    transition:background-color .25s ease;
+}
+.btn:hover,.btn:focus{ background-color:#a2a2a6; color:#202020; outline:none; }
+.btn.disabled{ opacity:.35; pointer-events:none; }
+#what{ color:#6f7076; font-size:.78rem; line-height:1.65; margin:24px auto 0;
+       max-width:40rem; text-align:left; }
+#what b{ color:#9a9ba1; font-weight:700; }
+table{ border-collapse:collapse; margin:26px auto 0; font-size:.78rem; }
+th,td{ padding:6px 14px; border-bottom:1px solid #1b1c20; text-align:left; }
+th{ color:#6f7076; font-weight:700; letter-spacing:.1em; font-size:.7rem; }
+td.fw{ font-weight:700; color:#cfd0d4; }
+tr.here td{ background:#17181c; }
+.s-pass{ color:#5ac47a; font-weight:700; }
+.s-fail{ color:#d4585c; font-weight:700; }
+.s-none{ color:#5a5b61; }
+#foot{ color:#3d3e43; font-size:.68rem; margin-top:26px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+
+<div id="title">P2JB PREFLIGHT</div>
+<p id="sub">offset + call-path probe &mdash; no leak, no jailbreak</p>
+
+<div id="fw">detecting&hellip;</div>
+<p id="fwnote"></p>
+
+<a class="btn disabled" id="run" tabindex="-1"
+   href="p2jb.html?go=1&amp;auto=1&amp;trigger=netcontrol&amp;preflight=1&amp;skipleak=1&amp;v=105">RUN PREFLIGHT</a>
+
+<div id="what">
+<b>What this does.</b> Runs the full setup path &mdash; WebKit primitive, module bases,
+gadget + syscall stub resolution, the rop-worker spawn and the libkernel call probe &mdash;
+then <b>stops before the leak</b>. About two minutes. It does not jailbreak and does not
+touch the kernel.
+<br><br>
+<b>Why.</b> A wrong offset shows up here in minutes instead of at minute 70 of a full run.
+<br><br>
+<b>What a pass looks like.</b> On-screen log ends with
+<b>preflight complete - stopping here (?skipleak=1)</b> and a &ldquo;p2jb preflight done&rdquo;
+notification. Look for the <b>PREFLIGHT</b> lines: <b>A-POST returned &hellip; (stub path OK)</b>
+means the syscall-stub call path works, and the canary thread spawn means the pthread path works.
+<br><br>
+<b>What a fail looks like.</b> <b>no libkernel base - abort</b> (base derivation is wrong),
+<b>A-SKIP no getpid stub in the map</b> (syscall map wrong), <b>PREFLIGHT threw: &hellip;</b>,
+or the page dying with no PREFLIGHT lines at all. Report the last line either way.
+</div>
+
+<table>
+<thead><tr><th>FIRMWARE</th><th>PREFLIGHT</th><th>FULL RUN</th><th>NOTES</th></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+
+<p id="foot">p2jb covers 12.00&ndash;12.70. Poopsploit (9.00&ndash;12.00) is a separate page.</p>
+
+</div>
+
+<script>
+"use strict";
+
+/* Results table. UPDATE THIS as each preflight comes back - it is the on-console record.
+   status: "pass" | "fail" | "" (untested).  Keep `note` short; the detail lives in
+   E:\POOPKIT\WORKING.txt / FAILS.txt. */
+var RESULTS = [
+    { fw:"12.00", pre:"pass", run:"pass", note:"baseline - devkit + retail, full chain to elfldr" },
+    { fw:"12.02", pre:"pass", run:"",     note:"preflight all stages 0 - stub, thr_new, pthread" },
+    { fw:"12.20", pre:"pass", run:"fail", note:"preflight all stages 0 - offsets sound; the earlier fail was not offsets" },
+    { fw:"12.40", pre:"pass", run:"fail", note:"preflight all stages 0 - offsets sound; the earlier fail was not offsets" },
+    { fw:"12.60", pre:"pass", run:"",     note:"preflight all stages 0 - stub, thr_new, pthread" },
+    { fw:"12.70", pre:"pass", run:"pass", note:"baseline - devkit, full chain to elfldr" }
+];
+
+(function () {
+    var m = /PlayStation 5\/(\d+)\.(\d+)/.exec(navigator.userAgent);
+    var fwEl = document.getElementById("fw");
+    var noteEl = document.getElementById("fwnote");
+    var btn = document.getElementById("run");
+    var here = "";
+
+    if (!m) {
+        fwEl.textContent = "not a PS5 browser";
+        noteEl.textContent = "open this page on the console";
+    } else {
+        // parsed, not assumed 4 chars: "12.0" was being read out of 12.02 by an older build
+        here = m[1] + "." + m[2];
+        var num = parseInt(m[1], 10) * 100 + parseInt(m[2], 10);
+        fwEl.textContent = "firmware " + here;
+        if (num >= 1200 && num <= 1270) {
+            btn.className = "btn";
+            btn.setAttribute("tabindex", "0");
+            noteEl.textContent = "in range for p2jb - preflight is safe to run";
+            try { btn.focus(); } catch (e) { }
+        } else {
+            noteEl.textContent = "outside p2jb's 12.00-12.70 range - nothing to preflight here";
+        }
+    }
+
+    // Static rows, built once from RESULTS. textContent only - no innerHTML with names.
+    var tb = document.getElementById("rows");
+    for (var i = 0; i < RESULTS.length; i++) {
+        var r = RESULTS[i];
+        var tr = document.createElement("tr");
+        if (r.fw === here) tr.className = "here";
+        var cells = [
+            { t: r.fw, c: "fw" },
+            { t: r.pre === "pass" ? "PASS" : (r.pre === "fail" ? "FAIL" : "-"),
+              c: r.pre === "pass" ? "s-pass" : (r.pre === "fail" ? "s-fail" : "s-none") },
+            { t: r.run === "pass" ? "PASS" : (r.run === "fail" ? "FAIL" : "-"),
+              c: r.run === "pass" ? "s-pass" : (r.run === "fail" ? "s-fail" : "s-none") },
+            { t: r.note, c: "s-none" }
+        ];
+        for (var j = 0; j < cells.length; j++) {
+            var td = document.createElement("td");
+            td.textContent = cells[j].t;
+            td.className = cells[j].c;
+            tr.appendChild(td);
+        }
+        tb.appendChild(tr);
+    }
+})();
+</script>
+</body>
+</html>
