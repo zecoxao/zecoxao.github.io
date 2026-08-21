@@ -833,8 +833,15 @@ async function prepare(p) {
 
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-PRE-POST", "next=worker.postMessage(0)-rop-executes-now");
+        /* A hung worker is as fatal as a crashed one and much harder to read:
+           with no deadline this await never settles, so the page freezes at
+           whatever it last printed and there is no crash dump either. The
+           `p1 == 0` branch below was already written for this case but nothing
+           could ever reach it -- resolve(0) on timeout so it can. */
         let p1 = await new Promise((resolve) => {
+            const t = setTimeout(() => { crumb("pm-TIMEOUT"); resolve(0); }, 10000);
             worker.onmessage = function (e) {
+                clearTimeout(t);
                 resolve(1);
             }
             crumb("pm");
@@ -844,7 +851,12 @@ async function prepare(p) {
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-POST-POST", "worker-answered-p1=" + p1);
         if (p1 == 0) {
-            throw new Error("The rop thread ran away. ");
+            throw new Error("The rop thread ran away: the worker neither"
+                + " answered nor crashed within 10s. It returned through the"
+                + " hijacked frame and is now lost inside the chain -- stuck in"
+                + " a gadget that does not return, or spinning. This is the"
+                + " same fault as the crash, just landing somewhere that loops"
+                + " instead of faulting.");
         }
     }
 
@@ -917,4 +929,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=25`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=26`);
