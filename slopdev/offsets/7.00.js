@@ -13,10 +13,22 @@
 const OFFSET_wk_host_constructor_candidates = [0x00010AE8, 0x00010590, 0x000114C0];
 // Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
 const OFFSET_wk_vtable_first_element     = 0x006E6910;
-// GOT slots: JMPREL entry for memset (8zTFvBIAIN8#P#Q) and the RELA
-// GLOB_DAT entry for __stack_chk_guard (f7uOxY9mM1U#C#D).
-const OFFSET_wk_memset_import                  = 0x03E16EE0;
-const OFFSET_wk___stack_chk_guard_import       = 0x03E14910;
+// Import GOT slots, MEASURED on the console, not taken from the relocation
+// tables. DT_JMPREL/DT_RELA give r_offset 0x03E16EE0 (memset, 8zTFvBIAIN8#P#Q)
+// and 0x03E14910 (__stack_chk_guard, f7uOxY9mM1U#C#D), but at runtime those
+// two addresses hold WebKit-internal code pointers -- they are in .data.rel.ro
+// among the vtables, not in the import GOT. Sweeping the RW data segments for
+// pointers leaving the module and testing them against the known symbol
+// offsets found the real slots exactly one 16KB page higher, independently for
+// both symbols:
+//   __stack_chk_guard  reloc 0x03E14910 -> real 0x03E18910   (+0x4000)
+//   memset             reloc 0x03E16EE0 -> real 0x03E1AEE0   (+0x4000)
+// Measured values: guard 0x80e5411d0 -> libkernel_web 0x80e4d4000,
+// memset 0x82b9cce70 -> libSceLibcInternal 0x82b9b8000; both 0x4000-aligned and
+// both inside their module's image. If another firmware's profile is ever
+// derived the same way, check for this page bias before trusting r_offset.
+const OFFSET_wk_memset_import                  = 0x03E1AEE0;
+const OFFSET_wk___stack_chk_guard_import       = 0x03E18910;
 
 const OFFSET_lk___stack_chk_guard              = 0x0006D1D0;
 const OFFSET_lk_pthread_create_name_np         = 0x00001CE0;
