@@ -378,6 +378,15 @@ async function prepare(p) {
     libKernelBase.sub32inplace(OFFSET_lk___stack_chk_guard);
 
     // once per run, before any racer exists
+    /* Which build is the console actually running?
+       The PS5 browser caches by URL and index.html itself carries no
+       cache-buster, so a reload can serve a stale page that still references an
+       old main.js -- twice now a run has been analysed as if it contained a
+       change it did not. Stamp the build on screen so that is never in doubt. */
+    jbmark("BUILD", "main.js v=39 | if this is not the version just"
+        + " pushed, the console is running a CACHED page and the run means"
+        + " nothing -- force a reload");
+
     jbmark("MODULE-BASES", "wk=0x" + libSceNKWebKitBase.toString()
         + "-lk=0x" + libKernelBase.toString()
         + "-lc=0x" + libSceLibcInternalBase.toString());
