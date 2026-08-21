@@ -63,7 +63,15 @@ function find_worker(p, libKernelBase) {
 
 async function find_worker_return_slot(p, stacks, libKernelBase) {
     if (!Array.isArray(stacks)) stacks = [stacks];
-    const expected = libKernelBase.add32(OFFSET_lk_worker_wait_return);
+    /* The profile may give one saved PC or a ranked list of them. A list is
+       useful because several frames in the wait chain are equally valid pivot
+       points -- the first entry that appears exactly once wins, so the profile
+       author's ordering picks the frame, not luck. */
+    const wants = (Array.isArray(OFFSET_lk_worker_wait_return)
+        ? OFFSET_lk_worker_wait_return
+        : [OFFSET_lk_worker_wait_return]).map(rva => ({
+            rva: rva, addr: libKernelBase.add32(rva)
+        }));
     let lastCount = 0;
 
     // The worker may answer immediately before returning to its idle wait.
@@ -74,24 +82,28 @@ async function find_worker_return_slot(p, stacks, libKernelBase) {
         let hit = null;
         let count = 0;
         for (const stack of stacks) {
-            let hitHere = null, here = 0;
-            for (let offset = 0x7F000; offset < 0x80000; offset += 0x8) {
-                const candidate = stack.add32(offset);
-                const value = p.read8(candidate);
-                if (value.low !== expected.low || value.hi !== expected.hi)
-                    continue;
+            for (const want of wants) {
+                let hitHere = null, here = 0;
+                for (let offset = 0x7F000; offset < 0x80000; offset += 0x8) {
+                    const candidate = stack.add32(offset);
+                    const value = p.read8(candidate);
+                    if (value.low !== want.addr.low || value.hi !== want.addr.hi)
+                        continue;
 
-                hitHere = candidate;
-                here++;
+                    hitHere = candidate;
+                    here++;
+                }
+                if (here === 1) {
+                    jbmark("WORKER-RET-FINGERPRINT", "hit=0x" + hitHere.toString()
+                        + "-rva=0x" + want.rva.toString(16)
+                        + "-rank=" + wants.indexOf(want)
+                        + "-of=" + wants.length
+                        + "-stacks=" + stacks.length);
+                    return hitHere;
+                }
+                count += here;
+                if (hitHere) hit = hitHere;
             }
-            if (here === 1) {
-                jbmark("WORKER-RET-FINGERPRINT", "hit=0x" + hitHere.toString()
-                    + "-expected=0x" + expected.toString()
-                    + "-stacks=" + stacks.length);
-                return hitHere;
-            }
-            count += here;
-            if (hitHere) hit = hitHere;
         }
         lastCount = count;
         await new Promise(resolve => setTimeout(resolve, 1));
@@ -136,12 +148,12 @@ async function find_worker_return_slot(p, stacks, libKernelBase) {
             + " -- if the profile's fingerprint came from the OTHER body,"
             + " that alone explains count 0.";
     }
-    jbmark("WORKER-RET-CANDIDATES", "expected=lk+0x"
-        + OFFSET_lk_worker_wait_return.toString(16)
+    jbmark("WORKER-RET-CANDIDATES", "tried=["
+        + wants.map(w => "0x" + w.rva.toString(16)).join(",") + "]"
         + "-found=" + seen.size + "-" + top.join(" ") + selNote);
     throw new Error("worker wait return fingerprint count " + lastCount
-        + ", expected 1. OFFSET_lk_worker_wait_return = 0x"
-        + OFFSET_lk_worker_wait_return.toString(16)
+        + ", expected 1. OFFSET_lk_worker_wait_return candidates ["
+        + wants.map(w => "0x" + w.rva.toString(16)).join(",") + "]"
         + " is not on the worker stack for fw " + window.fw_str + "."
         + " " + stacks.length + " candidate stack(s); "
         + seen.size + " libkernel pointers in the top half,"
@@ -757,4 +769,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=20`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=21`);

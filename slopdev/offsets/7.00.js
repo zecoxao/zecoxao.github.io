@@ -49,10 +49,31 @@ const OFFSET_lk_getpid                         = 0x00036760;
 // TAILQ head written by _thr_link()'s TAILQ_INSERT_HEAD at 0x0002B960
 // (tle at +0x38, as main.js assumes).  Same address as 9.00-13.60.
 const OFFSET_lk__thread_list                   = 0x00064218;
-// Return address of the blocking call inside cond_wait_common (0x00038840,
-// the branch pthread_cond_wait takes) -- the saved PC the idle Worker
-// thread parks on.
-const OFFSET_lk_worker_wait_return             = 0x000389B1;
+/* Saved PC the idle Worker parks on, as a RANKED list -- main.js takes the
+ * first entry that appears exactly once on the worker stack.
+ *
+ * MEASURED on a live 7.00 devkit, not read off the binary. The static guess
+ * 0x389B1 ("return address of the blocking call inside cond_wait_common
+ * 0x38840, the branch pthread_cond_wait takes") is NOT on the stack -- the
+ * fingerprint scan found 0 of it. Sweeping the parked worker stack for
+ * libkernel pointers produced this chain, newest frame (lowest offset) first:
+ *
+ *     0x7fb28  lk+0x2d85c   umtx wait wrapper (deepest, in the syscall)
+ *     0x7fb48  lk+0x39843   _thr_ucond_wait
+ *     0x7fb78  lk+0x38f31   cond_wait_common      <-- 0x38840 + 0x6f1
+ *     0x7fc38  lk+0x33d1e   pthread_cond_wait
+ *     0x7ffc8  lk+0x39ac0   thread entry (oldest)
+ *
+ * i.e. exactly libthr's pthread_cond_wait -> cond_wait_common ->
+ * _thr_ucond_wait -> _thr_umtx_timedwait_uint. 0x38F31 is the same function
+ * the original constant aimed at, just the call site that actually runs, so
+ * it keeps the intended pivot frame. The other two are ranked behind it as
+ * fallbacks in case a future build shifts that call.
+ * The cond_wait selector at lk+0x64014 reads 1 on this console, confirming
+ * pthread_cond_wait really does take the 0x38840 body -- so the wrong-body
+ * explanation is ruled out and the call site is the whole story.
+ * previous (never matched): 0x000389B1 */
+const OFFSET_lk_worker_wait_return             = [0x00038F31, 0x00039843, 0x00033D1E];
 // Byte that selects WHICH cond_wait_common body pthread_cond_wait calls:
 // 1 -> 0x38840 (the body 0x389B1 above was taken from), 0 -> 0x38BE0.
 // probe700.html reads this too. main.js reports it when the fingerprint scan
