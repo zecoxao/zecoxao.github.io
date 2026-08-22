@@ -176,7 +176,7 @@ let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./slopkit/poops.js?v=79");
+    const lib = await import("./slopkit/poops.js?v=80");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
@@ -249,7 +249,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-66-gate-does-not-arm-itself";
+const REV = "slopkit-poops-67-tty-two-channels";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";

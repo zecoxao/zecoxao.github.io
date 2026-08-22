@@ -3514,15 +3514,9 @@ export function makePoopsEngine(X) {
      awaits. */
   let ttyArena = null,
     ttySeq = 0,
-    ttyProbed = 0;
+    ttyProbed = 0,
+    ttyMode = "";
   async function tty(text) {
-    if (P.syscalls[PSYS.DEBUG_OUT_TEXT] === undefined) {
-      if (!ttyProbed) {
-        ttyProbed = 1;
-        flushMark("TTY", "unavailable-no-stub-for-syscall-0x259");
-      }
-      return -1;
-    }
     if (!ttyArena) ttyArena = alloc(0x140, "tty");
     const line =
       "[slopkit " +
@@ -3535,18 +3529,42 @@ export function makePoopsEngine(X) {
     const u8 = ttyArena.u8;
     for (let i = 0; i < line.length; ++i) u8[i] = line.charCodeAt(i) & 0x7f;
     u8[line.length] = 0;
-    const r = await sys(PSYS.DEBUG_OUT_TEXT, 7, ttyArena.base, 0);
+
+    /* Two channels, because the first is not certain to be readable.
+       -----------------------------------------------------------------------
+       0x259 is not a printf: its callers pass rdi = a small KIND code (3, 0xa,
+       0xb, 0xd, 0xe, 0xf, 0x11, 0x12, 0x14, 0x15, 0x18, 0x1a, 0x1c, 0x1e,
+       0x1f, 0x21, 0x23 ... in libkernel_web alone) and sceKernelDebugOutText
+       is simply kind 7. Where kind 7 comes out is the kernel's business.
+       write(1) is the channel this process demonstrably already has: the
+       serial log carries "SceNKWebProcess: arg[0] = ..." at every spawn, and
+       nothing but the WebProcess itself prints that.
+       Try the named one first, fall back on its failure, and remember which
+       worked so the choice is made once. */
+    let r = null;
+    if (ttyMode !== "write" && P.syscalls[PSYS.DEBUG_OUT_TEXT] !== undefined) {
+      r = await sys(PSYS.DEBUG_OUT_TEXT, 7, ttyArena.base, 0);
+      if (!r.failed) ttyMode = "debugouttext";
+    }
+    let w = null;
+    if (ttyMode !== "debugouttext") {
+      w = await sys(PSYS.WRITE, 1, ttyArena.base, line.length);
+      if (!w.failed && w.s32 > 0) ttyMode = "write";
+    }
     if (!ttyProbed) {
       ttyProbed = 1;
       flushMark(
         "TTY",
-        "sceKernelDebugOutText-syscall0x259-ret=" +
-          r.s32 +
-          (r.failed ? "-" + r.errText : "-ok") +
-          "-look-for-[slopkit-N]-in-the-target-console",
+        "using=" +
+          (ttyMode || "NEITHER") +
+          "-debugOutText(0x259)=" +
+          (r ? (r.failed ? "FAIL-" + r.errText : "ok-" + r.s32) : "skipped") +
+          "-write(fd1)=" +
+          (w ? (w.failed ? "FAIL-" + w.errText : "ok-" + w.s32) : "skipped") +
+          "-grep-the-SERIAL-log-for-[slopkit",
       );
     }
-    return r.failed ? -1 : r.s32;
+    return ttyMode ? 0 : -1;
   }
 
   async function ttyMark(tag, extra) {
