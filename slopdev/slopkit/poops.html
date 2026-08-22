@@ -694,8 +694,20 @@ function captureRemoteEvent(tag, extra) {
         tag: String(tag).slice(0, 64),
         extra: extra == null ? "" : String(extra).slice(0, 1024)
     });
-    if (remoteEvents.length > 120) remoteEvents.shift();
-    if (REMOTE_STAGE5_FLUSH.test(tag) && remoteFlushTimer === null)
+    if (remoteEvents.length > 400) remoteEvents.shift();
+    /* Flush early and often, not just at the run boundaries.
+       -----------------------------------------------------------------------
+       A crash takes the buffer with it, so anything still sitting here when the
+       WebProcess dies is lost -- which is most of a run, since the old policy
+       only flushed on the STAGE5 tags and at the end. Ship a batch every 40
+       marks as well, so a death costs at most 40 of them. Never inside a race
+       window: the flush is a fetch, and the race is the one place where the
+       cost of extra work is not merely a nicety.
+       On GitHub Pages "/__poops_log" 404s and this is one wasted request per 40
+       marks; served from slopserve.py it is the whole log. */
+    if ((REMOTE_STAGE5_FLUSH.test(tag)
+            || (!raceMode && remoteEvents.length >= 40))
+        && remoteFlushTimer === null)
         remoteFlushTimer = setTimeout(function () {
             remoteFlushTimer = null;
             sendRemoteEvents(false);
