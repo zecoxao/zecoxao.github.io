@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=66 | if this is not the version just"
+    jbmark("BUILD", "main.js v=67 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1879,6 +1879,31 @@ async function prepare(p) {
                 picked = d; break;
             }
             jbmark("PIPE2-CANDIDATES", tried.join(" "));
+            /* Reproduce poops' call exactly. The probe passed flags=0 and
+               worked; poops passes O_NONBLOCK and the chain never returns, and
+               those are the only two differing inputs -- so make the probe ask
+               the same question poops asks. Two pipes, because poops opens two
+               and the second is the first thing that differs from a probe that
+               only ever opened one.
+               If this hangs, the fault is reproduced somewhere it can be
+               bisected. If it does NOT hang, then pipe2 is innocent and the
+               difference is poops' buffer or its chain, which is equally worth
+               knowing and rules out a whole line of enquiry. */
+            if (picked !== null) {
+                const O_NONBLOCK = 4;
+                const addr = libKernelBase.add32(0x363a0 + picked);
+                const got = [];
+                for (let i = 0; i < 2; i++) {
+                    p.write8(fdbuf, new int64(0xFFFFFFFF, 0xFFFFFFFF));
+                    const r = await chain.call(addr, fdbuf, O_NONBLOCK);
+                    got.push((r.low === 0 && r.hi === 0)
+                        ? p.read4(fdbuf) + "," + p.read4(fdbuf.add32(4))
+                        : "err0x" + r.toString());
+                }
+                jbmark("PIPE2-NONBLOCK", "O_NONBLOCK pipes: " + got.join(" | ")
+                    + " -- if this line printed, pipe2 with the flag poops uses"
+                    + " does NOT hang");
+            }
             if (picked === null) {
                 jbmark("PIPE2-PROBE", "neither 0x363a0+0x540 nor +0x560 made a"
                     + " working pipe -- the window model is wrong, not just"
