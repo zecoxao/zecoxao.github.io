@@ -326,7 +326,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-71-emit-by-number";
+const REV = "slopkit-poops-72-remember-the-leaked-slot";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -447,8 +447,30 @@ function bootSlots(tag, extra) {
     }
     // TRIGGER-ARMED / TRIGGER-EXHAUSTED: this boot's slots are gone.
     if (driverPid < 0) return;
+    const rec = { pid: driverPid };
+    /* Record WHICH slot and WHICH fd number, not just that something was
+       spent. The netcontrol slots are system-wide -- "consumed by an earlier
+       trigger this boot" survives the WebProcess dying and respawning -- and
+       CLEAR_QUEUE matches a slot by the fd NUMBER stored in it, which is a
+       number in whatever process now asks. So a slot left behind by a run that
+       died still names an fd, and that is the whole input a later run would
+       need to hand it back (or to use it). Nothing reads this yet; it costs
+       one localStorage write on a mark that fires twice a boot. */
+    const m = /took slot (\d+) on fd (\d+)/.exec(
+        String(extra == null ? "" : extra));
+    if (m) {
+        rec.slot = parseInt(m[1], 10);
+        rec.fd = parseInt(m[2], 10);
+        rec.armedAt = driverPid;
+    }
     try {
-        localStorage.setItem(SPENT_KEY, JSON.stringify({ pid: driverPid }));
+        const prev = spentRecord();
+        if (prev && prev.slot !== undefined && rec.slot === undefined) {
+            rec.slot = prev.slot;
+            rec.fd = prev.fd;
+            rec.armedAt = prev.armedAt;
+        }
+        localStorage.setItem(SPENT_KEY, JSON.stringify(rec));
     } catch { }
 }
 let STALLED_AT = storeGet(PROGRESS_KEY);
