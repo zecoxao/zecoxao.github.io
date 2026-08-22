@@ -3615,12 +3615,28 @@ export function makePoopsEngine(X) {
       "PIPE2-PRE",
       label + "-out=0x" + S.buf.pipefd.base.toString() + "-flags=O_NONBLOCK",
     );
-    const r = await sys(PSYS.PIPE2, S.buf.pipefd.base, K.O_NONBLOCK);
+    /* pipe2 with a non-zero flags argument never returns on 7.00.00.70 --
+       reproduced outside poops, while flags=0 works and an invalid flag errors
+       promptly. Reach the same state the long way: create the pipe, then set
+       O_NONBLOCK on each end with the fcntl call this file already uses on its
+       socketpair write end. */
+    const noFlags = typeof window !== "undefined" && window.__pipe2NoFlags;
+    const r = await sys(PSYS.PIPE2, S.buf.pipefd.base,
+        noFlags ? 0 : K.O_NONBLOCK);
     if (r.failed) throw new Error("pipe2(" + label + ") failed: " + r.errText);
     const a = r32(S.buf.pipefd.u8, 0) | 0,
       b = r32(S.buf.pipefd.u8, 4) | 0;
     if (a < 0 || b < 0)
       throw new Error("pipe2(" + label + ") gave " + a + "," + b);
+    if (noFlags) {
+      for (const fd of [a, b]) {
+        const sf = await sys(PSYS.FCNTL, fd, K.F_SETFL, K.O_NONBLOCK);
+        if (sf.failed)
+          throw new Error("pipe2(" + label + "): fcntl(F_SETFL,O_NONBLOCK) on fd "
+            + fd + " failed: " + sf.errText);
+      }
+      flushMark("PIPE2-FCNTL", label + "-a=" + a + "-b=" + b + "-nonblock-set");
+    }
     track(a);
     track(b);
     flushMark("PIPE2", label + "-r=" + a + "-w=" + b);

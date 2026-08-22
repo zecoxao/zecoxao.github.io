@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=67 | if this is not the version just"
+    jbmark("BUILD", "main.js v=68 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1879,58 +1879,18 @@ async function prepare(p) {
                 picked = d; break;
             }
             jbmark("PIPE2-CANDIDATES", tried.join(" "));
-            /* Reproduce poops' call exactly. The probe passed flags=0 and
-               worked; poops passes O_NONBLOCK and the chain never returns, and
-               those are the only two differing inputs -- so make the probe ask
-               the same question poops asks. Two pipes, because poops opens two
-               and the second is the first thing that differs from a probe that
-               only ever opened one.
-               If this hangs, the fault is reproduced somewhere it can be
-               bisected. If it does NOT hang, then pipe2 is innocent and the
-               difference is poops' buffer or its chain, which is equally worth
-               knowing and rules out a whole line of enquiry. */
-            if (picked !== null) {
-                const O_NONBLOCK = 4;
-                const addr = libKernelBase.add32(0x363a0 + picked);
-                const got = [];
-                for (let i = 0; i < 2; i++) {
-                    p.write8(fdbuf, new int64(0xFFFFFFFF, 0xFFFFFFFF));
-                    const r = await chain.call(addr, fdbuf, O_NONBLOCK);
-                    got.push((r.low === 0 && r.hi === 0)
-                        ? p.read4(fdbuf) + "," + p.read4(fdbuf.add32(4))
-                        : "err0x" + r.toString());
-                }
-                jbmark("PIPE2-NONBLOCK", "O_NONBLOCK pipes: " + got.join(" | ")
-                    + " -- if this line printed, pipe2 with the flag poops uses"
-                    + " does NOT hang");
-            }
-            if (picked === null) {
-                jbmark("PIPE2-PROBE", "neither 0x363a0+0x540 nor +0x560 made a"
-                    + " working pipe -- the window model is wrong, not just"
-                    + " unresolved");
-            } else {
-                syscall_map[0x2af] = 0x363a0 + picked;
-                syscalls[0x2af] = libKernelBase.add32(0x363a0 + picked);
-                /* Proven by behaviour, so pin it as an ADDRESS. The round trip
-                   shows this stub makes a working pipe; it does not show the
-                   stub's immediate is 0x2af, because plain pipe() passes the
-                   same test. Calling 0x2af by number hangs, so the number is
-                   wrong and the address is right -- use the address. */
-                PROVEN[0x2af] = libKernelBase.add32(0x363a0 + picked);
-                let tail = "";
-                if (picked === 0x560) {
-                    /* Monotonic: 0x363e0 > 0x363a0, so it cannot shift less. */
-                    syscall_map[0x1af] = 0x363e0 + 0x560;
-                    syscalls[0x1af] = libKernelBase.add32(0x363e0 + 0x560);
-                    tail = " | 0x1AF=0x" + (0x363e0 + 0x560).toString(16)
-                        + " follows by monotonicity";
-                } else {
-                    tail = " | 0x1AF still ambiguous (+0x540 or +0x560) and"
-                        + " thr_exit is not worth guessing";
-                }
-                jbmark("PIPE2-PROBE", "0x2AF=0x"
-                    + (0x363a0 + picked).toString(16) + " PROVEN by a byte"
-                    + " round trip (+0x" + picked.toString(16) + ")" + tail);
+            /* The O_NONBLOCK reproduction lived here and did its job: it
+               hung exactly as poops does, proving the fault is pipe2 itself
+               and not poops' buffer or chain. It is removed rather than kept
+               because it kills the worker, and every later stage then reports
+               a hang it did not cause -- AUDIT-FAILED sys=[0x4a] was mprotect
+               inheriting a dead worker, not mprotect failing. A diagnostic
+               that poisons everything after it has to be temporary. */
+            if (typeof OFFSET_lk_pipe2_flags_hang !== "undefined"
+                && OFFSET_lk_pipe2_flags_hang) {
+                try { window.__pipe2NoFlags = 1; } catch (e) {  }
+                jbmark("PIPE2-NOFLAGS", "pipe2 hangs on non-zero flags here --"
+                    + " poops will use pipe2(buf,0) + fcntl(F_SETFL)");
             }
         } catch (e) {
             jbmark("PIPE2-PROBE-FAILED", String((e && e.message) || e));

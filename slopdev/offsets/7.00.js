@@ -1553,3 +1553,16 @@ const OFFSET_lk_stub_nids = [
 	[0x38710, 0x189, "YA0r4LCkfeY"],
 	[0x38730, 0x270, "Hx-KCms9n4s"]
 ];
+
+/* pipe2() on this build hangs when given a non-zero flags argument.
+ * Observed three times: poops' pipe2(buf, O_NONBLOCK) never returned, and a
+ * probe reproducing that exact call outside poops hung identically, while the
+ * same stub with flags=0 creates a working pipe (byte round trip) and with an
+ * invalid 0x7FFF0000 returns an error promptly. So the stub is genuinely
+ * pipe2 -- it validates flags -- and it is specifically the accepted non-zero
+ * case that never comes back.
+ *
+ * Whatever the cause, the flag is not needed: pipe2(buf, 0) followed by
+ * fcntl(F_SETFL, O_NONBLOCK) on both ends reaches the same state, and poops
+ * already uses that exact fcntl call on its socketpair write end. */
+const OFFSET_lk_pipe2_flags_hang = true;
