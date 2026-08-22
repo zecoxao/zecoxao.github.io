@@ -249,7 +249,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-55-twin-census";
+const REV = "slopkit-poops-56-slots-spent";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -318,6 +318,58 @@ function markTrailTag(tag, extra) {
     if (tag !== "TEST" && tag !== "TEST-ENTER") return tag;
     const parts = String(extra == null ? "" : extra).split("-");
     return tag + ":" + parts.slice(0, tag === "TEST" ? 2 : 1).join("-");
+}
+
+/* "Have the netcontrol slots already been spent this boot?"
+   ---------------------------------------------------------------------------
+   Once a netcontrol trigger has fired, both slots stay occupied until the
+   console reboots, so every later load fails to arm in about ten milliseconds
+   and the whole run is a no-op. That state is indistinguishable, from the top
+   of the screen, from a run that is about to do something -- you only find out
+   after spending a load and a screenshot on it.
+   The page has no clock_gettime, but it does have the driver's pid, and pids
+   are handed out in increasing order within a boot and reset low across one.
+   So: remember the pid that was live when a trigger last fired; if this load's
+   pid is LOWER, the console rebooted and the slots are fresh. If it is higher,
+   nothing has rebooted since and stage 0 cannot arm.
+   A heuristic, and it says so: a boot with few loads followed by a boot with
+   many can produce a false "spent". It only ever WARNS -- nothing is refused on
+   the strength of it. */
+const SPENT_KEY = "slopkit-poops:spent";
+let driverPid = -1;
+
+function spentRecord() {
+    try {
+        const v = JSON.parse(localStorage.getItem(SPENT_KEY) || "null");
+        return v && typeof v.pid === "number" ? v : null;
+    } catch { return null; }
+}
+
+function bootSlots(tag, extra) {
+    if (tag === "DRIVER-IDENTITY") {
+        const m = /(?:^|-)pid=(\d+)/.exec(String(extra == null ? "" : extra));
+        if (!m) return;
+        driverPid = parseInt(m[1], 10);
+        const s = spentRecord();
+        if (!s) {
+            flushMark("TRIGGER-SLOTS", "fresh-noRecord-pid=" + driverPid);
+        } else if (driverPid < s.pid) {
+            try { localStorage.removeItem(SPENT_KEY); } catch { }
+            flushMark("TRIGGER-SLOTS", "fresh-pid=" + driverPid
+                + "-below-lastFired=" + s.pid + "-so-the-console-rebooted");
+        } else {
+            flushMark("TRIGGER-SPENT", "REBOOT FIRST -- a trigger fired at pid "
+                + s.pid + " and this WebProcess is pid " + driverPid
+                + ", higher, so nothing has rebooted since. stage 0 will fail"
+                + " to arm. (pid heuristic)");
+        }
+        return;
+    }
+    // TRIGGER-ARMED / TRIGGER-EXHAUSTED: this boot's slots are gone.
+    if (driverPid < 0) return;
+    try {
+        localStorage.setItem(SPENT_KEY, JSON.stringify({ pid: driverPid }));
+    } catch { }
 }
 let STALLED_AT = storeGet(PROGRESS_KEY);
 let LAST_RUN = storeJson(RUNLOG_KEY);
@@ -604,6 +656,8 @@ const CONCISE_SCREEN_SHOW = {
     "PREP-NULLCHAIN-OK": 1,
     "PREV-CRUMBS": 1,
     "TWIN-FIRST-CALLS": 1,
+    "TRIGGER-SLOTS": 1,
+    "TRIGGER-SPENT": 1,
     "TWIN-SCAN-DONE": 1,
     "TWIN-SPRAY-DEGRADED": 1,
     "TWIN-FOUND": 1,
@@ -750,6 +804,11 @@ function sendRemoteEvents(unloading) {
 }
 
 function screenMark(tag, extra) {
+    /* Before any filtering: both flushMark and queueEvent land here, and
+       TRIGGER-EXHAUSTED is raised inside a race window, where flushMark
+       defers to queueEvent. */
+    if (tag === "DRIVER-IDENTITY" || tag === "TRIGGER-ARMED"
+        || tag === "TRIGGER-EXHAUSTED") bootSlots(tag, extra);
     const s0 = extra == null ? "" : String(extra);
     if (tag === "STAGE5-DONE" && /(?:^|-)joinRet=0(?:-|$)/.test(s0) &&
         /(?:^|-)shellcodeRet=0x0+(?:-|$)/.test(s0)) {
