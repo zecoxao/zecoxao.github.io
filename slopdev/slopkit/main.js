@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=60 | if this is not the version just"
+    jbmark("BUILD", "main.js v=61 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1449,12 +1449,27 @@ async function prepare(p) {
         if (window.jb && window.jb.hot)
             jbmark("CHAIN-POST-POST", "worker-answered-p1=" + p1);
         if (p1 == 0) {
-            throw new Error("The rop thread ran away: the worker neither"
+            /* Say WHICH chain hung and what it was made of. "The rop thread ran
+               away" names the symptom and nothing else, and poops' own
+               POOPS-WHY is teardown fallout -- the affinity never reads back
+               BECAUSE the chain died, so reading that as the cause points at
+               the wrong syscall, which it did for two rounds. What narrows it
+               is the launch number, the slot count, and whether the chain's
+               return slot was written before it stopped: written means the
+               body ran and something after it blocked, untouched means it
+               never got past the pivot. */
+            let rv = "unreadable";
+            try { rv = "0x" + p.read8(chain.return_value).toString(); }
+            catch (e) {  }
+            jbmark("CHAIN-HUNG", "launch " + tag + " name="
+                + (chain.jbName || "?") + " retslot=" + rv
+                + " -- 10s, no answer and no crash");
+            throw new Error("The rop thread ran away on launch " + tag
+                + ": the worker neither"
                 + " answered nor crashed within 10s. It returned through the"
                 + " hijacked frame and is now lost inside the chain -- stuck in"
-                + " a gadget that does not return, or spinning. This is the"
-                + " same fault as the crash, just landing somewhere that loops"
-                + " instead of faulting.");
+                + " a gadget that does not return, or spinning. Return slot"
+                + " reads " + rv + ".");
         }
     }
 
