@@ -66,11 +66,10 @@ const payload_map = [
         displayTitle: "OnionHEN",
         description: "AIO HEN. Requires the elfldr on port 9021 to be running.",
         fileName: "OnionHEN.elf",
-        // TODO: author/version are not stamped in the binary, confirm before release
-        author: "LightningMods",
+        author: "aydencharles",
         projectSource: "",
         binarySource: "",
-        version: "n/a",
+        version: "0.0.10",
         toPort: 9021
     },
     {
@@ -232,22 +231,20 @@ const payload_map = [
         displayTitle: "PoorDS4",
         description: "DualShock 4 pad bridge",
         fileName: "poords4.elf",
-        // TODO: author/version are not stamped in the binary, confirm before release
-        author: "n/a",
+        author: "ItsBlurf",
         projectSource: "",
         binarySource: "",
-        version: "n/a",
+        version: "0.1.0-rc38",
         toPort: 9021
     },
     {
         displayTitle: "PS Play",
         description: "Media player and streaming app. Web UI on port 9055.",
         fileName: "psplay.elf",
-        // TODO: author is not stamped in the binary, confirm before release
-        author: "n/a",
+        author: "MounirHero",
         projectSource: "",
         binarySource: "",
-        version: "2.0 (built 2026-08-02)",
+        version: "0.2.1",
         toPort: 9021
     },
     {
