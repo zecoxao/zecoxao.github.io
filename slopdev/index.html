@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>slopkit2</title>
-<link rel="stylesheet" href="main.css?v=54">
+<link rel="stylesheet" href="main.css?v=55">
 <link rel="preload" href="slopkit/cat.jpg" as="image">
 <link rel="preload" href="slopkit/mmhmm-cats-ps5.gif" as="image">
 
@@ -136,8 +136,8 @@ window.SLOP_DIR = "slopkit/";
       <div id="summary"></div>
     </div>
 
-<script src="slopkit/rop.js?v=54"></script>
-<script src="slopkit/main.js?v=54"></script>
+<script src="slopkit/rop.js?v=55"></script>
+<script src="slopkit/main.js?v=55"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = window.__offsetsScript;
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -514,7 +514,7 @@ function screenLine(text) {
 // Families whose members are generated, so they cannot be listed by
 // name: the module-shift probe emits one mark per step (SHIFT-WK-1,
 // SHIFT-LK-2, ...) precisely so no single mark hits the 110-char cap.
-const CONCISE_SCREEN_RE = /^(SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM)/;
+const CONCISE_SCREEN_RE = /^(SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM|PIPE2-PROBE)/;
 const CONCISE_SCREEN_SHOW = {
     "PROBE-WAIT": 1,
     "PROBE-W": 1,

@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=54 | if this is not the version just"
+    jbmark("BUILD", "main.js v=55 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1717,6 +1717,88 @@ async function prepare(p) {
         }
     }
 
+    /* Resolve the last window by PROVING a syscall, not by guessing it.
+       -----------------------------------------------------------------------
+       mprotect is refused and dlsym is restricted (69 handles tried, including
+       poops' own LIBKERNEL_HANDLE 0x2001, none agreed with the GOT on getpid),
+       so neither reading the stubs nor asking the loader is available. What is
+       left is the window 0x36100 (+0x540) .. 0x36420 (+0x560), where one stub
+       was inserted and no landmark falls inside.
+
+       The two stubs poops needs are in it, and one of them is a gift: 0x2AF is
+       pipe2. A pipe can be PROVED -- create it, write a byte, read the byte
+       back, and only the real pipe2 can produce that result. So instead of
+       reasoning about which side of the insertion it falls on, call both
+       candidates and keep whichever actually makes a working pipe.
+
+       The shift is monotonic, so a positive answer settles more than itself:
+       0x2AF sits at 0x363a0 and 0x1AF (thr_exit) at 0x363e0, so if pipe2 turns
+       out to be +0x560 then thr_exit -- being higher -- must be +0x560 too.
+       Only if pipe2 is +0x540 does thr_exit stay ambiguous, and thr_exit is
+       exactly the syscall not to guess at.
+
+       Order matters: try +0x560 first. If it is right the pipe works and the
+       lower candidate is never called at all. */
+    if (!(0x2af in syscall_map) && typeof SHIFT.at === "function"
+        && (0x6 in syscall_map)) {
+        try {
+            const fdbuf = malloc(0x40);
+            const iobuf = malloc(0x40);
+            const provePipe = async (rva) => {
+                p.write8(fdbuf, new int64(0xFFFFFFFF, 0xFFFFFFFF));
+                const addr = libKernelBase.add32(rva);
+                const r = await chain.call(addr, fdbuf, 0);
+                if (r.low !== 0 || r.hi !== 0) return null;
+                const rd = p.read4(fdbuf), wr = p.read4(fdbuf.add32(4));
+                if (!(rd > 2 && rd < 0x1000 && wr > 2 && wr < 0x1000
+                    && rd !== wr)) return null;
+                /* Two plausible fds is suggestive; a byte making the round trip
+                   is proof. Nothing but a real pipe does that. */
+                let ok = false;
+                if ((0x4 in syscall_map) && (0x3 in syscall_map)) {
+                    p.write8(iobuf, new int64(0x5A5A5A5A, 0));
+                    const w = await chain.syscall(0x4, wr, iobuf, 1);
+                    if (w.low === 1) {
+                        p.write8(iobuf, new int64(0, 0));
+                        const q = await chain.syscall(0x3, rd, iobuf, 1);
+                        ok = q.low === 1 && (p.read4(iobuf) & 0xff) === 0x5a;
+                    }
+                }
+                await chain.syscall(0x6, rd);
+                await chain.syscall(0x6, wr);
+                return ok ? { rd, wr } : null;
+            };
+            let picked = null;
+            for (const d of [0x560, 0x540]) {
+                if (await provePipe(0x363a0 + d)) { picked = d; break; }
+            }
+            if (picked === null) {
+                jbmark("PIPE2-PROBE", "neither 0x363a0+0x540 nor +0x560 made a"
+                    + " working pipe -- the window model is wrong, not just"
+                    + " unresolved");
+            } else {
+                syscall_map[0x2af] = 0x363a0 + picked;
+                syscalls[0x2af] = libKernelBase.add32(0x363a0 + picked);
+                let tail = "";
+                if (picked === 0x560) {
+                    /* Monotonic: 0x363e0 > 0x363a0, so it cannot shift less. */
+                    syscall_map[0x1af] = 0x363e0 + 0x560;
+                    syscalls[0x1af] = libKernelBase.add32(0x363e0 + 0x560);
+                    tail = " | 0x1AF=0x" + (0x363e0 + 0x560).toString(16)
+                        + " follows by monotonicity";
+                } else {
+                    tail = " | 0x1AF still ambiguous (+0x540 or +0x560) and"
+                        + " thr_exit is not worth guessing";
+                }
+                jbmark("PIPE2-PROBE", "0x2AF=0x"
+                    + (0x363a0 + picked).toString(16) + " PROVEN by a byte"
+                    + " round trip (+0x" + picked.toString(16) + ")" + tail);
+            }
+        } catch (e) {
+            jbmark("PIPE2-PROBE-FAILED", String((e && e.message) || e));
+        }
+    }
+
     /* Stop inferring: make text readable and LOOK.
        -----------------------------------------------------------------------
        Everything up to here has been triangulation, because libSceNKWebKit and
@@ -2234,4 +2316,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=54`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=55`);
