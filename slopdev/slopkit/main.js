@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=64 | if this is not the version just"
+    jbmark("BUILD", "main.js v=65 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -447,6 +447,9 @@ async function prepare(p) {
        derived. getpid is one of them. Every read is in mapped RW data, so none
        of this can crash. */
     let SHIFT = { wk: null, lk: null };
+    /* Syscalls whose ADDRESS was demonstrated on this console but whose number
+       was not. rop.js prefers these over the by-number path. */
+    const PROVEN = {};
     if (typeof OFFSET_lk_import_landmarks !== "undefined") {
         const numOf = (v) => (v.hi >>> 0) * 4294967296 + (v.low >>> 0);
         const wkN = numOf(libSceNKWebKitBase);
@@ -1527,6 +1530,7 @@ async function prepare(p) {
        raw -- so rop.js refuses those instead of running whatever rax held.
        Without the flag this would be the same silent-wrong-stub bug that made
        getpid return -1, moved somewhere harder to see. */
+    p2.provenAddr = PROVEN;
     p2.byNumberOnly = {};
     if (p2.syscall_insn && SHIFT.goneList) {
         for (const nr of SHIFT.goneList) {
@@ -1850,6 +1854,12 @@ async function prepare(p) {
             } else {
                 syscall_map[0x2af] = 0x363a0 + picked;
                 syscalls[0x2af] = libKernelBase.add32(0x363a0 + picked);
+                /* Proven by behaviour, so pin it as an ADDRESS. The round trip
+                   shows this stub makes a working pipe; it does not show the
+                   stub's immediate is 0x2af, because plain pipe() passes the
+                   same test. Calling 0x2af by number hangs, so the number is
+                   wrong and the address is right -- use the address. */
+                PROVEN[0x2af] = libKernelBase.add32(0x363a0 + picked);
                 let tail = "";
                 if (picked === 0x560) {
                     /* Monotonic: 0x363e0 > 0x363a0, so it cannot shift less. */

