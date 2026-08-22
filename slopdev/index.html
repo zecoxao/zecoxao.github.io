@@ -249,7 +249,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-61-fdnum-window";
+const REV = "slopkit-poops-62-trail-in-frame";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -311,6 +311,20 @@ function trailTake() {
 }
 /* Taken at load, before anything can push to it. */
 const PREV_TRAIL = trailTake();
+/* Printed TWICE: once at the top of main(), and again immediately above the
+   ladder. The console log holds 500 lines and auto-scrolls, so anything said at
+   the top of a run is off-screen by the time the run dies -- and the trail is
+   only ever read after a death. Above the ladder it is a handful of lines from
+   ps0/ps1, which is the part of the screen that actually gets photographed. */
+let prevTrailShown = 0;
+function showPrevTrail() {
+    if (!PREV_TRAIL || prevTrailShown >= 2) return;
+    prevTrailShown++;
+    const parts = PREV_TRAIL.split(">");
+    flushMark("PREV-TRAIL", "died-after="
+        + parts.slice(-8).reverse().join("<")
+        + "-steps=" + parts.length);
+}
 /* TEST and TEST-ENTER are the only two tags whose identity lives in the detail
    rather than the tag, and they are the two that name the stage. Fold just
    enough of it in to tell the stages apart. */
@@ -859,6 +873,11 @@ function screenMark(tag, extra) {
     } else return;
     if (line.length > 110) line = line.slice(0, 107) + "...";
     screenLine(line);
+    /* ps1_prepare runs entirely inside a race window, and inside one screenLine
+       repaints at most every 250ms -- so its steps are precisely the thing that
+       does not survive a death in ps1. Seven marks, once each per run: force
+       them out. */
+    if (tag.indexOf("PS1-") === 0) repaintScreen();
 }
 
 function catState(tag, extra) {
@@ -2265,13 +2284,8 @@ async function announceLoader(present = true) {
 
 async function main() {
     /* First thing on screen, before anything can die again: where the previous
-       load stopped. */
-    if (PREV_TRAIL) {
-        const parts = PREV_TRAIL.split(">");
-        flushMark("PREV-TRAIL", "died-after="
-            + parts.slice(-8).reverse().join("<")
-            + "-steps=" + parts.length);
-    }
+       load stopped. Repeated just above the ladder as well -- see showPrevTrail. */
+    showPrevTrail();
     flushMark("POOPS-BOOT", "rev=" + REV + "-trigger=" + cfg.trigger
         + "-burn=" + cfg.burn + "-sockets=" + cfg.sockets
         + "-attempts=" + cfg.attempts + "-from=" + (FROM || "none")
@@ -2363,6 +2377,7 @@ async function main() {
             + "; will put back mask " + driver.origMaskHex + " and rtprio "
             + driver.origPrioType + "/" + driver.origPrio + "\n" + "chain watchdog " + WATCHDOG_MS + " ms per round trip; every loop " + "on this page is bounded by an iteration count AND a wall clock, " + "and every wait has a deadline.\n";
 
+        showPrevTrail();
         stage("running the ladder -- one row at a time");
         try {
             await runLadder();
