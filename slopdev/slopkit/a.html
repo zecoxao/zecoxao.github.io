@@ -326,7 +326,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-56-slots-spent";
+const REV = "slopkit-poops-57-quiet-sink";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -714,6 +714,11 @@ const REMOTE_STAGE_SHOW = /^STAGE5-|^STAGE[0-4]-(ATTEMPT|ROW|STEPS|OK|DONE|FAIL|
 const REMOTE_STAGE5_FLUSH = /^STAGE5-(ENTER|STAGED|SHELLCODE-VERIFY|ALIAS-VERIFY|ARGS|PIPEBUF|SPAWN|CREATE-RET|JOIN-PRE|DONE)$/;
 const remoteEvents = [];
 let remoteSequence = 0, remoteFlushTimer = null, remoteEarlyAttached = false;
+/* Set the first time a POST comes back as anything but success. On GitHub
+   Pages "/__poops_log" is a 404 and there is no sink, so the every-40-marks
+   flush would keep firing requests into it for the whole run. Learn once and
+   stop; the run-boundary flushes stay, since they cost nothing extra. */
+let remoteSinkDead = false;
 
 function captureRemoteEvent(tag, extra) {
     if (tag !== "TEST" && CONCISE_SCREEN_SHOW[tag] !== 1
@@ -740,7 +745,7 @@ function captureRemoteEvent(tag, extra) {
        On GitHub Pages "/__poops_log" 404s and this is one wasted request per 40
        marks; served from slopserve.py it is the whole log. */
     if ((REMOTE_STAGE5_FLUSH.test(tag)
-            || (!raceMode && remoteEvents.length >= 40))
+            || (!raceMode && !remoteSinkDead && remoteEvents.length >= 40))
         && remoteFlushTimer === null)
         remoteFlushTimer = setTimeout(function () {
             remoteFlushTimer = null;
@@ -783,7 +788,9 @@ function sendRemoteEvents(unloading) {
             headers: { "Content-Type": "text/plain;charset=UTF-8" },
             body: body,
             cache: "no-store"
-        }).catch(function () { });
+        }).then(function (r) {
+            if (!r || (r.status !== 204 && !r.ok)) remoteSinkDead = true;
+        }).catch(function () { remoteSinkDead = true; });
     } catch (e) { }
 }
 
