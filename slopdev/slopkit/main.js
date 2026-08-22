@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=63 | if this is not the version just"
+    jbmark("BUILD", "main.js v=64 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1461,17 +1461,20 @@ async function prepare(p) {
             let rv = "unreadable";
             try { rv = "0x" + p.read8(chain.return_value).toString(); }
             catch (e) {  }
-            jbmark("CHAIN-HUNG", "launch " + tag + " name="
-                + (chain.jbName || "?") + " retslot=" + rv
-                + " -- 10s, no answer and no crash");
+            jbmark("CHAIN-HUNG", "launch " + tag + " sys=["
+                + ((chain.syscList || []).map(n => "0x" + n.toString(16))
+                    .join(",") || "none") + "] ret=" + rv
+                + " name=" + (chain.jbName || "?"));
             /* Lead with the measurements. jbmarks are filtered by a list
                that lives in index.html, which is itself cached and therefore
                does not know about CHAIN-HUNG -- so the mark exists and never
                reaches the screen. The thrown message does reach it, but the
                screen truncates at ~110 characters, and the previous wording
                spent all of them on prose. Numbers first, explanation after. */
-            throw new Error("ran away " + tag + " ret=" + rv + " name="
-                + (chain.jbName || "?")
+            const sl = (chain.syscList || []).map(n =>
+                "0x" + n.toString(16)).join(",") || "none";
+            throw new Error("ran away " + tag + " sys=[" + sl + "] ret=" + rv
+                + " name=" + (chain.jbName || "?")
                 + " -- worker neither answered nor crashed in 10s;"
                 + " ret still poisoned means it never got past the pivot,"
                 + " a written ret means the body ran and something blocked.");

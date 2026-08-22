@@ -43,6 +43,9 @@ class rop {
     clear() {
         this.count = this.initial_count;
         this.branches_count = 0;
+        /* Reset alongside the chain body so the list always describes the
+           launch that is about to run, not the one before it. */
+        this.syscList = [];
 
         this.stack_array.set(this.zeroed_stack);
     }
@@ -228,6 +231,11 @@ class rop {
        the stand-in it uses (`xor r9d,r9d ; test r9,r9 ; setne al ; ret`)
        clobbers al. */
     fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
+        /* Record what this chain is made of. A hung chain currently reports
+           only a slot count, and "14 slots" fits any three-argument syscall --
+           which is not enough to tell socket() apart from a blocking read().
+           The numbers cost nothing to keep and name the call outright. */
+        (this.syscList = this.syscList || []).push(sysc);
         if (!this.p.syscall_insn) {
             this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
             return;
@@ -277,6 +285,7 @@ class rop {
            placeholders were the same `ret`. These four are not
            interchangeable, so the pad goes in front and the target keeps the
            parity it had. */
+        (this.syscList = this.syscList || []).push(sysc);
         if (this.p.syscall_insn) {
             if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
                 this.push(this.gadgets["ret"]);
@@ -440,6 +449,7 @@ class rop {
            placeholders were the same `ret`. These four are not
            interchangeable, so the pad goes in front and the target keeps the
            parity it had. */
+        (this.syscList = this.syscList || []).push(sysc);
         if (this.p.syscall_insn) {
             if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
                 this.push(this.gadgets["ret"]);
