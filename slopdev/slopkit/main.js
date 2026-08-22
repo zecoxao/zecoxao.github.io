@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=62 | if this is not the version just"
+    jbmark("BUILD", "main.js v=63 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1919,6 +1919,16 @@ async function prepare(p) {
             if (typeof lc_gadgetmap !== "undefined")
                 src += "|" + Object.keys(lc_gadgetmap).sort()
                     .map(k => k + ":" + lc_gadgetmap[k]).join(",");
+            /* The DISPATCH mechanism belongs in this signature too, not just
+               the gadgets. "mprotect refused" was recorded while syscalls went
+               by stub address, and mprotect's was one of the 272 interpolated
+               ones -- on a 0x20 grid a miss runs a different syscall, so that
+               -1 may never have come from mprotect at all. fsyscall now calls
+               by number through a verified instruction, which is a different
+               question with a different answer, and the old verdict was
+               outliving the thing it was a verdict about. Same mistake as the
+               FAULT that survived the pop rdx fix. */
+            src += "|dispatch:" + (p2 && p2.syscall_insn ? "bynumber" : "byaddr");
             let h = 0;
             for (let z = 0; z < src.length; z++)
                 h = ((h * 31 + src.charCodeAt(z)) & 0x7fffffff);
