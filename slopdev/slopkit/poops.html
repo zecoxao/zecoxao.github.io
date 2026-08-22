@@ -227,8 +227,8 @@ otherwise.</div>
 
 <div id="console" hidden></div>
 
-<script src="rop.js?v=55"></script>
-<script src="main.js?v=55"></script>
+<script src="rop.js?v=56"></script>
+<script src="main.js?v=56"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="../offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -542,7 +542,7 @@ function screenLine(text) {
 // Families whose members are generated, so they cannot be listed by
 // name: the module-shift probe emits one mark per step (SHIFT-WK-1,
 // SHIFT-LK-2, ...) precisely so no single mark hits the 110-char cap.
-const CONCISE_SCREEN_RE = /^(SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM|PIPE2-PROBE)/;
+const CONCISE_SCREEN_RE = /^(SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM|PIPE2-PROBE|SYSCALL-INSN)/;
 const CONCISE_SCREEN_SHOW = {
     "PROBE-WAIT": 1,
     "PROBE-W": 1,

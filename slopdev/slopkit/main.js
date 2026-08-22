@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=55 | if this is not the version just"
+    jbmark("BUILD", "main.js v=56 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1484,6 +1484,15 @@ async function prepare(p) {
     };
 
     p2.LC_SOURCED = LC_SOURCED;
+    /* One correct stub is enough. See rop.js fsyscall: stub+7 is
+       `mov r10,rcx ; syscall ; jb err ; ret`, the same in all 328, so with
+       rax loaded by `pop rax` every syscall number is reachable through it.
+       getpid's stub is the one to build on -- read from the import GOT, not
+       interpolated -- which retires the 272 addresses that were only as good
+       as the step they were guessed in, and the 35 that had to be dropped.
+       Verified below before anything is allowed to depend on it. */
+    if (SHIFT.exact && SHIFT.exact[0x14] && (0x14 in syscall_map))
+        p2.syscall_insn = libKernelBase.add32(syscall_map[0x14] + 7);
     /* Every OFFSET_lk_* TEXT constant is still a 7_00_00_44 address. The
        syscall stubs were corrected because syscall_map is a mutable object;
        these are `const`, so nothing could rewrite them, and SHIFT-TODO has
@@ -1562,6 +1571,21 @@ async function prepare(p) {
        write_result. The old guard only rejected 0, so 0xFFFFFFFF sailed
        through and every syscall return value downstream was suspect. */
     const pidOK = pid.hi === 0 && pid.low > 0 && pid.low < 0x100000;
+    /* Prove the universal path against the one it was derived from: the same
+       getpid, invoked by number through stub+7 instead of by address. Equal
+       answers mean rax reaches the kernel and the tail behaves; anything else
+       and it is switched off rather than trusted quietly. */
+    if (p2.syscall_insn) {
+        const viaInsn = await chain.syscall(0x14);
+        const same = viaInsn.low === pid.low && viaInsn.hi === pid.hi;
+        if (!same) p2.syscall_insn = null;
+        jbmark("SYSCALL-INSN", same
+            ? "stub+7 with pop rax returns the same pid -- every syscall number"
+            + " is now reachable without a stub address"
+            : "DISABLED: by-number getpid gave 0x" + viaInsn.toString()
+            + " but by-address gave " + pid.low);
+    }
+
     jbmark("PREP-GETPID-OK", "pid=" + pid.low + (pidOK ? ""
         : " *** IMPLAUSIBLE (0x" + pid.toString() + ") -- getpid cannot fail,"
         + " so the syscall return path is wrong ***"));
@@ -2316,4 +2340,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=55`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=56`);

