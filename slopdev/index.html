@@ -249,7 +249,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-52-single-pass";
+const REV = "slopkit-poops-53-durable-trail";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -275,6 +275,49 @@ function storeJson(k) {
     const raw = storeGet(k);
     if (!raw) return null;
     try { return JSON.parse(raw); } catch { return null; }
+}
+
+/* Crash-durable mark trail.
+   ---------------------------------------------------------------------------
+   Everything above is sessionStorage, which is per-tab and does not survive the
+   WebProcess dying: the screen, the queued marks and PROGRESS_KEY all go with
+   it, and the only thing left is the console log saying
+
+       [Syscore App] App Crash : PID=0x5b, reason=0xa
+
+   -- signal 10, SIGBUS, which on FreeBSD amd64 is T_PROTFLT and its neighbours,
+   i.e. a protection fault rather than a page fault. No address, no stage,
+   nothing. main.js already commits crumbs to localStorage for the prepare and
+   chain-launch phases for exactly this reason (CRUMB_KEY there); the ladder had
+   no equivalent, so a death inside a ps* stage left nothing behind at all, and
+   three identical crashes in a row said no more than one of them did.
+   Tags only -- short, one setItem per mark, read back and cleared at the top of
+   the next load. The LAST tag in the trail is the last thing that ran. */
+const TRAIL_KEY = "slopkit-poops:trail";
+const TRAIL_MAX = 80;
+const trail = [];
+function trailPush(tag) {
+    if (trail.length >= TRAIL_MAX) trail.shift();
+    trail.push(tag);
+    try { localStorage.setItem(TRAIL_KEY, trail.join(">")); } catch { }
+}
+function trailTake() {
+    let v = "";
+    try {
+        v = localStorage.getItem(TRAIL_KEY) || "";
+        localStorage.removeItem(TRAIL_KEY);
+    } catch { }
+    return v;
+}
+/* Taken at load, before anything can push to it. */
+const PREV_TRAIL = trailTake();
+/* TEST and TEST-ENTER are the only two tags whose identity lives in the detail
+   rather than the tag, and they are the two that name the stage. Fold just
+   enough of it in to tell the stages apart. */
+function markTrailTag(tag, extra) {
+    if (tag !== "TEST" && tag !== "TEST-ENTER") return tag;
+    const parts = String(extra == null ? "" : extra).split("-");
+    return tag + ":" + parts.slice(0, tag === "TEST" ? 2 : 1).join("-");
 }
 let STALLED_AT = storeGet(PROGRESS_KEY);
 let LAST_RUN = storeJson(RUNLOG_KEY);
@@ -508,7 +551,12 @@ function repaintScreen() {
 function setRaceMode(on) {
     const was = raceMode;
     raceMode = !!on;
-    if (was && !raceMode) repaintScreen();
+    /* One crumb either side of the race window. Marks raised INSIDE it are
+       deliberately not trailed -- a synchronous store per mark could perturb
+       the very timing the race depends on -- so these two are what localises a
+       death in there. */
+    if (!was && raceMode) trailPush("RACE-ENTER");
+    if (was && !raceMode) { trailPush("RACE-LEAVE"); repaintScreen(); }
     return was;
 }
 function screenLine(text) {
@@ -555,6 +603,7 @@ const CONCISE_SCREEN_SHOW = {
     "PROBE-VERDICT": 1,
     "PREP-NULLCHAIN-OK": 1,
     "PREV-CRUMBS": 1,
+    "PREV-TRAIL": 1,
     "WORKER-RET-FINGERPRINT": 1,
     "POOPS-BOOT": 1,
     "OFFSETS-READY": 1,
@@ -743,6 +792,7 @@ function flushMark(tag, extra) {
 
     if (raceMode && CRITICAL_MARKS[tag] !== 1) { queueEvent(tag, extra); return; }
     marksBlocked++;
+    trailPush(markTrailTag(tag, extra));
     screenMark(tag, extra);
 }
 
@@ -2104,6 +2154,14 @@ async function announceLoader(present = true) {
 }
 
 async function main() {
+    /* First thing on screen, before anything can die again: where the previous
+       load stopped. */
+    if (PREV_TRAIL) {
+        const parts = PREV_TRAIL.split(">");
+        flushMark("PREV-TRAIL", "died-after="
+            + parts.slice(-8).reverse().join("<")
+            + "-steps=" + parts.length);
+    }
     flushMark("POOPS-BOOT", "rev=" + REV + "-trigger=" + cfg.trigger
         + "-burn=" + cfg.burn + "-sockets=" + cfg.sockets
         + "-attempts=" + cfg.attempts + "-from=" + (FROM || "none")

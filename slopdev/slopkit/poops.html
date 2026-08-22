@@ -328,7 +328,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-52-single-pass";
+const REV = "slopkit-poops-53-durable-trail";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -354,6 +354,32 @@ function storeJson(k) {
     const raw = storeGet(k);
     if (!raw) return null;
     try { return JSON.parse(raw); } catch { return null; }
+}
+
+/* Crash-durable mark trail -- see index.html, where this is documented in
+   full. sessionStorage does not survive the WebProcess dying; localStorage
+   does, so the tag stream goes there and is read back at the next load. */
+const TRAIL_KEY = "slopkit-poops:trail";
+const TRAIL_MAX = 80;
+const trail = [];
+function trailPush(tag) {
+    if (trail.length >= TRAIL_MAX) trail.shift();
+    trail.push(tag);
+    try { localStorage.setItem(TRAIL_KEY, trail.join(">")); } catch { }
+}
+function trailTake() {
+    let v = "";
+    try {
+        v = localStorage.getItem(TRAIL_KEY) || "";
+        localStorage.removeItem(TRAIL_KEY);
+    } catch { }
+    return v;
+}
+const PREV_TRAIL = trailTake();
+function markTrailTag(tag, extra) {
+    if (tag !== "TEST" && tag !== "TEST-ENTER") return tag;
+    const parts = String(extra == null ? "" : extra).split("-");
+    return tag + ":" + parts.slice(0, tag === "TEST" ? 2 : 1).join("-");
 }
 let STALLED_AT = storeGet(PROGRESS_KEY);
 let LAST_RUN = storeJson(RUNLOG_KEY);
@@ -538,7 +564,10 @@ function repaintScreen() {
 function setRaceMode(on) {
     const was = raceMode;
     raceMode = !!on;
-    if (was && !raceMode) repaintScreen();
+    /* Marks raised inside the race window are not trailed -- a synchronous
+       store per mark could perturb the timing the race depends on. */
+    if (!was && raceMode) trailPush("RACE-ENTER");
+    if (was && !raceMode) { trailPush("RACE-LEAVE"); repaintScreen(); }
     return was;
 }
 function screenLine(text) {
@@ -583,6 +612,7 @@ const CONCISE_SCREEN_SHOW = {
     "PROBE-VERDICT": 1,
     "PREP-NULLCHAIN-OK": 1,
     "PREV-CRUMBS": 1,
+    "PREV-TRAIL": 1,
     "WORKER-RET-FINGERPRINT": 1,
     "POOPS-BOOT": 1,
     "OFFSETS-READY": 1,
@@ -771,6 +801,7 @@ function flushMark(tag, extra) {
 
     if (raceMode && CRITICAL_MARKS[tag] !== 1) { queueEvent(tag, extra); return; }
     marksBlocked++;
+    trailPush(markTrailTag(tag, extra));
     screenMark(tag, extra);
 }
 
@@ -1953,6 +1984,12 @@ async function bootPrimitiveAndChain() {
 }
 
 async function main() {
+    if (PREV_TRAIL) {
+        const parts = PREV_TRAIL.split(">");
+        flushMark("PREV-TRAIL", "died-after="
+            + parts.slice(-8).reverse().join("<")
+            + "-steps=" + parts.length);
+    }
     flushMark("POOPS-BOOT", "rev=" + REV + "-trigger=" + cfg.trigger
         + "-burn=" + cfg.burn + "-sockets=" + cfg.sockets
         + "-attempts=" + cfg.attempts + "-from=" + (FROM || "none")
