@@ -2169,7 +2169,7 @@ export function makeTwinEngine(X) {
         first.getSample = retGetOf(0, 0);
         first.optlenSample = optlenOf(0, 0);
 
-        scanMark(
+        flushMark(
           "TWIN-FIRST-CALLS",
           "set_rthdr[0]=" +
             first.spraySample +
@@ -4255,13 +4255,24 @@ export function makePoopsEngine(X) {
     }
     closeWindow();
     flushQueueSoft();
+    /* The one line that says WHY there was no twin, and the only place the
+       census reaches the screen. Kept short enough to survive the 110-char
+       clip, and carrying untouched/notag/optlen as well as the fail counts:
+       "spray=0 read=0 untch=0" with examined>0 means the spray is landing and
+       the allocation simply is not being handed out twice, which is a
+       statement about the BUG. Any of them non-zero is a statement about the
+       spray, which is a different problem entirely. */
     if (!tw.found && tw.total)
       flushMark(
         "TWIN-SCAN-DONE",
-        "reason=" + (tw.reason || "?") + "-attempts=" + tw.attempts
-          + "-ms=" + tw.ms + "-totSprayFail=" + tw.total.sprayFailCount
-          + "-totReadFail=" + tw.total.readFailCount + "-totSelf="
-          + tw.total.selfTagged + "of" + tw.total.examined
+        "reason=" + (tw.reason || "?") + "-a=" + tw.attempts
+          + "-ms=" + tw.ms
+          + "-spray=" + tw.total.sprayFailCount
+          + "-read=" + tw.total.readFailCount
+          + "-self=" + tw.total.selfTagged + "/" + tw.total.examined
+          + "-untch=" + tw.total.untouchedCount
+          + "-notag=" + tw.total.tagAbsentCount
+          + "-optlen=" + tw.total.optlenWrongCount
       );
     if (!tw.found) {
       rep.detail = "no twin in " + tw.attempts + " rounds ("

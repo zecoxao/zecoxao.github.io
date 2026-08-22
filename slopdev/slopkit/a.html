@@ -265,7 +265,7 @@ let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./poops.js?v=74");
+    const lib = await import("./poops.js?v=75");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
@@ -326,7 +326,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-54-stage0-rows";
+const REV = "slopkit-poops-55-twin-census";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -589,6 +589,11 @@ function screenLine(text) {
 const CONCISE_SCREEN_RE = /^(SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM|PIPE2-PROBE|SYSCALL-INSN|SYSCALL-BYNUMBER)/;
 const CONCISE_SCREEN_SHOW = {
     "POOPS-BOOT": 1,
+    "TWIN-FIRST-CALLS": 1,
+    "TWIN-SCAN-DONE": 1,
+    "TWIN-SPRAY-DEGRADED": 1,
+    "TWIN-FOUND": 1,
+    "IOV-BLOCKED": 1,
     "PREV-TRAIL": 1,
     "OFFSETS-READY": 1,
     "TRIGGER-ARMED": 1,
