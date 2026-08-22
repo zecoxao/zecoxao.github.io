@@ -161,21 +161,22 @@ document.write('<scr' + 'ipt src="slopkit/main.js' + window.__cb + '"><\/scr' + 
 <script src="slopkit/syscalls.js"></script>
 
 <script type="module">
-/* Dynamic, so these pick up window.__cb too. A static specifier is
-   frozen into this cached page; core.js and mem.js sat at ?v=10 while
-   their contents moved on, which is the same trap rop.js was in. */
-const { establishPrimitive, fakeCellReleased } =
-    await import("./slopkit/core.js" + (window.__cb || ""));
-const { installWindowP, pairStatus } =
-    await import("./slopkit/mem.js" + (window.__cb || ""));
-const { int64 } = await import("./slopkit/int64.js" + (window.__cb || ""));
+/* NOT stamped, deliberately. A query string makes a DISTINCT module
+   instance, and mem.js imports "./int64.js" and "./core.js?v=10"
+   with those exact specifiers. Stamping only the page's copies gave
+   two int64 classes, so an int64 built here failed mem.js's type
+   check -- "bad numeric address NaN". Module URLs must match across
+   every importer, so busting these means editing mem.js too. */
+import { establishPrimitive, fakeCellReleased } from "./slopkit/core.js?v=10";
+import { installWindowP, pairStatus } from "./slopkit/mem.js?v=10";
+import { int64 } from "./slopkit/int64.js";
 
 let BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList;
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./slopkit/poops.js" + (window.__cb || ""));
+    const lib = await import("./slopkit/poops.js?v=37");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
