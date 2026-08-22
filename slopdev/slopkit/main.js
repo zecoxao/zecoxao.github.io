@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=56 | if this is not the version just"
+    jbmark("BUILD", "main.js v=57 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -596,6 +596,7 @@ async function prepare(p) {
             for (const k of gone) delete syscall_map[k];
             SHIFT.exact = exact;
             SHIFT.dropped = gone.length;
+            SHIFT.goneList = gone.slice();
             const need = { 0x3: "read", 0x4: "write", 0x6: "close",
                 0x4a: "mprotect", 0x61: "socket", 0x1c7: "thr_new",
                 0x1dd: "mmap", 0x14b: "sched_yield" };
@@ -1493,6 +1494,26 @@ async function prepare(p) {
        Verified below before anything is allowed to depend on it. */
     if (SHIFT.exact && SHIFT.exact[0x14] && (0x14 in syscall_map))
         p2.syscall_insn = libKernelBase.add32(syscall_map[0x14] + 7);
+    /* A dropped stub is an unknown ADDRESS, not a missing syscall: 7_00_00_44
+       has all 328 and .70 only added to them. Once fsyscall can invoke by
+       number that distinction matters, because poops' needStub() asks "is
+       there an entry" and would refuse a syscall that is now callable.
+       So give the dropped ones an entry pointing at the syscall instruction
+       itself and record that they are by-number-only. That address is right
+       for fsyscall (which loads rax) and wrong for anything that pushes it
+       raw -- so rop.js refuses those instead of running whatever rax held.
+       Without the flag this would be the same silent-wrong-stub bug that made
+       getpid return -1, moved somewhere harder to see. */
+    p2.byNumberOnly = {};
+    if (p2.syscall_insn && SHIFT.goneList) {
+        for (const nr of SHIFT.goneList) {
+            syscalls[nr] = p2.syscall_insn;
+            p2.byNumberOnly[nr] = 1;
+        }
+        jbmark("SYSCALL-BYNUMBER", SHIFT.goneList.length + " stub(s) with an"
+            + " unknown address are callable by number | 0x17="
+            + (p2.byNumberOnly[0x17] ? "by number" : "had an address"));
+    }
     /* Every OFFSET_lk_* TEXT constant is still a 7_00_00_44 address. The
        syscall stubs were corrected because syscall_map is a mutable object;
        these are `const`, so nothing could rewrite them, and SHIFT-TODO has
@@ -2340,4 +2361,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=56`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=57`);

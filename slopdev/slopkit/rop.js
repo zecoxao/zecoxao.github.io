@@ -255,6 +255,16 @@ class rop {
     }
 
     self_healing_syscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
+        /* These push the stub address as a raw chain slot and re-arm it by
+           writing that same address into the restore point, so there is
+           nowhere to load rax and the by-number path does not fit. A syscall
+           that only has a by-number entry would run whatever rax happened to
+           hold, so refuse it here rather than later and quietly. */
+        if (this.p.byNumberOnly && this.p.byNumberOnly[sysc])
+            throw new Error("self_healing_syscall: 0x" + sysc.toString(16)
+                + " is callable by number but its stub address is unknown"
+                + " (.70 inserted stubs and no landmark brackets this one)."
+                + " Use add_syscall/syscall instead.");
         this.push_sysv(rdi, rsi, rdx, rcx, r8, r9);
         let restore_point = this.get_rsp();
         this.push(this.gadgets["ret"]);
@@ -310,6 +320,16 @@ class rop {
     }
 
     self_healing_syscall_2(sysc, rdi = undefined, deref_rdi = false, rsi = undefined, deref_rsi = false, rdx = undefined, deref_rdx = false, rcx = undefined, deref_rcx = false, r8 = undefined, deref_r8 = false, r9 = undefined, deref_r9 = false) {
+        /* These push the stub address as a raw chain slot and re-arm it by
+           writing that same address into the restore point, so there is
+           nowhere to load rax and the by-number path does not fit. A syscall
+           that only has a by-number entry would run whatever rax happened to
+           hold, so refuse it here rather than later and quietly. */
+        if (this.p.byNumberOnly && this.p.byNumberOnly[sysc])
+            throw new Error("self_healing_syscall: 0x" + sysc.toString(16)
+                + " is callable by number but its stub address is unknown"
+                + " (.70 inserted stubs and no landmark brackets this one)."
+                + " Use add_syscall/syscall instead.");
 
         if (rsi !== undefined) {
             if (deref_rsi) {
