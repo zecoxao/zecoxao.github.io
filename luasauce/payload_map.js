@@ -63,6 +63,39 @@ const payload_map = [
         toPort: 9021
     },
     {
+        displayTitle: "OnionHEN",
+        description: "AIO HEN. Requires the elfldr on port 9021 to be running.",
+        fileName: "OnionHEN.elf",
+        // TODO: author/version are not stamped in the binary, confirm before release
+        author: "LightningMods",
+        projectSource: "",
+        binarySource: "",
+        version: "n/a",
+        toPort: 9021
+    },
+    {
+        displayTitle: "PS5 HEN",
+        description: "HEN for 3.xx/4.xx",
+        fileName: "ps5-hen.elf",
+        author: "SpecterDev, f0f, flat_z",
+        projectSource: "",
+        binarySource: "",
+        version: "n/a",
+        supportedFirmwares: ["3.", "4."],
+        toPort: 9021
+    },
+    {
+        displayTitle: "Byepervisor HEN",
+        description: "FPKG enabler",
+        fileName: "byepervisor.elf",
+        author: "SpecterDev, ChendoChap, flatz, fail0verflow, Znullptr, kiwidog, sleirsgoevy, EchoStretch, LightningMods, BestPig, zecoxao",
+        projectSource: "https://github.com/EchoStretch/Byepervisor",
+        binarySource: "https://github.com/EchoStretch/Byepervisor/actions/runs/12567456429",
+        version: "47a6ae7",
+        supportedFirmwares: ["1.00", "1.01", "1.02", "1.12", "1.14", "2.00", "2.20", "2.25", "2.26", "2.30", "2.50", "2.70"],
+        toPort: 9021
+    },
+    {
         displayTitle: "libhijacker game-patch",
         description: "Patches supported games to run at higher framerates, and adds debug menus to certain titles.",
         fileName: "libhijacker-game-patch.v1.160.elf",
@@ -153,6 +186,98 @@ const payload_map = [
         binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v2.3",
         version: "2.3",
 		supportedFirmwares: ["3.","4.","5.","6.","7."],
+        toPort: 9021
+    },
+    {
+        displayTitle: "Payload Manager",
+        description: "Payload manager and autoloader. Web UI on port 8084.",
+        fileName: "pldmgr.elf",
+        author: "PLK",
+        projectSource: "",
+        binarySource: "",
+        version: "0.5.1",
+        toPort: 9021
+    },
+    {
+        displayTitle: "WebKit Autoloader",
+        description: "Installs the WebKit autoloader app. Web UI on port 18181.",
+        fileName: "autoloader.elf",
+        author: "PLK",
+        projectSource: "",
+        binarySource: "",
+        version: "0.3.1",
+        toPort: 9021
+    },
+    {
+        displayTitle: "gdbsrv",
+        description: "GDB server. Runs on port 2159.",
+        fileName: "gdbsrv.elf",
+        author: "john-tornblom",
+        projectSource: "https://github.com/ps5-payload-dev/gdbsrv",
+        binarySource: "https://github.com/ps5-payload-dev/pacbrew-repo/actions/runs/13686166926",
+        version: "0.5",
+        toPort: 9021
+    },
+    {
+        displayTitle: "shsrv",
+        description: "Telnet shell server. Runs on port 2323.",
+        fileName: "shsrv.elf",
+        author: "john-tornblom",
+        projectSource: "https://github.com/ps5-payload-dev/shsrv",
+        binarySource: "https://github.com/ps5-payload-dev/pacbrew-repo/actions/runs/13686166926",
+        version: "0.13.1",
+        toPort: 9021
+    },
+    {
+        displayTitle: "PoorDS4",
+        description: "DualShock 4 pad bridge",
+        fileName: "poords4.elf",
+        // TODO: author/version are not stamped in the binary, confirm before release
+        author: "n/a",
+        projectSource: "",
+        binarySource: "",
+        version: "n/a",
+        toPort: 9021
+    },
+    {
+        displayTitle: "PS Play",
+        description: "Media player and streaming app. Web UI on port 9055.",
+        fileName: "psplay.elf",
+        // TODO: author is not stamped in the binary, confirm before release
+        author: "n/a",
+        projectSource: "",
+        binarySource: "",
+        version: "2.0 (built 2026-08-02)",
+        toPort: 9021
+    },
+    {
+        displayTitle: "ps5debug",
+        description: "Debugger, open source version by DizzRL",
+        fileName: "ps5debug_dizz.elf",
+        author: "Dizz, astrelsky, John Tornblom, SiSTR0, golden, idlesauce",
+        projectSource: "https://github.com/idlesauce/ps5debug",
+        binarySource: "https://github.com/idlesauce/ps5debug/releases/download/v0.0.1/ps5debug.elf",
+        version: "0.0.1-r2",
+        toPort: 9021
+    },
+    {
+        displayTitle: "ps5-versions",
+        description: "Shows kernel build, os and sdk versions",
+        fileName: "ps5-versions.elf",
+        author: "SiSTRo",
+        projectSource: "https://github.com/SiSTR0/ps5-versions",
+        binarySource: "https://github.com/SiSTR0/ps5-versions/releases/download/v1.0/ps5-versions.elf",
+        version: "1.0",
+        supportedFirmwares: ["1.", "2.", "3.", "4."]
+    },
+    {
+        displayTitle: "ps5-remoteplay-get-pin",
+        description: "Get Remote Play PIN for offline activated users. Send again to cancel.",
+        fileName: "rp-get-pin.elf",
+        author: "idlesauce",
+        projectSource: "https://github.com/idlesauce/ps5-remoteplay-get-pin",
+        binarySource: "https://github.com/idlesauce/ps5-remoteplay-get-pin/releases/tag/v0.1.1",
+        version: "0.1.1",
         toPort: 9021
     },
     {
