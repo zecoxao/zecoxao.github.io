@@ -4204,8 +4204,20 @@ export function makePoopsEngine(X) {
     at(STEPS[1]);
     const pre = await preFlushAct();
     if (pre && pre.ok === false) {
-      rep.detail = "trigger did not arm: " + (pre.why || "?");
+      /* Lead with the remedy when there is one. Both netcontrol slots stay
+         occupied for the rest of the boot once a trigger has fired -- that is
+         what "next setuid(1) is irreversible for the boot" means -- so every
+         later run arms nothing and fails in 10ms with crfrees=0. The reason
+         says so, but it says so at the END of a line the screen truncates, so
+         it reads as an unexplained failure and invites debugging something
+         that is working correctly. */
+      const exhausted = /netcontrol slots occupied/.test(pre.why || "");
+      rep.detail = (exhausted ? "REBOOT REQUIRED -- " : "")
+        + "trigger did not arm: " + (pre.why || "?");
       rep.terminal = !!pre.terminal;
+      if (exhausted)
+        flushMark("TRIGGER-EXHAUSTED", "both netcontrol slots were consumed by"
+          + " an earlier trigger this boot; nothing can arm until reboot");
       return rep;
     }
     flushQueueSoft();
