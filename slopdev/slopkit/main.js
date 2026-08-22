@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=65 | if this is not the version just"
+    jbmark("BUILD", "main.js v=66 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1843,10 +1843,42 @@ async function prepare(p) {
                 await chain.syscall(0x6, wr);
                 return ok ? { rd, wr } : null;
             };
+            /* Distinguish pipe2 from pipe, which the round trip cannot.
+               pipe2 VALIDATES its flags argument and rejects an unknown bit
+               with EINVAL; pipe takes one argument and ignores the second
+               entirely, so it returns 0 and makes a pipe either way. That is
+               why +0x560 passed the first probe and then hung in poops: poops
+               calls with O_NONBLOCK, and a plain pipe() honours no such flag,
+               so its reader blocks forever on an empty pipe.
+               Safe both ways -- an invalid flag either errors or is ignored,
+               and neither outcome blocks. */
+            const rejectsBadFlags = async (rva) => {
+                p.write8(fdbuf, new int64(0xFFFFFFFF, 0xFFFFFFFF));
+                const r = await chain.call(libKernelBase.add32(rva),
+                    fdbuf, 0x7FFF0000);
+                if (r.low === 0 && r.hi === 0) {
+                    /* It accepted nonsense: pipe(), not pipe2. Close what it
+                       just made so the probe does not leak two fds per try. */
+                    const a = p.read4(fdbuf), b = p.read4(fdbuf.add32(4));
+                    if (a > 2 && a < 0x1000) await chain.syscall(0x6, a);
+                    if (b > 2 && b < 0x1000) await chain.syscall(0x6, b);
+                    return false;
+                }
+                return true;
+            };
             let picked = null;
+            const tried = [];
             for (const d of [0x560, 0x540]) {
-                if (await provePipe(0x363a0 + d)) { picked = d; break; }
+                const rva = 0x363a0 + d;
+                if (!await provePipe(rva)) { tried.push("+0x" + d.toString(16) + ":nopipe"); continue; }
+                if (!await rejectsBadFlags(rva)) {
+                    tried.push("+0x" + d.toString(16) + ":pipe-not-pipe2");
+                    continue;
+                }
+                tried.push("+0x" + d.toString(16) + ":OK");
+                picked = d; break;
             }
+            jbmark("PIPE2-CANDIDATES", tried.join(" "));
             if (picked === null) {
                 jbmark("PIPE2-PROBE", "neither 0x363a0+0x540 nor +0x560 made a"
                     + " working pipe -- the window model is wrong, not just"
