@@ -3465,7 +3465,21 @@ export function makePoopsEngine(X) {
   }
   function emit(num, retPtr, a1, a2, a3, a4, a5) {
     needStub(num, "unrolled chain emit");
-    chain.fcall(P.syscalls[num], a1, a2, a3, a4, a5);
+    /* By-number-only syscalls must NOT be fcall'd.
+       -----------------------------------------------------------------------
+       emit() used to jump straight to P.syscalls[num], i.e. the stub ADDRESS.
+       On 7.00.00.70 thirty-five stubs have no known address, and main.js gives
+       those an entry pointing at the bare syscall instruction instead -- which
+       is right for fsyscall, because fsyscall loads rax, and catastrophic for a
+       raw fcall, which executes whatever number rax happened to hold.
+       SETUID (0x17) is one of them. That is how the netcontrol sandwich killed
+       the process one line after NETCTRL-SET: close/setuid/socket/setuid in a
+       single chain, and the setuid slots ran a wild syscall.
+       fsyscall() already picks the right form for all three cases (proven
+       address, no syscall instruction, or by number), so hand those to it. */
+    if (P.byNumberOnly && P.byNumberOnly[num])
+      chain.fsyscall(num, a1, a2, a3, a4, a5);
+    else chain.fcall(P.syscalls[num], a1, a2, a3, a4, a5);
     chain.write_result4(retPtr);
   }
 
@@ -4157,6 +4171,11 @@ export function makePoopsEngine(X) {
     });
     untrack(discard);
     S.setuidCalls += 2;
+    await ttyMark(
+      "NETCTRL-SANDWICH",
+      "close=" + retOf(0) + "-setuid=" + retOf(1) + "-socket=" + retOf(2)
+        + "-setuid2=" + retOf(3) + "-wanted=" + discard,
+    );
     let uafFd = retOf(2);
     if (uafFd < 0)
       throw new Error(
