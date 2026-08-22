@@ -992,14 +992,13 @@ async function sendPayloadToElfldr(name) {
         { cache: "no-store" });
     if (!response.ok)
         throw new Error("payload fetch failed: HTTP " + response.status);
-    const declared = response.headers.get("Content-Length");
+    // Deliberately no Content-Length comparison: the host gzips these files,
+    // so that header carries the *encoded* size while arrayBuffer() yields the
+    // decoded bytes, and no header reports the decoded length. checkPayloadElf
+    // measures the bytes we actually hold instead.
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (!bytes.length)
         throw new Error("payload is empty");
-    if (declared !== null && /^\d+$/.test(declared)
-        && Number(declared) !== bytes.length)
-        throw new Error("payload download is short: got " + bytes.length
-            + " of " + declared + " bytes");
     checkPayloadElf(bytes);
 
     preparePayloadSender();
@@ -1105,8 +1104,12 @@ async function sendPayloadInPlace(name, tile) {
     } catch (error) {
         tile.className = "payloadTile";
         setPayloadTileState(tile, "failed");
+        const why = error && error.message ? error.message : String(error);
+        // The tile art can only say "Send failed"; without the reason on
+        // screen a failure here is undiagnosable from the couch.
+        showToast(name + ": " + why, TOAST_ERROR_TIMEOUT);
         flushMark("ELF-SEND-FAILED", "name=" + clean(name) + "-why="
-            + clean(error && error.message ? error.message : error));
+            + clean(why));
     } finally {
         if (payloadSenderBlocked) {
             payloadSendBusy = true;
