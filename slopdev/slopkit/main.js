@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=51 | if this is not the version just"
+    jbmark("BUILD", "main.js v=52 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1526,6 +1526,120 @@ async function prepare(p) {
         + " so the syscall return path is wrong ***"));
     crumb("OK");
 
+    /* Ask the loader, instead of measuring.
+       -----------------------------------------------------------------------
+       mprotect came back -1, so text stays unreadable and the displacement
+       measurement is all there is -- and it has one hole left. Between 0x36100
+       (+0x540) and 0x36420 (+0x560) exactly one stub was inserted, and no
+       import landmark falls inside, so all 25 stubs in that window were
+       dropped. Two of them are the ones poops needs: 0x2AF at 0x363a0 and
+       0x1AF at 0x363e0. Checking all 230 modules in the PUP found exactly one
+       importer of the bracketing NIDs, libScePsm, which is not loaded here.
+       So there are no more landmarks to find.
+
+       But 264 of the stubs are EXPORTED BY NAME, and this is a devkit, where
+       sys_dynlib_dlsym is normally available. The loader already knows every
+       address we have been triangulating. Ask it: one resolved export inside
+       the window pins the insertion point, and 0x363c0 (KIbJFQ0I1Cg) sits
+       between the two stubs that matter, so it settles both at once.
+
+       Cheap and safe: a wrong handle or a missing syscall returns -1. */
+    if (typeof OFFSET_lk_stub_nids !== "undefined" && (0x24f in syscall_map)) {
+        try {
+            const outp = malloc(0x40);
+            const dlsym = async (h, nid) => {
+                p.write8(outp, new int64(0, 0));
+                const r = await chain.syscall(0x24f, h, stringify(nid), outp);
+                if (r.low !== 0 || r.hi !== 0) return null;
+                const v = p.read8(outp);
+                if (v.low === 0 && v.hi === 0) return null;
+                return (v.hi >>> 0) * 4294967296 + (v.low >>> 0);
+            };
+            /* Find libkernel_web's handle by asking for a stub whose address we
+               already know exactly -- getpid, read from the GOT. The handle that
+               answers with that address is the right module, and the answer
+               being right is itself the proof dlsym is trustworthy here. */
+            const lkNum = (libKernelBase.hi >>> 0) * 4294967296
+                + (libKernelBase.low >>> 0);
+            const getpidAbs = lkNum + syscall_map[0x14];
+            let handle = -1, probe = null;
+            for (let h = 0; h <= 24 && handle < 0; h++) {
+                probe = await dlsym(h, "HoLVWNanBBc");     // getpid
+                if (probe === getpidAbs) handle = h;
+            }
+            jbmark("DLSYM", handle < 0
+                ? "no handle resolved getpid to its known address -- dlsym is"
+                + " unavailable or restricted, nothing applied"
+                : "handle " + handle + " agrees with the GOT on getpid");
+            if (handle >= 0) {
+                let fixed = 0, added = 0, conflict = 0;
+                /* Window first. Each dlsym is a worker round trip, and the
+                   16 exports inside 0x36100..0x36420 are the only ones that
+                   change what is already known -- everything else merely
+                   confirms a landmark. If a later call kills the run, the
+                   answer that mattered is already in. */
+                const order = OFFSET_lk_stub_nids.slice().sort((a, b) =>
+                    ((a[0] >= 0x36100 && a[0] <= 0x36420) ? 0 : 1)
+                    - ((b[0] >= 0x36100 && b[0] <= 0x36420) ? 0 : 1));
+                for (const e of order) {
+                    const nr = e[1];
+                    const a = await dlsym(handle, e[2]);
+                    if (a === null) continue;
+                    const rva = a - lkNum;
+                    if (rva <= 0x1000 || rva >= 0x60000) continue;
+                    if (nr in syscall_map) {
+                        if (syscall_map[nr] !== rva) conflict++;
+                        else { fixed++; continue; }
+                    } else added++;
+                    syscall_map[nr] = rva;
+                    syscalls[nr] = libKernelBase.add32(rva);
+                }
+                jbmark("DLSYM-STUBS", added + " recovered, " + fixed
+                    + " confirmed, " + conflict + " corrected"
+                    + " | 0x1AF=" + (syscall_map[0x1af]
+                        ? "0x" + syscall_map[0x1af].toString(16) : "still gone")
+                    + " 0x2AF=" + (syscall_map[0x2af]
+                        ? "0x" + syscall_map[0x2af].toString(16) : "still gone"));
+                /* 0x1AF and 0x2AF are NOT exported, so dlsym cannot name them.
+                   Their exported neighbours can though: 0x363c0 sits between
+                   them and 0x36380 / 0x36420 close the bracket. Once those are
+                   known, a stub between two neighbours that agree takes their
+                   shift -- the same rule as everywhere else, now with the
+                   landmarks dense enough to apply it. */
+                const known = OFFSET_lk_stub_nids
+                    .filter(e => e[1] in syscall_map)
+                    .map(e => [e[0], syscall_map[e[1]] - e[0]])
+                    .sort((a, b) => a[0] - b[0]);
+                const between = (rva) => {
+                    let lo = null, hi = null;
+                    for (const r of known) {
+                        if (r[0] <= rva) lo = r;
+                        if (r[0] >= rva) { hi = r; break; }
+                    }
+                    return (lo && hi && lo[1] === hi[1]) ? lo[1] : null;
+                };
+                const rescued = [];
+                for (const [nr, rva] of [[0x1af, 0x363e0], [0x2af, 0x363a0],
+                                         [0x1b1, 0x36400]]) {
+                    if (nr in syscall_map) continue;
+                    const d = between(rva);
+                    if (d === null) continue;
+                    syscall_map[nr] = rva + d;
+                    syscalls[nr] = libKernelBase.add32(rva + d);
+                    rescued.push("0x" + nr.toString(16) + "=+0x"
+                        + d.toString(16));
+                }
+                jbmark("DLSYM-BRACKET", rescued.length
+                    ? rescued.join(" ") + " -- unexported stubs recovered from"
+                    + " neighbours that agree"
+                    : "the unexported stubs are still bracketed by neighbours"
+                    + " that disagree");
+            }
+        } catch (e) {
+            jbmark("DLSYM-FAILED", String((e && e.message) || e));
+        }
+    }
+
     /* Stop inferring: make text readable and LOOK.
        -----------------------------------------------------------------------
        Everything up to here has been triangulation, because libSceNKWebKit and
@@ -2043,4 +2157,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=51`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=52`);
