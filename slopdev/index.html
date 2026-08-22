@@ -249,7 +249,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-58-netctrl-visible";
+const REV = "slopkit-poops-59-offsets-parse";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -1564,15 +1564,32 @@ async function preflight() {
         throw new Error("syscalls.js did not evaluate -- SYS_GETPID is undefined");
 
     await window.offsetsReady;
-    flushMark("OFFSETS-READY", "fw=" + window.fw_str
-        + "-gadgets=" + Object.keys(wk_gadgetmap).length
-        + "-syscalls=" + Object.keys(syscall_map).length);
 
-    if (!wk_gadgetmap || !Object.keys(wk_gadgetmap).length
-        || !syscall_map || !Object.keys(syscall_map).length)
+    /* offsetsReady resolves on the script element's LOAD event, and a script
+       that fails to PARSE still fires load. So one syntax error in a profile --
+       a duplicate `const` is enough, and every declaration in the file is then
+       absent -- arrives here as a bare ReferenceError on whichever symbol the
+       run touches first ("can't find variable wk_gadgetmap"), a long way from
+       the actual fault. Ask for the declarations behind a guard and say what
+       really happened. */
+    let nGadgets = -1, nSyscalls = -1, undeclared = "";
+    try { nGadgets = Object.keys(wk_gadgetmap).length; }
+    catch (e) { undeclared += "wk_gadgetmap (" + ((e && e.message) || e) + ") "; }
+    try { nSyscalls = Object.keys(syscall_map).length; }
+    catch (e) { undeclared += "syscall_map (" + ((e && e.message) || e) + ") "; }
+    if (undeclared)
+        throw new Error("offsets/" + window.fw_str + ".js reported load but did"
+            + " NOT evaluate -- " + undeclared + "undeclared. That is a syntax"
+            + " error in the profile; a script that fails to parse still fires"
+            + " its load event, so nothing in the file exists. src="
+            + ((window.__offsetsScript && window.__offsetsScript.src) || "?"));
+
+    flushMark("OFFSETS-READY", "fw=" + window.fw_str
+        + "-gadgets=" + nGadgets + "-syscalls=" + nSyscalls);
+
+    if (!nGadgets || !nSyscalls)
         throw new Error("offsets/" + window.fw_str + ".js loaded but is empty: "
-            + Object.keys(wk_gadgetmap || {}).length + " gadgets, "
-            + Object.keys(syscall_map || {}).length + " syscalls.");
+            + nGadgets + " gadgets, " + nSyscalls + " syscalls.");
 
     let verdict = "ok";
     try {

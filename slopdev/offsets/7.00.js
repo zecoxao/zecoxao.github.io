@@ -547,22 +547,17 @@ let syscall_map = {
 
 // Firmware-specific kernel offsets, from 700_dvk_kernel.elf (already the
 // unwrapped kernel; the SLB2-wrapped copy is kernel.dec.bin).  Text-relative
-// except for the two invariant syscall-stack frame offsets.  Nothing in the
-// engine reads these -- allproc is walked at runtime -- so the four Sony
-// flag words below are left at 0 rather than guessed.
+// except for the two invariant syscall-stack frame offsets.
+//
+// OFFSET_KERNEL_ALLPROC / _DATA / _ROOTVNODE and the four Sony flag words are
+// declared ONCE, at the END of this file, where the derived values live.  They
+// used to be declared here as well, at 0 -- and a duplicate `const` makes the
+// WHOLE file a SyntaxError.  A script that fails to parse still fires its load
+// event, so offsetsReady resolves and the failure surfaces much later and much
+// further away as "can't find variable wk_gadgetmap".
 const OFFSET_KERNEL_STACK_COOKIE                = 0x00000930;
 const OFFSET_KERNEL_STACK_SYS_SCHED_YIELD_RET   = 0x00000808;
-// kdata_base = text_base + text_size = 0xffffffff80210000 + 0xC50000.
-const OFFSET_KERNEL_DATA                        = 0x00C50000;
 const OFFSET_KERNEL_SYS_SCHED_YIELD_RET         = 0x00000000; // not derived
-// LIST_INIT(&allproc) in procinit() at 0xffffffff8074DEBB -> kdata+0x2859D50.
-const OFFSET_KERNEL_ALLPROC                     = 0x034A9D50;
-const OFFSET_KERNEL_SECURITY_FLAGS              = 0x00000000; // not derived
-const OFFSET_KERNEL_TARGETID                    = 0x00000000; // not derived
-const OFFSET_KERNEL_QA_FLAGS                    = 0x00000000; // not derived
-const OFFSET_KERNEL_UTOKEN_FLAGS                = 0x00000000; // not derived
-// VFS_ROOT(mp, LK_EXCLUSIVE, &rootvnode) at 0xffffffff80E2BCFA -> kdata+0x30C7510.
-const OFFSET_KERNEL_ROOTVNODE                   = 0x03D17510;
 
 /* ---------------------------------------------------------------------------
  * Module-shift probe tables.
@@ -1567,7 +1562,9 @@ const OFFSET_lk_stub_nids = [
  * already uses that exact fcntl call on its socketpair write end. */
 const OFFSET_lk_pipe2_flags_hang = true;
 
+// LIST_INIT(&allproc) in procinit() at 0xffffffff8074DEBB -> kdata+0x2859D50.
 const OFFSET_KERNEL_ALLPROC                         = 0x034A9D50;
+// kdata_base = text_base + text_size = 0xffffffff80210000 + 0xC50000.
 const OFFSET_KERNEL_DATA                            = 0x00C50000;
 const OFFSET_KERNEL_QA_FLAGS                        = 0x01718088;
 /* rootvnode, derived from this firmware's own x86_kernel.elf.
@@ -1580,6 +1577,7 @@ const OFFSET_KERNEL_QA_FLAGS                        = 0x01718088;
  * The method reproduces the known-good values on TWO anchors we already have:
  * 9.00 -> 0x03C7B510 and 12.00 -> 0x03E27510, both exact matches.
  * Range-checked: value sits past OFFSET_KERNEL_DATA and inside the image. */
+// VFS_ROOT(mp, LK_EXCLUSIVE, &rootvnode) at 0xffffffff80E2BCFA -> kdata+0x30C7510.
 const OFFSET_KERNEL_ROOTVNODE                       = 0x03D17510;
 const OFFSET_KERNEL_SECURITY_FLAGS                  = 0x01718064;
 const OFFSET_KERNEL_TARGETID                        = 0x0171806D;
