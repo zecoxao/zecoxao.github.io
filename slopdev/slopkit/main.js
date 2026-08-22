@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=48 | if this is not the version just"
+    jbmark("BUILD", "main.js v=49 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1541,12 +1541,39 @@ async function prepare(p) {
                 o += (u8[i] < 16 ? "0" : "") + u8[i].toString(16);
             return o;
         };
+        /* Resumable, for the same reason the gadget suite is: a read of a
+           page mprotect claims is readable but is not kills the WebProcess
+           synchronously, and without a persisted marker the next run faults at
+           exactly the same place forever. Commit "doing" BEFORE each read; a
+           run that finds one still set knows that step killed the last run and
+           skips it. */
+        ps.au = ps.au || {};
+        for (const k in ps.au) if (ps.au[k] === "doing") ps.au[k] = "FAULT";
+        psSave();
+        const auStep = (k) => {
+            if (ps.au[k]) return false;
+            ps.au[k] = "doing"; psSave(); return true;
+        };
+        const auDone = (k, v) => { ps.au[k] = v || "ok"; psSave(); };
+        const faulted = Object.keys(ps.au).filter(k => ps.au[k] === "FAULT");
+        if (faulted.length)
+            jbmark("AUDIT-FAULTED", faulted.slice(0, 6).join(",")
+                + " killed an earlier run and will not be retried");
         try {
             crumb("mp-lk");
             /* libkernel_web text is 0x426e2 in our file and the console's is
                0x580 longer at the top step, so ask for a little extra. */
-            const lkOk = await mprot(libKernelBase, 0, 0x48000);
-            jbmark("MPROTECT-LK", lkOk ? "text is readable" : "refused (-1)");
+            const lkPrev = ps.au["lk"];
+            const lkSkip = lkPrev === "FAULT" || lkPrev === "refused";
+            let lkOk = false;
+            if (!lkSkip) {
+                ps.au["lk"] = "doing"; psSave();
+                lkOk = await mprot(libKernelBase, 0, 0x48000);
+                if (!lkOk) { ps.au["lk"] = "refused"; psSave(); }
+            }
+            jbmark("MPROTECT-LK", lkSkip
+                ? "skipped: " + lkPrev + " on an earlier run"
+                : lkOk ? "text is readable" : "refused (-1)");
             if (lkOk) {
                 crumb("scan-lk");
                 const u8 = array_from_address(libKernelBase, 0x48000);
@@ -1572,6 +1599,7 @@ async function prepare(p) {
                     if (rebuilt[e[0]] === syscall_map[e[0]]) agree++;
                     else disagree++;
                 }
+                auDone("lk");          // survived the read: safe to redo
                 jbmark("SYSCALL-SCAN", n + " stubs found | agrees with "
                     + agree + " of the GOT-read ones, differs on " + disagree);
                 if (disagree === 0 && agree >= 15 && n > 250) {
@@ -1600,8 +1628,10 @@ async function prepare(p) {
             for (const nm of names) {
                 const want = OFFSET_wk_gadget_bytes[nm];
                 if (!want) continue;
+                if (!auStep("g:" + nm)) continue;
                 const rva = wk_gadgetmap[nm];
                 if (!await mprot(libSceNKWebKitBase, rva, 16)) {
+                    auDone("g:" + nm, "refused");
                     unreadable++;
                     /* If the kernel will not add PROT_READ to one page of this
                        module it will not do it for the next 25 either; stop
@@ -1610,8 +1640,24 @@ async function prepare(p) {
                     continue;
                 }
                 const u8 = array_from_address(libSceNKWebKitBase.add32(rva), 16);
+                const got = hex(u8, want.length / 2);
+                auDone("g:" + nm, got === want ? "ok" : got);
                 checked++;
-                if (hex(u8, want.length / 2) !== want) wrong.push(nm);
+                if (got !== want) wrong.push(nm);
+            }
+            /* Verdicts survive a reload, so a run that dies mid-audit still
+               contributes -- replay what is already known. */
+            for (const nm in wk_gadgetmap) {
+                const v = ps.au["g:" + nm];
+                if (v && v !== "ok" && v !== "refused" && v !== "FAULT"
+                    && wrong.indexOf(nm) === -1) wrong.push(nm);
+            }
+            for (const nm in wk_gadgetmap) {
+                const v = ps.au["s:" + nm];
+                if (v && v.indexOf("0x") === 0) {
+                    wk_gadgetmap[nm] = parseInt(v, 16);
+                    gadgets[nm] = libSceNKWebKitBase.add32(wk_gadgetmap[nm]);
+                }
             }
             jbmark("GADGET-AUDIT", checked + " read, " + wrong.length
                 + " wrong, " + unreadable + " unreadable");
@@ -1630,7 +1676,10 @@ async function prepare(p) {
                 const want = OFFSET_wk_gadget_bytes[nm];
                 const L = want.length / 2, W = 0x8000;
                 const lo = Math.max(0, rva - W);
-                if (!await mprot(libSceNKWebKitBase, lo, W * 2)) continue;
+                if (!auStep("s:" + nm)) continue;
+                if (!await mprot(libSceNKWebKitBase, lo, W * 2)) {
+                    auDone("s:" + nm, "refused"); continue;
+                }
                 const u8 = array_from_address(libSceNKWebKitBase.add32(lo), W * 2);
                 let found = -1;
                 for (let a = 0; a < W * 2 - L; a++) {
@@ -1641,6 +1690,7 @@ async function prepare(p) {
                         || Math.abs(lo + a - rva) < Math.abs(found - rva)))
                         found = lo + a;
                 }
+                auDone("s:" + nm, found < 0 ? "none" : "0x" + found.toString(16));
                 jbmark("GADGET-FIX-" + (i + 1), nm + " 0x" + rva.toString(16)
                     + (found < 0 ? " -> not found within +-0x8000"
                         : " -> 0x" + found.toString(16) + " (delta "
@@ -1942,4 +1992,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=48`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=49`);
