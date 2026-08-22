@@ -3425,6 +3425,10 @@ export function makePoopsEngine(X) {
     leakedIovFirst: null,
 
     crfrees: 0,
+    /* Set when SET_QUEUE reports every slot occupied. Nothing was triggered in
+       that case, so no other verdict reason fires -- and yet the only remedy is
+       a reboot, which is what the run has to end up saying. */
+    slotsExhausted: false,
     kreadCalls: 0,
     kreadOk: 0,
     kqueuesOpened: 0,
@@ -4264,6 +4268,7 @@ export function makePoopsEngine(X) {
          it reads as an unexplained failure and invites debugging something
          that is working correctly. */
       const exhausted = /netcontrol slots occupied/.test(pre.why || "");
+      if (exhausted) S.slotsExhausted = true;
       rep.detail = (exhausted ? "REBOOT REQUIRED -- " : "")
         + "trigger did not arm: " + (pre.why || "?");
       rep.terminal = !!pre.terminal;
@@ -6941,6 +6946,15 @@ export function makePoopsEngine(X) {
       reasons.push(
         "cr_ref wrapped by the full burn: below the number " +
           "of files holding the credential",
+      );
+    /* Last, so it never displaces a reason describing something this run did.
+       It is the only reason that can fire on a run which changed nothing at
+       all, and without it such a run ends on a bare "FAILED" while the fix is
+       to power-cycle. */
+    if (S.slotsExhausted)
+      reasons.push(
+        "both netcontrol slots were already spent earlier this " +
+          "boot -- nothing can arm until the console is rebooted",
       );
     if (reasons.length)
       return {
