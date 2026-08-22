@@ -1215,3 +1215,40 @@ const OFFSET_lk_landmarks_via_lc = [
 	[0x385f0, 0x12c130],
 	[0x386d0, 0x12c3a0]
 ];
+
+// What each gadget must decode to. The instruction a name claims is
+// build-independent -- only its address moves -- so once mprotect makes
+// text readable these are what the on-console audit compares against,
+// which replaces inferring a gadget's validity from whether the process
+// survived running it.
+const OFFSET_wk_gadget_bytes = {
+	"ret": "c3",
+	"pop rdi": "5fc3",
+	"pop rsi": "5ec3",
+	"pop rdx": "5ac3",
+	"pop rcx": "59c3",
+	"pop rax": "58c3",
+	"pop rsp": "5cc3",
+	"pop r8": "4158c3",
+	"pop r9": "4531c94d85c90f95c0c3",
+	"mov [rdi], rsi": "488937c3",
+	"mov [rdi], rax": "488907c3",
+	"mov [rdi], eax": "8907c3",
+	"mov rax, [rax]": "488b00c3",
+	"add rax, rcx": "4801c8c3",
+	"cmp [rcx], eax": "3b01c3",
+	"inc dword [rax]": "ff00c3",
+	"seta al": "0f97c0c3",
+	"setb al": "0f92c0c3",
+	"sete al": "0f94c0c3",
+	"setg al": "0f9fc0c3",
+	"setl al": "0f9cc0c3",
+	"shl rax, 3": "48c1e003c3",
+	"shl rax, 4": "48c1e004c3",
+	"shr rax, 3": "48c1e803c3",
+	"shr rax, 4": "48c1e804c3",
+	"infloop": "ebfe"
+};
+
+// Read text after making it readable, and audit instead of guessing.
+const OFFSET_wk_text_audit = true;

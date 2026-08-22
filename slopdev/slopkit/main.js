@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=47 | if this is not the version just"
+    jbmark("BUILD", "main.js v=48 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1509,6 +1509,152 @@ async function prepare(p) {
         + " so the syscall return path is wrong ***"));
     crumb("OK");
 
+    /* Stop inferring: make text readable and LOOK.
+       -----------------------------------------------------------------------
+       Everything up to here has been triangulation, because libSceNKWebKit and
+       libkernel_web both map their text PF_X only -- a read faults and kills
+       the WebProcess, so a gadget could only ever be judged by whether running
+       it survived. That cost eight runs to find one bad store and still left
+       pop rdx unexplained.
+
+       But mprotect's stub resolved (its address is bracketed by landmarks that
+       agree), and a working chain can call it. If the kernel lets us add
+       PROT_READ to a module's text then every remaining question -- which
+       gadget is where, which stub is which syscall -- stops being an inference
+       and becomes a read. If it refuses, it returns -1 and nothing is harmed.
+
+       libkernel_web goes first: it is 275KB against 54MB, and scanning it for
+       `48 c7 c0 <nr> 49 89 ca 0f 05` rebuilds the ENTIRE syscall table exactly,
+       including the 35 stubs that had to be dropped as unresolvable and the
+       272 that are only as good as the step they were interpolated in. */
+    if (typeof OFFSET_wk_text_audit !== "undefined" && OFFSET_wk_text_audit
+        && (0x4a in syscall_map)) {
+        const PROT_RX = 5;                       // PROT_READ | PROT_EXEC
+        const mprot = async (base, off, len) => {
+            const r = await chain.syscall(0x4a, base.add32(off & ~0x3fff),
+                (len + (off & 0x3fff) + 0x3fff) & ~0x3fff, PROT_RX);
+            return r.low === 0 && r.hi === 0;
+        };
+        const hex = (u8, n) => {
+            let o = "";
+            for (let i = 0; i < n; i++)
+                o += (u8[i] < 16 ? "0" : "") + u8[i].toString(16);
+            return o;
+        };
+        try {
+            crumb("mp-lk");
+            /* libkernel_web text is 0x426e2 in our file and the console's is
+               0x580 longer at the top step, so ask for a little extra. */
+            const lkOk = await mprot(libKernelBase, 0, 0x48000);
+            jbmark("MPROTECT-LK", lkOk ? "text is readable" : "refused (-1)");
+            if (lkOk) {
+                crumb("scan-lk");
+                const u8 = array_from_address(libKernelBase, 0x48000);
+                const rebuilt = {};
+                let n = 0;
+                for (let a = 0; a < 0x48000 - 12; a++) {
+                    if (u8[a] !== 0x48 || u8[a + 1] !== 0xc7 || u8[a + 2] !== 0xc0)
+                        continue;
+                    if (u8[a + 7] !== 0x49 || u8[a + 8] !== 0x89
+                        || u8[a + 9] !== 0xca || u8[a + 10] !== 0x0f
+                        || u8[a + 11] !== 0x05) continue;
+                    const nr = u8[a + 3] | (u8[a + 4] << 8) | (u8[a + 5] << 16)
+                        | (u8[a + 6] << 24);
+                    /* Two stubs for one number happens; 9.00's profile always
+                       took the lower address, so match that. */
+                    if (!(nr in rebuilt)) { rebuilt[nr] = a; n++; }
+                }
+                /* Cross-check against the 21 that were read from the GOT before
+                   trusting a scan of bytes we have never seen. */
+                let agree = 0, disagree = 0;
+                for (const e of OFFSET_lk_syscall_landmarks) {
+                    if (!(e[0] in rebuilt)) continue;
+                    if (rebuilt[e[0]] === syscall_map[e[0]]) agree++;
+                    else disagree++;
+                }
+                jbmark("SYSCALL-SCAN", n + " stubs found | agrees with "
+                    + agree + " of the GOT-read ones, differs on " + disagree);
+                if (disagree === 0 && agree >= 15 && n > 250) {
+                    for (const k in syscall_map) delete syscall_map[k];
+                    for (const nr in rebuilt) {
+                        syscall_map[nr] = rebuilt[nr];
+                        syscalls[nr] = libKernelBase.add32(rebuilt[nr]);
+                    }
+                    jbmark("SYSCALL-REBUILT", n + " stubs, read not derived"
+                        + " | getpid 0x" + rebuilt[0x14].toString(16)
+                        + " mmap 0x" + (rebuilt[0x1dd] || 0).toString(16)
+                        + " thr_new 0x" + (rebuilt[0x1c7] || 0).toString(16));
+                } else {
+                    jbmark("SYSCALL-SCAN-REJECTED", "kept the derived table:"
+                        + " the scan disagrees with stubs that were read"
+                        + " directly, so something about it is wrong");
+                }
+            }
+
+            /* Now the gadgets. One page each rather than 54MB in one call:
+               less to refuse, and a page is all an audit needs. */
+            crumb("mp-wk");
+            const names = Object.keys(wk_gadgetmap);
+            const wrong = [];
+            let checked = 0, unreadable = 0;
+            for (const nm of names) {
+                const want = OFFSET_wk_gadget_bytes[nm];
+                if (!want) continue;
+                const rva = wk_gadgetmap[nm];
+                if (!await mprot(libSceNKWebKitBase, rva, 16)) {
+                    unreadable++;
+                    /* If the kernel will not add PROT_READ to one page of this
+                       module it will not do it for the next 25 either; stop
+                       rather than spend a worker round trip per gadget. */
+                    if (unreadable >= 2 && checked === 0) break;
+                    continue;
+                }
+                const u8 = array_from_address(libSceNKWebKitBase.add32(rva), 16);
+                checked++;
+                if (hex(u8, want.length / 2) !== want) wrong.push(nm);
+            }
+            jbmark("GADGET-AUDIT", checked + " read, " + wrong.length
+                + " wrong, " + unreadable + " unreadable");
+            for (let i = 0; i < wrong.length && i < 8; i++) {
+                const nm = wrong[i], rva = wk_gadgetmap[nm];
+                const u8 = array_from_address(libSceNKWebKitBase.add32(rva), 16);
+                jbmark("GADGET-BAD-" + (i + 1), nm + " @0x" + rva.toString(16)
+                    + " is " + hex(u8, 8) + " want " + OFFSET_wk_gadget_bytes[nm]);
+            }
+            /* A wrong gadget is only half the answer -- find where it went.
+               Search a window around the expected address for the exact bytes
+               the name requires; with the shift already measured the real one
+               is a few hundred bytes away, not megabytes. */
+            for (let i = 0; i < wrong.length && i < 6; i++) {
+                const nm = wrong[i], rva = wk_gadgetmap[nm];
+                const want = OFFSET_wk_gadget_bytes[nm];
+                const L = want.length / 2, W = 0x8000;
+                const lo = Math.max(0, rva - W);
+                if (!await mprot(libSceNKWebKitBase, lo, W * 2)) continue;
+                const u8 = array_from_address(libSceNKWebKitBase.add32(lo), W * 2);
+                let found = -1;
+                for (let a = 0; a < W * 2 - L; a++) {
+                    let ok = 1;
+                    for (let b = 0; b < L; b++)
+                        if (u8[a + b] !== parseInt(want.substr(b * 2, 2), 16)) { ok = 0; break; }
+                    if (ok && (found < 0
+                        || Math.abs(lo + a - rva) < Math.abs(found - rva)))
+                        found = lo + a;
+                }
+                jbmark("GADGET-FIX-" + (i + 1), nm + " 0x" + rva.toString(16)
+                    + (found < 0 ? " -> not found within +-0x8000"
+                        : " -> 0x" + found.toString(16) + " (delta "
+                        + (found - rva) + ")"));
+                if (found >= 0) {
+                    wk_gadgetmap[nm] = found;
+                    gadgets[nm] = libSceNKWebKitBase.add32(found);
+                }
+            }
+        } catch (e) {
+            jbmark("AUDIT-FAILED", String((e && e.message) || e));
+        }
+    }
+
     /* Gadget conformance suite.
        -----------------------------------------------------------------------
        prepare() now completes, which changes what is possible: a WORKING chain
@@ -1796,4 +1942,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=47`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=48`);
