@@ -3629,6 +3629,17 @@ export function makePoopsEngine(X) {
     if (a < 0 || b < 0)
       throw new Error("pipe2(" + label + ") gave " + a + "," + b);
     if (noFlags) {
+      /* Log the fds BEFORE touching them. Both hangs so far -- pipe2 with a
+         flag, and now fcntl(F_SETFL) -- are operations that set O_NONBLOCK,
+         which is suspicious in a way the syscall numbers are not: the common
+         factor may be WHICH fd is being modified rather than which call does
+         it. If pipe2 handed back a number that aliases something the
+         WebProcess relies on (its Worker message channel, say), marking that
+         non-blocking would break the very path the worker answers on -- and
+         "neither answered nor crashed" is exactly what that looks like.
+         These numbers cost one mark and settle it. */
+      flushMark("PIPE2-FDS", label + "-a=" + a + "-b=" + b
+        + "-about-to-fcntl-F_SETFL-O_NONBLOCK");
       for (const fd of [a, b]) {
         const sf = await sys(PSYS.FCNTL, fd, K.F_SETFL, K.O_NONBLOCK);
         if (sf.failed)

@@ -267,7 +267,7 @@ let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./poops.js?v=68");
+    const lib = await import("./poops.js?v=69");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
@@ -601,6 +601,7 @@ const CONCISE_SCREEN_SHOW = {
     "PIPE2-CANDIDATES": 1,
     "PIPE2-NOFLAGS": 1,
     "PIPE2-FCNTL": 1,
+    "PIPE2-FDS": 1,
     "STAGE5-DONE": 1,
     "POOPS-COMPLETE": 1,
     "POOPS-FAILED": 1,
