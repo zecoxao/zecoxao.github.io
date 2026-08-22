@@ -249,7 +249,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-65-no-autorun-after-death";
+const REV = "slopkit-poops-66-gate-does-not-arm-itself";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -308,6 +308,13 @@ function trailTake() {
         localStorage.removeItem(TRAIL_KEY);
     } catch { }
     return v;
+}
+/* Wipe both halves. The refusal below emits marks of its own, and they land in
+   the trail like any others, so it has to be able to start the next load from
+   nothing. */
+function trailReset() {
+    trail.length = 0;
+    try { localStorage.removeItem(TRAIL_KEY); } catch { }
 }
 /* Taken at load, before anything can push to it. */
 const PREV_TRAIL = trailTake();
@@ -2466,23 +2473,36 @@ async function entry() {
        consumed on the way in, so the very next load runs normally. */
     if (PREV_TRAIL && PREV_TRAIL.indexOf("POOPS-COMPLETE") === -1) {
         const parts = PREV_TRAIL.split(">");
-        const diedAt = parts[parts.length - 1];
-        renderNav("", false);
-        showPrevTrail();
-        stage("previous load DIED at '" + diedAt
-            + "' -- not auto-running; reload to start a run", "bad");
-        summaryEl.textContent = "NOTHING was executed. The last load in this"
-            + " browser session ended at '" + diedAt + "' after " + parts.length
-            + " marks without completing, so this load is almost certainly the"
-            + " browser reloading itself after that death. Running now would"
-            + " spend this boot's netcontrol slots unattended -- there are two,"
-            + " and they do not come back until the console is rebooted."
-            + " Reload to run deliberately.";
-        flushMark("POOPS-AUTORUN-REFUSED",
-            "prevDiedAt=" + diedAt + "-steps=" + parts.length);
-        sendRemoteEvents(false);
-        offerReload();
-        return;
+        /* The refusal's OWN marks go into the trail like any others, so without
+           this the gate arms itself: refuse, write two marks, and the next load
+           sees a non-empty trail with no POOPS-COMPLETE in it and refuses
+           again, forever. Observed immediately --
+           "prevDiedAt=POOPS-AUTORUN-REFUSED-steps=2".
+           So ignore our own bookkeeping when deciding, and wipe the trail on
+           the way out either way. */
+        const ownMarks = { "PREV-TRAIL": 1, "POOPS-AUTORUN-REFUSED": 1 };
+        const real = parts.filter((t) => !ownMarks[t]);
+        if (real.length) {
+            const diedAt = real[real.length - 1];
+            renderNav("", false);
+            showPrevTrail();
+            stage("previous load DIED at '" + diedAt
+                + "' -- not auto-running; reload to start a run", "bad");
+            summaryEl.textContent = "NOTHING was executed. The last load in"
+                + " this browser session ended at '" + diedAt + "' after "
+                + real.length + " marks without completing, so this load is"
+                + " almost certainly the browser reloading itself after that"
+                + " death. Running now would spend this boot's netcontrol slots"
+                + " unattended -- there are two, and they do not come back until"
+                + " the console is rebooted. Reload to run deliberately.";
+            flushMark("POOPS-AUTORUN-REFUSED",
+                "prevDiedAt=" + diedAt + "-steps=" + real.length);
+            sendRemoteEvents(false);
+            trailReset();
+            offerReload();
+            return;
+        }
+        trailReset();
     }
 
     if (PRODUCTION_REQUEST_ERROR) {
