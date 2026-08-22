@@ -71,7 +71,7 @@ window.SLOP_DIR = "slopkit/";
             <div id="payloadMenu">
                 <img class="menuTitle" data-src="ui/payload-menu-title.png" alt="">
                 <div class="payloadGrid">
-					<a class="payloadTile" href="#" data-name="OnionHEN.elf" data-key="etahen"><img data-src="ui/payload-etahen-default.png" alt=""></a>
+                    <a class="payloadTile" href="#" data-name="OnionHEN.elf" data-key="onionhen"><img data-src="ui/payload-onionhen-default.png" alt=""></a>
                     <a class="payloadTile" href="#" data-name="kstuff.elf" data-key="kstuff"><img data-src="ui/payload-kstuff-default.png" alt=""></a>
                     <a class="payloadTile" href="#" data-name="shadowmountplus.elf" data-key="shadowmountplus"><img data-src="ui/payload-shadowmountplus-default.png" alt=""></a>
                     <a class="payloadTile" href="#" data-name="autoloader.elf" data-key="autoloader"><img data-src="ui/payload-autoloader-default.png" alt=""></a>
@@ -81,6 +81,8 @@ window.SLOP_DIR = "slopkit/";
                     <a class="payloadTile" href="#" data-name="klogsrv-ps5.elf" data-key="klog"><img data-src="ui/payload-klog-default.png" alt=""></a>
                     <a class="payloadTile" href="#" data-name="shsrv-ps5.elf" data-key="shell"><img data-src="ui/payload-shell-default.png" alt=""></a>
                     <a class="payloadTile" href="#" data-name="websrv-ps5.elf" data-key="web"><img data-src="ui/payload-web-default.png" alt=""></a>
+                    <a class="payloadTile" href="#" data-name="poords4.elf" data-key="poords4"><img data-src="ui/payload-poords4-default.png" alt=""></a>
+                    <a class="payloadTile" href="#" data-name="psplay.elf" data-key="psplay"><img data-src="ui/payload-psplay-default.png" alt=""></a>
                 </div>
             </div>
         </div>
@@ -834,7 +836,6 @@ const rowByKey = new Map();
 let payloadSendBusy = false;
 const PAYLOAD_PORT = 9021;
 const PAYLOAD_BUFFER_SIZE = 0x10000;
-const PAYLOAD_MAX_SIZE = 0x400000;
 let payloadSendStore = null;
 let payloadSockaddrStore = null;
 let payloadSocketOptionStore = null;
@@ -914,6 +915,67 @@ function preparePayloadSender() {
     }
 }
 
+// There is no fixed ceiling on payload size: etaHEN, OnionHEN and PSPlay are
+// all well past a few MiB, and PSPlay alone is ~32 MiB. What used to be a
+// blunt length limit is replaced by a structural check -- the ELF header is
+// parsed and every program header must lie inside the bytes we actually
+// received -- so a truncated or corrupt download is rejected on its own
+// evidence instead of a payload simply being "too big".
+function checkPayloadElf(bytes) {
+    const u32 = offset => (bytes[offset] | (bytes[offset + 1] << 8)
+        | (bytes[offset + 2] << 16)) + bytes[offset + 3] * 0x1000000;
+    const u16 = offset => bytes[offset] | (bytes[offset + 1] << 8);
+
+    if (bytes.length < 0x40)
+        throw new Error("payload is too small to hold an ELF header");
+    if (bytes[0] !== 0x7f || bytes[1] !== 0x45 || bytes[2] !== 0x4c
+        || bytes[3] !== 0x46)
+        throw new Error("payload does not start with the ELF signature");
+    if (bytes[4] !== 2)
+        throw new Error("payload is not a 64-bit ELF");
+    if (bytes[5] !== 1)
+        throw new Error("payload is not a little-endian ELF");
+
+    // 64-bit fields are read as two halves; anything with a non-zero high
+    // word is nonsense for a file we just downloaded over HTTP.
+    if (u32(0x24) !== 0)
+        throw new Error("payload program header table is out of range");
+    const phoff = u32(0x20);
+    const phentsize = u16(0x36);
+    const phnum = u16(0x38);
+    if (phnum < 1)
+        throw new Error("payload has no program headers");
+    if (phentsize < 0x38)
+        throw new Error("payload program header entries are undersized");
+    if (phoff + phnum * phentsize > bytes.length)
+        throw new Error("payload is truncated: the program header table ends "
+            + "past the end of the file");
+
+    for (let i = 0; i < phnum; ++i) {
+        const ph = phoff + i * phentsize;
+        if (u32(ph + 0x0c) !== 0 || u32(ph + 0x24) !== 0)
+            throw new Error("payload segment " + i + " has an out-of-range "
+                + "file offset or size");
+        const offset = u32(ph + 0x08);
+        const filesz = u32(ph + 0x20);
+        if (offset + filesz > bytes.length)
+            throw new Error("payload is truncated: segment " + i + " ends at "
+                + (offset + filesz) + " but the file is only "
+                + bytes.length + " bytes");
+    }
+
+    // A stripped ELF has no section header table and skips this; every payload
+    // shipped here keeps one, and it sits at the very end of the file, so this
+    // is what actually catches a download that stopped a few bytes short.
+    if (u32(0x2c) !== 0)
+        throw new Error("payload section header table is out of range");
+    const shoff = u32(0x28);
+    const shnum = u16(0x3c);
+    if (shoff !== 0 && shoff + shnum * u16(0x3a) > bytes.length)
+        throw new Error("payload is truncated: the section header table ends "
+            + "past the end of the file");
+}
+
 async function sendPayloadToElfldr(name) {
     if (!elfldrSpawned && !senderReady)
         throw new Error("ELF loader is not ready");
@@ -930,14 +992,15 @@ async function sendPayloadToElfldr(name) {
         { cache: "no-store" });
     if (!response.ok)
         throw new Error("payload fetch failed: HTTP " + response.status);
+    const declared = response.headers.get("Content-Length");
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (!bytes.length)
         throw new Error("payload is empty");
-    if (bytes.length > PAYLOAD_MAX_SIZE)
-        throw new Error("payload is larger than the 2 MiB limit");
-    if (bytes.length < 4 || bytes[0] !== 0x7f || bytes[1] !== 0x45
-        || bytes[2] !== 0x4c || bytes[3] !== 0x46)
-        throw new Error("payload does not start with the ELF signature");
+    if (declared !== null && /^\d+$/.test(declared)
+        && Number(declared) !== bytes.length)
+        throw new Error("payload download is short: got " + bytes.length
+            + " of " + declared + " bytes");
+    checkPayloadElf(bytes);
 
     preparePayloadSender();
     let fd = -1;
