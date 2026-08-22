@@ -1566,3 +1566,21 @@ const OFFSET_lk_stub_nids = [
  * fcntl(F_SETFL, O_NONBLOCK) on both ends reaches the same state, and poops
  * already uses that exact fcntl call on its socketpair write end. */
 const OFFSET_lk_pipe2_flags_hang = true;
+
+const OFFSET_KERNEL_ALLPROC                         = 0x034A9D50;
+const OFFSET_KERNEL_DATA                            = 0x00C50000;
+const OFFSET_KERNEL_QA_FLAGS                        = 0x01718088;
+/* rootvnode, derived from this firmware's own x86_kernel.elf.
+ * main.js does:  rootvnode = krw.read8(get_kaddr(OFFSET_KERNEL_ROOTVNODE))
+ * then writes it to procFd+0x10 and +0x18 to escape the sandbox, so a wrong
+ * value is a kernel read at a garbage address - it MUST be right.
+ * Signature (unique, exactly one match per kernel):
+ *     48 8B 7D A8    mov rdi, [rbp-0x58]
+ *     48 89 3D ..    mov [rip+X], rdi        <- the store to rootvnode
+ * The method reproduces the known-good values on TWO anchors we already have:
+ * 9.00 -> 0x03C7B510 and 12.00 -> 0x03E27510, both exact matches.
+ * Range-checked: value sits past OFFSET_KERNEL_DATA and inside the image. */
+const OFFSET_KERNEL_ROOTVNODE                       = 0x03D17510;
+const OFFSET_KERNEL_SECURITY_FLAGS                  = 0x01718064;
+const OFFSET_KERNEL_TARGETID                        = 0x0171806D;
+const OFFSET_KERNEL_UTOKEN_FLAGS                    = 0x017180F0;
