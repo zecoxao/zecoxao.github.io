@@ -328,7 +328,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-72-remember-the-leaked-slot";
+const REV = "slopkit-poops-73-trail-names-the-race-step";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -397,6 +397,14 @@ function showPrevTrail() {
         + "-steps=" + parts.length);
 }
 function markTrailTag(tag, extra) {
+    /* RACE-STEP is raised twelve times an attempt and its identity is entirely
+       in the detail -- s0-free-all-rthdrs, s2-iov-flush-32, s4-find-twins and
+       so on. Trailed as a bare "RACE-STEP" it says only that the race was
+       running, which is the one thing already obvious. The step costs nothing
+       extra to keep: the trail write happens either way, so this is the whole
+       race narrated inside the window without adding a single syscall to it. */
+    if (tag === "RACE-STEP")
+        return tag + ":" + String(extra == null ? "" : extra);
     if (tag !== "TEST" && tag !== "TEST-ENTER") return tag;
     const parts = String(extra == null ? "" : extra).split("-");
     return tag + ":" + parts.slice(0, tag === "TEST" ? 2 : 1).join("-");
