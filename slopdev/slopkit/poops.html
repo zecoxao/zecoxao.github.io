@@ -267,7 +267,7 @@ let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./poops.js?v=80");
+    const lib = await import("./poops.js?v=82");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
@@ -328,7 +328,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-67-tty-two-channels";
+const REV = "slopkit-poops-69-serial-transcript";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -1756,11 +1756,18 @@ async function runLadder() {
         else if (result.status === "SKIP") skipped++;
         else failed++;
         row(i + 1, entry, result.status, result.detail, currentNotes);
-        flushMark("TEST", entry.key + "-" + result.status
+        const testDetail = entry.key + "-" + result.status
             + (result.detail
                 ? "-why=" + String(result.detail).replace(/[\r\n\t]+/g, " ")
                     .replace(/[^\x20-\x7e]/g, "").slice(0, 400)
-                : ""));
+                : "");
+        flushMark("TEST", testDetail);
+        /* Between rows is a safe place to spend a chain round trip,
+           and this is the line that says what the run actually did. */
+        try {
+            if (engine && engine.tty && !chainDead)
+                await engine.tty("TEST " + testDetail);
+        } catch (e) { }
         if (state.cleanupFailed) danger("cleanup failure: " + state.cleanupFailed);
 
         if (aborted || result.status === "FAIL") {
@@ -1900,7 +1907,8 @@ async function runLadder() {
     flushMark("POOPS-COMPLETE", "pass=" + passed + "-fail=" + failed
         + "-skip=" + skipped + "-reboot=" + (mustReboot ? 1 : 0)
         + "-triggered=" + (engine && engine.triggered ? 1 : 0)
-        + "-rtmean=" + rtMean + "-filtered=" + (FILTERED_RUN ? 1 : 0));
+        + "-rtmean=" + rtMean + "-filtered=" + (FILTERED_RUN ? 1 : 0)
+        + "-tty=" + (engine && engine.ttyState ? engine.ttyState() : "n/a"));
 
     const payloadSuccess = cfg.payload === "1" && elfldrSpawned;
     const fullSuccess = payloadSuccess || (failed === 0 && !aborted

@@ -3517,6 +3517,7 @@ export function makePoopsEngine(X) {
     ttyProbed = 0,
     ttyMode = "";
   async function tty(text) {
+    if (ttyMode === "none") return -1;
     if (!ttyArena) ttyArena = alloc(0x140, "tty");
     const line =
       "[slopkit " +
@@ -3529,42 +3530,57 @@ export function makePoopsEngine(X) {
     const u8 = ttyArena.u8;
     for (let i = 0; i < line.length; ++i) u8[i] = line.charCodeAt(i) & 0x7f;
     u8[line.length] = 0;
+    const n = line.length;
+    const has259 = P.syscalls[PSYS.DEBUG_OUT_TEXT] !== undefined;
 
-    /* Two channels, because the first is not certain to be readable.
-       -----------------------------------------------------------------------
-       0x259 is not a printf: its callers pass rdi = a small KIND code (3, 0xa,
-       0xb, 0xd, 0xe, 0xf, 0x11, 0x12, 0x14, 0x15, 0x18, 0x1a, 0x1c, 0x1e,
-       0x1f, 0x21, 0x23 ... in libkernel_web alone) and sceKernelDebugOutText
-       is simply kind 7. Where kind 7 comes out is the kernel's business.
-       write(1) is the channel this process demonstrably already has: the
-       serial log carries "SceNKWebProcess: arg[0] = ..." at every spawn, and
-       nothing but the WebProcess itself prints that.
-       Try the named one first, fall back on its failure, and remember which
-       worked so the choice is made once. */
-    let r = null;
-    if (ttyMode !== "write" && P.syscalls[PSYS.DEBUG_OUT_TEXT] !== undefined) {
-      r = await sys(PSYS.DEBUG_OUT_TEXT, 7, ttyArena.base, 0);
-      if (!r.failed) ttyMode = "debugouttext";
-    }
-    let w = null;
-    if (ttyMode !== "debugouttext") {
-      w = await sys(PSYS.WRITE, 1, ttyArena.base, line.length);
-      if (!w.failed && w.s32 > 0) ttyMode = "write";
-    }
+    /* 0x259 first, because it is PROVEN on this console -- twelve lines, in
+       order, in the serial log:
+           [slopkit 1] PS1-ENTER next=rtprio_thread-PRI_REALTIME/256
+           [slopkit 2] PS1-RTPRIO type=2-prio=256
+           ...
+       It is not a printf: its callers pass rdi = a small KIND code (3, 0xa,
+       0xb, 0xd ... 0x27 in libkernel_web alone) and sceKernelDebugOutText is
+       merely kind 7. fd 1 and fd 2 are kept as fallbacks for a build where the
+       stub is missing or the call is refused -- the WebProcess demonstrably has
+       stdout, since the serial log carries "SceNKWebProcess: arg[0] = ..." at
+       every spawn -- but they are never preferred over a channel already known
+       to work. Pinned on the first success; a syscall that returns success is
+       not by itself evidence its output is visible, which is why the pin comes
+       from the probe rather than from any single return. */
     if (!ttyProbed) {
       ttyProbed = 1;
+      await runBuilt("tty-probe", () => {
+        armRet(3);
+        if (has259) emit(PSYS.DEBUG_OUT_TEXT, retPtr(0), 7, ttyArena.base, 0);
+        else emit(PSYS.SCHED_YIELD, retPtr(0));
+        emit(PSYS.WRITE, retPtr(1), 1, ttyArena.base, n);
+        emit(PSYS.WRITE, retPtr(2), 2, ttyArena.base, n);
+      });
+      const a = has259 ? retOf(0) : -1,
+        b = retOf(1),
+        c = retOf(2);
+      ttyMode = a === 0 ? "0x259" : b > 0 ? "fd1" : c > 0 ? "fd2" : "none";
       flushMark(
         "TTY",
-        "using=" +
-          (ttyMode || "NEITHER") +
-          "-debugOutText(0x259)=" +
-          (r ? (r.failed ? "FAIL-" + r.errText : "ok-" + r.s32) : "skipped") +
-          "-write(fd1)=" +
-          (w ? (w.failed ? "FAIL-" + w.errText : "ok-" + w.s32) : "skipped") +
-          "-grep-the-SERIAL-log-for-[slopkit",
+        "using=" + ttyMode + "-0x259=" + a + "-fd1=" + b + "-fd2=" + c,
       );
+      return ttyMode === "none" ? -1 : 0;
     }
-    return ttyMode ? 0 : -1;
+
+    await runBuilt("tty", () => {
+      armRet(1);
+      if (ttyMode === "0x259")
+        emit(PSYS.DEBUG_OUT_TEXT, retPtr(0), 7, ttyArena.base, 0);
+      else emit(PSYS.WRITE, retPtr(0), ttyMode === "fd1" ? 1 : 2, ttyArena.base, n);
+    });
+    return retOf(0);
+  }
+
+  /* So the run's LAST line can say whether any of this worked -- the TTY mark
+     itself fires once, early, and scrolls away long before anyone reads the
+     screen. */
+  function ttyState() {
+    return ttyMode || (ttyProbed ? "none" : "untried");
   }
 
   async function ttyMark(tag, extra) {
@@ -4051,7 +4067,7 @@ export function makePoopsEngine(X) {
     if (S.uafSock >= 0 && !S.uafClosed) {
       await sys(PSYS.CLOSE, S.uafSock);
       untrack(S.uafSock);
-      flushMark(
+      await ttyMark(
         "NETCTRL-UAF-RECYCLED",
         "closed=" + S.uafSock + "-before-new-sandwich (lua:665)",
       );
@@ -4162,7 +4178,7 @@ export function makePoopsEngine(X) {
     }
     for (const fd of strays) await sys(PSYS.CLOSE, fd);
     if (strays.length)
-      flushMark(
+      await ttyMark(
         "NETCTRL-UAF-RETRY",
         "wanted=" +
           discard +
@@ -4351,7 +4367,7 @@ export function makePoopsEngine(X) {
         + "trigger did not arm: " + (pre.why || "?");
       rep.terminal = !!pre.terminal;
       if (exhausted)
-        flushMark("TRIGGER-EXHAUSTED", "both netcontrol slots were consumed by"
+        await ttyMark("TRIGGER-EXHAUSTED", "both netcontrol slots were consumed by"
           + " an earlier trigger this boot; nothing can arm until reboot");
       return rep;
     }
@@ -4398,7 +4414,7 @@ export function makePoopsEngine(X) {
        statement about the BUG. Any of them non-zero is a statement about the
        spray, which is a different problem entirely. */
     if (!tw.found && tw.total)
-      flushMark(
+      await ttyMark(
         "TWIN-SCAN-DONE",
         "reason=" + (tw.reason || "?") + "-a=" + tw.attempts
           + "-ms=" + tw.ms
@@ -8603,6 +8619,7 @@ export function makePoopsEngine(X) {
     buildBurnWorker,
     tty,
     ttyMark,
+    ttyState,
     RACER_FIELDS,
     crfree,
     triggerNetcontrol,
