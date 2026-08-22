@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=68 | if this is not the version just"
+    jbmark("BUILD", "main.js v=72 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1530,6 +1530,9 @@ async function prepare(p) {
        raw -- so rop.js refuses those instead of running whatever rax held.
        Without the flag this would be the same silent-wrong-stub bug that made
        getpid return -1, moved somewhere harder to see. */
+    /* Scratch qword for rop.js to park rax in while the self-healing syscall
+       re-arms itself; see the comment there. */
+    p2.sysScratch = malloc(0x40);
     p2.provenAddr = PROVEN;
     p2.byNumberOnly = {};
     if (p2.syscall_insn && SHIFT.goneList) {
