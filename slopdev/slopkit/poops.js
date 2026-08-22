@@ -3638,15 +3638,23 @@ export function makePoopsEngine(X) {
          non-blocking would break the very path the worker answers on -- and
          "neither answered nor crashed" is exactly what that looks like.
          These numbers cost one mark and settle it. */
-      flushMark("PIPE2-FDS", label + "-a=" + a + "-b=" + b
-        + "-about-to-fcntl-F_SETFL-O_NONBLOCK");
-      for (const fd of [a, b]) {
-        const sf = await sys(PSYS.FCNTL, fd, K.F_SETFL, K.O_NONBLOCK);
-        if (sf.failed)
-          throw new Error("pipe2(" + label + "): fcntl(F_SETFL,O_NONBLOCK) on fd "
-            + fd + " failed: " + sf.errText);
-      }
-      flushMark("PIPE2-FCNTL", label + "-a=" + a + "-b=" + b + "-nonblock-set");
+      /* a=33 b=36 last run: sane descriptors, nothing aliased, so the
+         "we non-blocked the WebProcess's own channel" theory is dead. What
+         hung was fcntl(F_SETFL) on `a` -- the READ end -- and that call should
+         never have been made. This pipe is a wake gate: emitRacerLoop parks
+         each racer in read(rfd, buf, 1) precisely so it BLOCKS until woken.
+         Marking the read end non-blocking asks for the opposite of what the
+         design wants, and pipe2(buf, O_NONBLOCK) set it on both ends, which is
+         why that hung in the same place.
+         So only the write end gets the flag, which is the end that must never
+         stall a wakeup. Failure there is reported rather than thrown: a
+         blocking write to an empty pipe cannot block anyway. */
+      flushMark("PIPE2-FDS", label + "-r=" + a + "-w=" + b
+        + "-nonblock-on-write-end-only");
+      const sf = await sys(PSYS.FCNTL, b, K.F_SETFL, K.O_NONBLOCK);
+      flushMark("PIPE2-FCNTL", label + "-w=" + b
+        + (sf.failed ? "-fcntl-FAILED-" + sf.errText : "-nonblock-set")
+        + "-read-end-left-blocking-by-design");
     }
     track(a);
     track(b);
