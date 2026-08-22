@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=61 | if this is not the version just"
+    jbmark("BUILD", "main.js v=62 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1464,12 +1464,17 @@ async function prepare(p) {
             jbmark("CHAIN-HUNG", "launch " + tag + " name="
                 + (chain.jbName || "?") + " retslot=" + rv
                 + " -- 10s, no answer and no crash");
-            throw new Error("The rop thread ran away on launch " + tag
-                + ": the worker neither"
-                + " answered nor crashed within 10s. It returned through the"
-                + " hijacked frame and is now lost inside the chain -- stuck in"
-                + " a gadget that does not return, or spinning. Return slot"
-                + " reads " + rv + ".");
+            /* Lead with the measurements. jbmarks are filtered by a list
+               that lives in index.html, which is itself cached and therefore
+               does not know about CHAIN-HUNG -- so the mark exists and never
+               reaches the screen. The thrown message does reach it, but the
+               screen truncates at ~110 characters, and the previous wording
+               spent all of them on prose. Numbers first, explanation after. */
+            throw new Error("ran away " + tag + " ret=" + rv + " name="
+                + (chain.jbName || "?")
+                + " -- worker neither answered nor crashed in 10s;"
+                + " ret still poisoned means it never got past the pivot,"
+                + " a written ret means the body ran and something blocked.");
         }
     }
 
