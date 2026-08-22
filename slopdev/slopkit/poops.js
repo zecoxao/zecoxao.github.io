@@ -4498,17 +4498,39 @@ export function makePoopsEngine(X) {
     const deadlineAt = Date.now() + (settings.deadlineMs || 180000);
     const startedAt = Date.now();
     const log = [];
+    const steps = [];
     let lastReport = null;
+
+    /* One line naming the furthest any attempt got, emitted on every exit.
+       With eight attempts the rows scroll off a twelve-line screen, and the
+       failure line quotes only the last attempt -- which, once the netcontrol
+       slots are spent, is always the degenerate "could not arm" one. */
+    const finish = (res) => {
+      const order = STEPS.slice();
+      let best = "none", bestIdx = -1, reached = 0;
+      for (const st of steps) {
+        const i = order.indexOf(st);
+        if (i > bestIdx) { bestIdx = i; best = st; }
+      }
+      for (const st of steps) if (st === best) reached++;
+      flushMark(
+        "STAGE0-STEPS",
+        "furthest=" + best +
+          "-atStep=" + bestIdx + "-of-" + (order.length - 1) +
+          "-reachedBy=" + reached + "-of-" + steps.length + "-raced"
+      );
+      return res;
+    };
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       if (Date.now() > deadlineAt) {
-        return {
+        return finish({
           ok: false,
           attempts: attempt - 1,
           ms: Date.now() - startedAt,
           log: log,
           why: "wall-clock deadline"
-        };
+        });
       }
 
       flushMark(
@@ -4588,6 +4610,37 @@ export function makePoopsEngine(X) {
           (report.detail ? " -- " + report.detail.slice(0, 160) : "")
       );
 
+      /* The same thing, as a mark.
+         -------------------------------------------------------------------
+         Which step an attempt reached has only ever been visible in `log`,
+         which reaches note(), which lands in the results table -- not in the
+         mark stream the operator is actually reading. So a stage 0 that runs
+         three real attempts and then fails to arm on the fourth reports only
+         the fourth: "attempt could not arm", hiding the three that raced.
+         Every field here is one the attempt already measured; keep the line
+         under the screen's 110-char clip so none of it is lost. */
+      steps.push(report.step);
+      /* Defensive: this runs inside a live attempt loop, and a TypeError here
+         would take down a stage that is otherwise working. */
+      const listOf = (v) => (v && typeof v.join === "function"
+        ? v.join(".") : v == null ? "none" : String(v));
+      try {
+        flushMark(
+          "STAGE0-ROW",
+          "a" + attempt +
+            "-" + report.step +
+            "-twins=" + listOf(report.twins) +
+            "-blk=" + report.blockedAfterSignal + "/" + report.iovRacers +
+            "-recv=" + report.recvmsgRet +
+            "-rec=" + report.reclaimRounds +
+            "-trip=" + listOf(report.tripletAttempts) +
+            "-" + attemptElapsedMs + "ms"
+        );
+      } catch (e) {
+        flushMark("STAGE0-ROW", "a" + attempt + "-" + report.step
+          + "-rowFailed=" + String((e && e.message) || e).slice(0, 60));
+      }
+
       if (report.ok) {
         flushMark(
           "STAGE0-OK",
@@ -4599,48 +4652,48 @@ export function makePoopsEngine(X) {
             (Date.now() - startedAt)
         );
         await sleep(PK.SUCCESS_SETTLE_MS);
-        return {
+        return finish({
           ok: true,
           attempts: attempt,
           ms: Date.now() - startedAt,
           log: log,
           last: report
-        };
+        });
       }
 
       if (report.terminal) {
-        return {
+        return finish({
           ok: false,
           attempts: attempt,
           ms: Date.now() - startedAt,
           log: log,
           why: "attempt could not arm: " + (report.detail || "?"),
           last: report
-        };
+        });
       }
 
       if (TW.corrupt) {
-        return {
+        return finish({
           ok: false,
           attempts: attempt,
           ms: Date.now() - startedAt,
           log: log,
           why: "alias exists, attempt_race not re-enterable: " + TW.corrupt,
           last: report
-        };
+        });
       }
 
       await sleepK(PK.ATTEMPT_GAP_MS);
     }
 
-    return {
+    return finish({
       ok: false,
       attempts: maxAttempts,
       ms: Date.now() - startedAt,
       log: log,
       why: "all " + maxAttempts + " attempts failed",
       last: lastReport
-    };
+    });
   }
 
   function buildUio(dst, iovPtr, td, isRead, kaddr, size) {
