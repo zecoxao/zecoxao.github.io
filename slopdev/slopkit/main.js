@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=52 | if this is not the version just"
+    jbmark("BUILD", "main.js v=53 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1555,22 +1555,53 @@ async function prepare(p) {
                 if (v.low === 0 && v.hi === 0) return null;
                 return (v.hi >>> 0) * 4294967296 + (v.low >>> 0);
             };
-            /* Find libkernel_web's handle by asking for a stub whose address we
-               already know exactly -- getpid, read from the GOT. The handle that
-               answers with that address is the right module, and the answer
-               being right is itself the proof dlsym is trustworthy here. */
+            /* Enumerate the handles instead of guessing them. The first
+               attempt swept 0..24 on the assumption that module handles are
+               small sequential integers; they are not necessarily, and a
+               sweep that misses proves nothing -- it cannot tell "dlsym is
+               restricted" apart from "wrong handle". sys_dynlib_get_list
+               (0x24C) resolved as part of the +0x540 step, so ask it. */
             const lkNum = (libKernelBase.hi >>> 0) * 4294967296
                 + (libKernelBase.low >>> 0);
             const getpidAbs = lkNum + syscall_map[0x14];
-            let handle = -1, probe = null;
-            for (let h = 0; h <= 24 && handle < 0; h++) {
-                probe = await dlsym(h, "HoLVWNanBBc");     // getpid
-                if (probe === getpidAbs) handle = h;
+            const hbuf = malloc(0x200), hcnt = malloc(0x40);
+            let handles = [];
+            if (0x24c in syscall_map) {
+                p.write8(hcnt, new int64(0, 0));
+                const r = await chain.syscall(0x24c, hbuf, 0x40, hcnt);
+                const n = p.read4(hcnt);
+                if (r.low === 0 && r.hi === 0 && n > 0 && n <= 0x40) {
+                    const a = array_from_address(hbuf, n * 4);
+                    for (let i = 0; i < n; i++)
+                        handles.push(a[i * 4] | (a[i * 4 + 1] << 8)
+                            | (a[i * 4 + 2] << 16) | (a[i * 4 + 3] << 24));
+                }
+                jbmark("DLSYM-LIST", handles.length
+                    ? handles.length + " modules: "
+                    + handles.slice(0, 12).join(",")
+                    : "get_list returned " + r.low + " -- falling back to a sweep");
             }
+            if (!handles.length)
+                for (let h = 0; h <= 64; h++) handles.push(h);
+            /* Validate before believing: the right module is the one whose
+               dlsym answer for getpid matches the address already read out of
+               the GOT. Two name forms, because the loader may want the bare
+               NID or the encoded name as it appears in the string table. */
+            let handle = -1, form = "";
+            for (const h of handles) {
+                for (const nm of ["HoLVWNanBBc", "HoLVWNanBBc#H#A"]) {
+                    if (await dlsym(h, nm) === getpidAbs) {
+                        handle = h; form = nm; break;
+                    }
+                }
+                if (handle >= 0) break;
+            }
+            const SUF = form.indexOf("#") >= 0 ? "#H#A" : "";
             jbmark("DLSYM", handle < 0
-                ? "no handle resolved getpid to its known address -- dlsym is"
-                + " unavailable or restricted, nothing applied"
-                : "handle " + handle + " agrees with the GOT on getpid");
+                ? "tried " + handles.length + " handle(s), none resolved getpid"
+                + " to its known address -- dlsym is restricted here"
+                : "handle " + handle + " agrees with the GOT on getpid"
+                + (SUF ? " (encoded names)" : " (bare NIDs)"));
             if (handle >= 0) {
                 let fixed = 0, added = 0, conflict = 0;
                 /* Window first. Each dlsym is a worker round trip, and the
@@ -1583,7 +1614,7 @@ async function prepare(p) {
                     - ((b[0] >= 0x36100 && b[0] <= 0x36420) ? 0 : 1));
                 for (const e of order) {
                     const nr = e[1];
-                    const a = await dlsym(handle, e[2]);
+                    const a = await dlsym(handle, e[2] + SUF);
                     if (a === null) continue;
                     const rva = a - lkNum;
                     if (rva <= 0x1000 || rva >= 0x60000) continue;
@@ -2157,4 +2188,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=52`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=53`);
