@@ -3517,7 +3517,7 @@ export function makePoopsEngine(X) {
     ttyProbed = 0,
     ttyMode = "";
   async function tty(text) {
-    if (ttyMode === "none") return -1;
+    if (ttyProbed && ttyMode === "none") return -1;
     if (!ttyArena) ttyArena = alloc(0x140, "tty");
     const line =
       "[slopkit " +
@@ -3531,49 +3531,55 @@ export function makePoopsEngine(X) {
     for (let i = 0; i < line.length; ++i) u8[i] = line.charCodeAt(i) & 0x7f;
     u8[line.length] = 0;
     const n = line.length;
-    const has259 = P.syscalls[PSYS.DEBUG_OUT_TEXT] !== undefined;
 
-    /* 0x259 first, because it is PROVEN on this console -- twelve lines, in
-       order, in the serial log:
-           [slopkit 1] PS1-ENTER next=rtprio_thread-PRI_REALTIME/256
-           [slopkit 2] PS1-RTPRIO type=2-prio=256
-           ...
-       It is not a printf: its callers pass rdi = a small KIND code (3, 0xa,
-       0xb, 0xd ... 0x27 in libkernel_web alone) and sceKernelDebugOutText is
-       merely kind 7. fd 1 and fd 2 are kept as fallbacks for a build where the
-       stub is missing or the call is refused -- the WebProcess demonstrably has
-       stdout, since the serial log carries "SceNKWebProcess: arg[0] = ..." at
-       every spawn -- but they are never preferred over a channel already known
-       to work. Pinned on the first success; a syscall that returns success is
-       not by itself evidence its output is visible, which is why the pin comes
-       from the probe rather than from any single return. */
+    /* sys(), NOT runBuilt/emit/retPtr.
+       -----------------------------------------------------------------------
+       The first tty call is PS1-ENTER, which happens before ps1_prepare gets
+       as far as buildBuffers() -- and retPtr()/armRet() read S.buf, which does
+       not exist until then. Hand-building the chain here threw on the very
+       first line and cost the whole channel, after it had been proven working.
+       sys() carries its own return cell and has no such dependency.
+
+       0x259 first: it is PROVEN on this console, twelve lines in order in the
+       serial log. It is not a printf -- its callers pass rdi = a small KIND
+       code (3, 0xa, 0xb, 0xd ... 0x27 in libkernel_web alone) and
+       sceKernelDebugOutText is merely kind 7 -- so fd 1 and fd 2 stay as
+       fallbacks for a build where the stub is missing or the call is refused.
+       The WebProcess demonstrably has stdout: the serial log carries
+       "SceNKWebProcess: arg[0] = ..." at every spawn. */
+    let how = "",
+      ret = -1;
+    if (
+      ttyMode !== "fd1" &&
+      ttyMode !== "fd2" &&
+      P.syscalls[PSYS.DEBUG_OUT_TEXT] !== undefined
+    ) {
+      const r = await sys(PSYS.DEBUG_OUT_TEXT, 7, ttyArena.base, 0);
+      if (!r.failed) {
+        how = "0x259";
+        ret = r.s32;
+      }
+    }
+    if (!how && ttyMode !== "fd2") {
+      const w = await sys(PSYS.WRITE, 1, ttyArena.base, n);
+      if (!w.failed && w.s32 > 0) {
+        how = "fd1";
+        ret = w.s32;
+      }
+    }
+    if (!how) {
+      const w2 = await sys(PSYS.WRITE, 2, ttyArena.base, n);
+      if (!w2.failed && w2.s32 > 0) {
+        how = "fd2";
+        ret = w2.s32;
+      }
+    }
+    ttyMode = how || "none";
     if (!ttyProbed) {
       ttyProbed = 1;
-      await runBuilt("tty-probe", () => {
-        armRet(3);
-        if (has259) emit(PSYS.DEBUG_OUT_TEXT, retPtr(0), 7, ttyArena.base, 0);
-        else emit(PSYS.SCHED_YIELD, retPtr(0));
-        emit(PSYS.WRITE, retPtr(1), 1, ttyArena.base, n);
-        emit(PSYS.WRITE, retPtr(2), 2, ttyArena.base, n);
-      });
-      const a = has259 ? retOf(0) : -1,
-        b = retOf(1),
-        c = retOf(2);
-      ttyMode = a === 0 ? "0x259" : b > 0 ? "fd1" : c > 0 ? "fd2" : "none";
-      flushMark(
-        "TTY",
-        "using=" + ttyMode + "-0x259=" + a + "-fd1=" + b + "-fd2=" + c,
-      );
-      return ttyMode === "none" ? -1 : 0;
+      flushMark("TTY", "using=" + ttyMode + "-ret=" + ret);
     }
-
-    await runBuilt("tty", () => {
-      armRet(1);
-      if (ttyMode === "0x259")
-        emit(PSYS.DEBUG_OUT_TEXT, retPtr(0), 7, ttyArena.base, 0);
-      else emit(PSYS.WRITE, retPtr(0), ttyMode === "fd1" ? 1 : 2, ttyArena.base, n);
-    });
-    return retOf(0);
+    return how ? 0 : -1;
   }
 
   /* So the run's LAST line can say whether any of this worked -- the TTY mark
