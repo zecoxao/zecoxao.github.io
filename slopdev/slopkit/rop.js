@@ -623,8 +623,12 @@ class thread_rop extends rop {
 
     async spawn_thread() {
 
-        this.fcall(this.p.libKernelBase.add32(OFFSET_lk_pthread_exit), 0x44414544);
-        await this.chain.call(this.p.libKernelBase.add32(OFFSET_lk_pthread_create_name_np), this.stack_memory.add32(0x48), 0x0, this.p.libSceLibcInternalBase.add32(OFFSET_lc_longjmp), this.stack_memory, this.stack_memory.add32(0x50));
+        this.fcall(this.p.libKernelBase.add32(this.p.lkfix
+            ? this.p.lkfix(OFFSET_lk_pthread_exit)
+            : OFFSET_lk_pthread_exit), 0x44414544);
+        await this.chain.call(this.p.libKernelBase.add32(this.p.lkfix
+            ? this.p.lkfix(OFFSET_lk_pthread_create_name_np)
+            : OFFSET_lk_pthread_create_name_np), this.stack_memory.add32(0x48), 0x0, this.p.libSceLibcInternalBase.add32(OFFSET_lc_longjmp), this.stack_memory, this.stack_memory.add32(0x50));
         return this.p.read8(this.stack_memory.add32(0x48));
     }
 

