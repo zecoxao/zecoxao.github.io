@@ -1,5 +1,23 @@
 // @egycnq (I rewrote egys impli of poops but 90% of his code is likely still factored in)
 
+
+/* Every OFFSET_lk_* here is a libkernel_web TEXT address from
+   PS5UPDATE-devkit-7_00_00_44, and this console runs 7.00.00.70, whose
+   libkernel text is displaced by a staircase of +0xe0 .. +0x580. main.js
+   measures that and publishes the correction; rop.js was taught to use it but
+   poops.js was not, so sceKernelGetCurrentCpu -- called raw in the driver
+   thread setup, right where ps1_prepare hangs -- was jumping into the middle
+   of whatever .70 put at the .44 address.
+
+   Returns the address unchanged when no correction is published (every other
+   firmware profile), and leaves an address alone when the landmarks either
+   side of it disagree, which is the same rule used for the syscall stubs. */
+function LKFIX(rva) {
+  return (typeof window !== "undefined" && window.__lkfix)
+    ? window.__lkfix(rva)
+    : rva;
+}
+
 // Site root (the folder holding payloads/) relative to the *document* that
 // loaded this module. slopkit/poops.html keeps the historical "../"; the
 // unified index.html at the site root sets window.SLOP_ROOT = "".
@@ -539,7 +557,7 @@ export function makeHarness(X) {
       t.write_result4(S.ptr("affret", wid));
     }
 
-    t.fcall(P.libKernelBase.add32(OFFSET_lk_sceKernelGetCurrentCpu));
+    t.fcall(P.libKernelBase.add32(LKFIX(OFFSET_lk_sceKernelGetCurrentCpu)));
     t.write_result(S.ptr("cpu", wid));
 
     t.push_write8(S.ptr("status", wid), TK.ST_READY);
@@ -1165,10 +1183,10 @@ export function makeHarness(X) {
   async function driverCurrentCpu() {
     flushMark(
       "DRV-CPU-PRE",
-      "fn=lk+0x" + OFFSET_lk_sceKernelGetCurrentCpu.toString(16),
+      "fn=lk+0x" + LKFIX(OFFSET_lk_sceKernelGetCurrentCpu).toString(16),
     );
     const v = await chainCall(
-      P.libKernelBase.add32(OFFSET_lk_sceKernelGetCurrentCpu),
+      P.libKernelBase.add32(LKFIX(OFFSET_lk_sceKernelGetCurrentCpu)),
     );
     flushMark("DRV-CPU", "cpu=" + (v & 0xffff));
     return v;
@@ -3181,39 +3199,39 @@ export const PK = {
 
   LK_PTHREAD_CREATE_NAME_NP:
     typeof OFFSET_lk_pthread_create_name_np === "number"
-      ? OFFSET_lk_pthread_create_name_np
+      ? LKFIX(OFFSET_lk_pthread_create_name_np)
       : -1,
   LK_PTHREAD_JOIN:
-    typeof OFFSET_lk_pthread_join === "number" ? OFFSET_lk_pthread_join : -1,
+    typeof OFFSET_lk_pthread_join === "number" ? LKFIX(OFFSET_lk_pthread_join) : -1,
   LK_SCE_PTHREAD_CREATE:
     typeof OFFSET_lk_scePthreadCreate === "number"
-      ? OFFSET_lk_scePthreadCreate
+      ? LKFIX(OFFSET_lk_scePthreadCreate)
       : -1,
   LK_SCE_PTHREAD_JOIN:
-    typeof OFFSET_lk_scePthreadJoin === "number" ? OFFSET_lk_scePthreadJoin : -1,
+    typeof OFFSET_lk_scePthreadJoin === "number" ? LKFIX(OFFSET_lk_scePthreadJoin) : -1,
   LK_SCE_PTHREAD_ATTR_INIT:
     typeof OFFSET_lk_scePthreadAttrInit === "number"
-      ? OFFSET_lk_scePthreadAttrInit
+      ? LKFIX(OFFSET_lk_scePthreadAttrInit)
       : -1,
   LK_SCE_PTHREAD_ATTR_SETSTACKSIZE:
     typeof OFFSET_lk_scePthreadAttrSetstacksize === "number"
-      ? OFFSET_lk_scePthreadAttrSetstacksize
+      ? LKFIX(OFFSET_lk_scePthreadAttrSetstacksize)
       : -1,
   LK_SCE_PTHREAD_ATTR_SETDETACHSTATE:
     typeof OFFSET_lk_scePthreadAttrSetdetachstate === "number"
-      ? OFFSET_lk_scePthreadAttrSetdetachstate
+      ? LKFIX(OFFSET_lk_scePthreadAttrSetdetachstate)
       : -1,
   LK_SCE_PTHREAD_ATTR_DESTROY:
     typeof OFFSET_lk_scePthreadAttrDestroy === "number"
-      ? OFFSET_lk_scePthreadAttrDestroy
+      ? LKFIX(OFFSET_lk_scePthreadAttrDestroy)
       : -1,
   LK_NOTIFY: typeof OFFSET_lk_sceKernelSendNotificationRequest === "number"
-    ? OFFSET_lk_sceKernelSendNotificationRequest : -1,
+    ? LKFIX(OFFSET_lk_sceKernelSendNotificationRequest) : -1,
   LK_SYSCTLBYNAME: typeof OFFSET_lk_sysctlbyname === "number"
-    ? OFFSET_lk_sysctlbyname : -1,
+    ? LKFIX(OFFSET_lk_sysctlbyname) : -1,
   LK_PTHREAD_CREATE: typeof OFFSET_lk_pthread_create === "number"
-    ? OFFSET_lk_pthread_create : -1,
-  LK_GETPID: typeof OFFSET_lk_getpid === "number" ? OFFSET_lk_getpid : -1,
+    ? LKFIX(OFFSET_lk_pthread_create) : -1,
+  LK_GETPID: typeof OFFSET_lk_getpid === "number" ? LKFIX(OFFSET_lk_getpid) : -1,
   LC_MALLOC: typeof OFFSET_lc_malloc === "number" ? OFFSET_lc_malloc : -1,
   LC_FREE: typeof OFFSET_lc_free === "number" ? OFFSET_lc_free : -1,
   LC_MEMCPY: typeof OFFSET_lc_memcpy === "number" ? OFFSET_lc_memcpy : -1,

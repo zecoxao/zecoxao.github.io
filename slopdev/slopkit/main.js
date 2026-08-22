@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=59 | if this is not the version just"
+    jbmark("BUILD", "main.js v=60 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1527,6 +1527,9 @@ async function prepare(p) {
        not, because a wrong function pointer is worse than a missing one. */
     p2.lkfix = (rva) => rva + (typeof SHIFT.at === "function"
         ? (SHIFT.at(rva) || 0) : 0);
+    /* poops.js is a module and cannot see p2, so publish the same correction
+       globally. It reads every libkernel function address through LKFIX(). */
+    try { window.__lkfix = p2.lkfix; } catch (e) {  }
     if (typeof SHIFT.at === "function") {
         const names = {
             pthread_exit: typeof OFFSET_lk_pthread_exit === "number"
