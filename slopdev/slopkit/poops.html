@@ -227,8 +227,18 @@ otherwise.</div>
 
 <div id="console" hidden></div>
 
-<script src="rop.js?v=57"></script>
-<script src="main.js?v=57"></script>
+<!-- index.html itself carries no cache-buster and the PS5 browser caches it,
+     so a stale copy pins every ?v= inside it and a push silently does nothing.
+     Three runs were analysed against code the console was not running before
+     that was noticed. Write the tags at parse time with a per-load stamp
+     instead: document.write keeps the ordering rop.js -> main.js that plain
+     tags give, and even a cached page then fetches fresh JS. window.__cb is
+     reused by main.js for the offsets profile and by the module imports. -->
+<script>
+window.__cb = "?cb=" + Date.now();
+document.write('<scr' + 'ipt src="rop.js' + window.__cb + '"><\/scr' + 'ipt>');
+document.write('<scr' + 'ipt src="main.js' + window.__cb + '"><\/scr' + 'ipt>');
+</script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="../offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -241,16 +251,22 @@ otherwise.</div>
 </script>
 <script src="syscalls.js"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=10";
-import { installWindowP, pairStatus } from "./mem.js?v=10";
-import { int64 } from "./int64.js";
+<script type="module">
+/* Dynamic, so these pick up window.__cb too. A static specifier is
+   frozen into this cached page; core.js and mem.js sat at ?v=10 while
+   their contents moved on, which is the same trap rop.js was in. */
+const { establishPrimitive, fakeCellReleased } =
+    await import("./core.js" + (window.__cb || ""));
+const { installWindowP, pairStatus } =
+    await import("./mem.js" + (window.__cb || ""));
+const { int64 } = await import("./int64.js" + (window.__cb || ""));
 
 let BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList;
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./poops.js?v=37");
+    const lib = await import("./poops.js" + (window.__cb || ""));
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;

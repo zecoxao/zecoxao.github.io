@@ -136,8 +136,18 @@ window.SLOP_DIR = "slopkit/";
       <div id="summary"></div>
     </div>
 
-<script src="slopkit/rop.js?v=57"></script>
-<script src="slopkit/main.js?v=57"></script>
+<!-- index.html itself carries no cache-buster and the PS5 browser caches it,
+     so a stale copy pins every ?v= inside it and a push silently does nothing.
+     Three runs were analysed against code the console was not running before
+     that was noticed. Write the tags at parse time with a per-load stamp
+     instead: document.write keeps the ordering rop.js -> main.js that plain
+     tags give, and even a cached page then fetches fresh JS. window.__cb is
+     reused by main.js for the offsets profile and by the module imports. -->
+<script>
+window.__cb = "?cb=" + Date.now();
+document.write('<scr' + 'ipt src="slopkit/rop.js' + window.__cb + '"><\/scr' + 'ipt>');
+document.write('<scr' + 'ipt src="slopkit/main.js' + window.__cb + '"><\/scr' + 'ipt>');
+</script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = window.__offsetsScript;
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -150,16 +160,22 @@ window.SLOP_DIR = "slopkit/";
 </script>
 <script src="slopkit/syscalls.js"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./slopkit/core.js?v=10";
-import { installWindowP, pairStatus } from "./slopkit/mem.js?v=10";
-import { int64 } from "./slopkit/int64.js";
+<script type="module">
+/* Dynamic, so these pick up window.__cb too. A static specifier is
+   frozen into this cached page; core.js and mem.js sat at ?v=10 while
+   their contents moved on, which is the same trap rop.js was in. */
+const { establishPrimitive, fakeCellReleased } =
+    await import("./slopkit/core.js" + (window.__cb || ""));
+const { installWindowP, pairStatus } =
+    await import("./slopkit/mem.js" + (window.__cb || ""));
+const { int64 } = await import("./slopkit/int64.js" + (window.__cb || ""));
 
 let BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList;
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./slopkit/poops.js?v=37");
+    const lib = await import("./slopkit/poops.js" + (window.__cb || ""));
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;

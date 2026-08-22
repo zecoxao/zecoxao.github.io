@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=57 | if this is not the version just"
+    jbmark("BUILD", "main.js v=58 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -2361,4 +2361,7 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=57`);
+/* Same per-load stamp as the page used for main.js: the profile is the
+   file most likely to have just changed, so it must never come from cache. */
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js`
+    + (window.__cb || '?v=57'));
