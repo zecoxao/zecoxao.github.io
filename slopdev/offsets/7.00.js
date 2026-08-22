@@ -1252,3 +1252,30 @@ const OFFSET_wk_gadget_bytes = {
 
 // Read text after making it readable, and audit instead of guessing.
 const OFFSET_wk_text_audit = true;
+
+/* ---------------------------------------------------------------------------
+ * Gadgets taken from libSceLibcInternal instead of libSceNKWebKit.
+ *
+ * `pop rdx` 0x21461c is `5a c3` in 7_00_00_44 and every landmark around it
+ * measures +0x0, yet it crashes the chain on 7.00.00.70. That is not a
+ * contradiction: a same-SIZE change moves nothing, so it is invisible to a
+ * displacement measurement by construction. Landmarks can only find what
+ * shifted.
+ *
+ * It also blocks the fix. mprotect takes three arguments, so fcall() emits
+ * `pop rdx` -- which means the text cannot be made readable without the very
+ * gadget the read is meant to identify. The crumb trail says exactly that:
+ * mp-lk, then w1/w2/armed/pm, then death.
+ *
+ * libSceLibcInternal is the way out. It measured FLAT over 66 landmarks --
+ * byte-identical between .44 and .70 -- so an address in it needs no shift and
+ * no audit, and it has two `5a c3` sites. Nothing else in the chain has to
+ * change: a gadget is just an address, and rop.js never cared which module it
+ * came from.
+ *
+ * 0x57c87 is the spare if 0x51592 ever turns out to be inside something that
+ * did change.
+ * ------------------------------------------------------------------------- */
+let lc_gadgetmap = {
+	"pop rdx": 0x51592,
+};

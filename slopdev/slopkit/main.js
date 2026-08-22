@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=49 | if this is not the version just"
+    jbmark("BUILD", "main.js v=50 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -634,6 +634,21 @@ async function prepare(p) {
 
     for (let gadget in wk_gadgetmap) {
         gadgets[gadget] = libSceNKWebKitBase.add32(wk_gadgetmap[gadget]);
+    }
+    /* Some gadgets come from libSceLibcInternal rather than libSceNKWebKit.
+       rop.js never cared which module an address is in, and libc measured flat
+       across 66 landmarks -- byte-identical between .44 and .70 -- so those
+       addresses need neither a shift nor an audit. `pop rdx` is here because
+       WebKit's crashes despite reading 5a c3 in our file with +0x0 measured
+       around it, which is what a same-size change looks like from the outside. */
+    const LC_SOURCED = {};
+    if (typeof lc_gadgetmap !== "undefined") {
+        for (const g in lc_gadgetmap) {
+            gadgets[g] = libSceLibcInternalBase.add32(lc_gadgetmap[g]);
+            LC_SOURCED[g] = 1;
+        }
+        jbmark("GADGET-FROM-LC", Object.keys(lc_gadgetmap).map(g =>
+            g + "=lc+0x" + lc_gadgetmap[g].toString(16)).join(" "));
     }
     for (let sysc in syscall_map) {
         syscalls[sysc] = libKernelBase.add32(syscall_map[sysc]);
@@ -1627,7 +1642,7 @@ async function prepare(p) {
             let checked = 0, unreadable = 0;
             for (const nm of names) {
                 const want = OFFSET_wk_gadget_bytes[nm];
-                if (!want) continue;
+                if (!want || LC_SOURCED[nm]) continue;
                 if (!auStep("g:" + nm)) continue;
                 const rva = wk_gadgetmap[nm];
                 if (!await mprot(libSceNKWebKitBase, rva, 16)) {
@@ -1740,7 +1755,11 @@ async function prepare(p) {
            (push_write4's check was wrong, not the gadget). */
         const gtSig = (function () {
             const src = Object.keys(wk_gadgetmap).sort()
-                .map(k => k + ":" + wk_gadgetmap[k]).join(",") + "|rev4-binary-verified";
+                .map(k => k + ":" + wk_gadgetmap[k]).join(",")
+                + "|lc:" + (typeof lc_gadgetmap !== "undefined"
+                    ? Object.keys(lc_gadgetmap).sort()
+                        .map(k => k + ":" + lc_gadgetmap[k]).join(",") : "")
+                + "|rev5-lc-sourced";
             let h = 0;
             for (let z = 0; z < src.length; z++)
                 h = ((h * 31 + src.charCodeAt(z)) & 0x7fffffff);
@@ -1992,4 +2011,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=49`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=50`);
