@@ -3649,12 +3649,22 @@ export function makePoopsEngine(X) {
          So only the write end gets the flag, which is the end that must never
          stall a wakeup. Failure there is reported rather than thrown: a
          blocking write to an empty pipe cannot block anyway. */
-      flushMark("PIPE2-FDS", label + "-r=" + a + "-w=" + b
-        + "-nonblock-on-write-end-only");
-      const sf = await sys(PSYS.FCNTL, b, K.F_SETFL, K.O_NONBLOCK);
-      flushMark("PIPE2-FCNTL", label + "-w=" + b
-        + (sf.failed ? "-fcntl-FAILED-" + sf.errText : "-nonblock-set")
-        + "-read-end-left-blocking-by-design");
+      /* No O_NONBLOCK at all. Three routes into the kernel's fd-flag code
+         have now hung: pipe2 with the flag, fcntl(F_SETFL) on the read end,
+         and fcntl(F_SETFL) on the write end (r=35 w=41, so not a bad
+         descriptor either). Which end it is does not matter, so the fault is
+         the flag operation itself on this build -- and this is a devkit debug
+         kernel, where a lock that a retail build never contends is exactly the
+         sort of thing that deadlocks.
+         The flag is not needed. This pipe is a wake gate: the racer must BLOCK
+         in read(rfd, buf, 1) until woken, so the read end has to stay
+         blocking; and the wakeup is a single byte into an empty pipe, which
+         cannot block a writer whether or not O_NONBLOCK is set. So the pipe is
+         used exactly as pipe2(buf, 0) returns it, and nothing downstream
+         depends on the difference. */
+      flushMark("PIPE2-FCNTL", label + "-r=" + a + "-w=" + b
+        + "-O_NONBLOCK-skipped: fd-flag calls hang on this build and a"
+        + "-1-byte-wakeup-cannot-block-anyway");
     }
     track(a);
     track(b);
