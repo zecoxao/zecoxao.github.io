@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>slopkit2</title>
-<link rel="stylesheet" href="main.css?v=44">
+<link rel="stylesheet" href="main.css?v=45">
 <link rel="preload" href="slopkit/cat.jpg" as="image">
 <link rel="preload" href="slopkit/mmhmm-cats-ps5.gif" as="image">
 
@@ -137,7 +137,7 @@ window.SLOP_DIR = "slopkit/";
     </div>
 
 <script src="slopkit/rop.js"></script>
-<script src="slopkit/main.js?v=44"></script>
+<script src="slopkit/main.js?v=45"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = window.__offsetsScript;
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -511,15 +511,11 @@ function screenLine(text) {
     try { scrEl.textContent = screenLines.join("\n"); } catch { }
 }
 
+// Families whose members are generated, so they cannot be listed by
+// name: the module-shift probe emits one mark per step (SHIFT-WK-1,
+// SHIFT-LK-2, ...) precisely so no single mark hits the 110-char cap.
+const CONCISE_SCREEN_RE = /^SHIFT-/;
 const CONCISE_SCREEN_SHOW = {
-    "SHIFT-LK": 1,
-    "SHIFT-LK-APPLIED": 1,
-    "SHIFT-LK-UNTRUSTED": 1,
-    "SHIFT-WK": 1,
-    "SHIFT-WK-APPLIED": 1,
-    "SHIFT-WK-NONE": 1,
-    "SHIFT-WK-COMPLEX": 1,
-    "SHIFT-FAILED": 1,
     "PROBE-WAIT": 1,
     "PROBE-W": 1,
     "GADGET-AUDIT": 1,
@@ -606,6 +602,7 @@ let remoteSequence = 0, remoteFlushTimer = null, remoteEarlyAttached = false;
 
 function captureRemoteEvent(tag, extra) {
     if (tag !== "TEST" && CONCISE_SCREEN_SHOW[tag] !== 1
+        && !CONCISE_SCREEN_RE.test(tag)
         && !/^(POOPS-|LATCH-|TRIGGER-)/.test(tag)
         && tag !== "CHAIN-DEAD" && tag !== "PAGE-LEFT-MID-RUN"
         && tag !== "OFFSETS-READY" && REMOTE_DETAIL_SHOW[tag] !== 1
@@ -689,6 +686,7 @@ function screenMark(tag, extra) {
         if (!LOG_DEBUG) return;
         line = "> " + s0.replace(/-chainMarks.*$/, "").replace(/-/, " ");
     } else if ((CONCISE_SCREEN_SHOW[tag] === 1
+        || CONCISE_SCREEN_RE.test(tag)
         || (LOG_DEBUG && DEBUG_SCREEN_SHOW.test(tag)))
         && !tag.endsWith("-PRE")) {
         line = s0 ? tag + " " + s0.replace(/_/g, " ") : tag;

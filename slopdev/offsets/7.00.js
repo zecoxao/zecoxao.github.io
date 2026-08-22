@@ -568,13 +568,17 @@ const OFFSET_KERNEL_ROOTVNODE                   = 0x03D17510;
  * Module-shift probe tables.
  *
  * The console is NOT running the build these offsets were generated from.
- * PS5UPDATE-devkit-7_00_00_44 is the closest match on disk, but the devkit is
- * on a "manu special" 7.00 image whose libSceNKWebKit and libkernel_web are the
- * same code with extra bytes inserted -- so every address BELOW the insertion
- * is exact (which is why pop rdi/rsi/rsp, mov [rdi],rax and the whole pivot
- * work) and every address ABOVE it is short by the size of the insertion
- * (which is why pop rdx, the shifts, the 8-byte store and every syscall stub
- * land in the wrong place). Two independent facts pinned this down:
+ * Its own boot log settles it:
+ *
+ *     secure loader(devkit release) ... releases/07.00_t_release_manu
+ *     [SceShellCore]  release: 0x07000070   sys-revision: 205498
+ *
+ * i.e. 7.00.00.70 "_manu", against PS5UPDATE-devkit-7_00_00_44 on disk -- the
+ * closest match available, but 26 revisions away. That is why every address
+ * BELOW where the two builds diverge is exact (pop rdi/rsi/rsp, mov [rdi],rax
+ * and the whole pivot work) and every address above it is not (the 8-byte
+ * store at 0x7527f0, all four shifts, cmp [rcx],eax and every syscall stub).
+ * Three facts pinned it down:
  *
  *   - the import GOT is exactly one 16KB page above where DT_RELA says. Text
  *     ends 0x2de bytes short of a page boundary in our file, so any growth
@@ -592,11 +596,32 @@ const OFFSET_KERNEL_ROOTVNODE                   = 0x03D17510;
  * minus base and addend, IS the shift at that address. Sorting by addend gives
  * a step profile: 0 below the insertion, the true delta above it.
  *
- * wk slots are read at slot+0x4000 (the data segments moved a page); lk slots
- * are read as-is (libkernel_web's data has 0x191e bytes of slack above text,
- * so it did not move -- which is why the base derivation and _thread_list,
- * both data, work while every lk text address is wrong).
+ * The bias each module needs is detected rather than assumed: a wrong bias
+ * reads the NEIGHBOURING relocation and the deltas scatter, so the probe tries
+ * 0 / +0x4000 / -0x4000 and keeps whichever yields the fewest distinct deltas.
+ *
+ * FIRST MEASUREMENT (7.00.00.70, 2026-08-22), report only:
+ *   libSceNKWebKit -- two clean steps, +0x0 up to ~0x44a1a0 and +0x2a0 from
+ *     ~0x4b0ea0 on. That fits five of the six gadgets known to fail
+ *     (0x572686, 0x7527f0, 0x1308fc3, 0x2488363, 0x2d60b54, 0x35f9049 are all
+ *     above the cut) and leaves pop rdx 0x21461c, which is BELOW it, as the
+ *     one result that does not fit -- its CRASH verdict came from a run that
+ *     may simply have re-armed a stale return slot.
+ *   libkernel_web -- the eight rodata controls all came back non-zero, so
+ *     libkernel_web's rodata content itself moved between .44 and .70 and a
+ *     pointer-into-rodata is not a fixed landmark across these two builds.
+ *     Its text is +0x580 by the one measurement that does not depend on any
+ *     of this: the parked worker's stack holds lk+0x38f31, and 0x38f31-0x580
+ *     is 0x389b1, the statically predicted cond_wait_common return.
+ *
+ * Applying the wk measurement moved pop r8 and pop r9 -- which fcall() uses --
+ * and turned a getpid that merely returned -1 into a SIGILL, so the probe is
+ * REPORT-ONLY until the numbers are corroborated. Flip
+ * OFFSET_apply_measured_shift to act on them.
  * ------------------------------------------------------------------------- */
+// Act on the measured shift instead of only reporting it. Off: the first
+// application made the run die earlier, not later.
+const OFFSET_apply_measured_shift = false;
 const OFFSET_wk_shift_probe = [
 	[0x3c5fc40, 0x2000],
 	[0x3ce45f0, 0x9efe0],
