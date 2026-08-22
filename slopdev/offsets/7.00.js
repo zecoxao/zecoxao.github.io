@@ -72,7 +72,13 @@ const OFFSET_lk__thread_list                   = 0x00064218;
  * The cond_wait selector at lk+0x64014 reads 1 on this console, confirming
  * pthread_cond_wait really does take the 0x38840 body -- so the wrong-body
  * explanation is ruled out and the call site is the whole story.
- * previous (never matched): 0x000389B1 */
+ * previous (never matched): 0x000389B1
+ *
+ * RESOLVED: 0x38F31 - 0x580 = 0x389B1 exactly, and 0x39843 - 0x580 = 0x392C3,
+ * the return of `call 0x2D380`. Both measured values are the statically derived
+ * ones plus 0x580, so the static analysis was right and libkernel_web's text on
+ * this console is simply 0x580 higher than in PS5UPDATE-devkit-7_00_00_44.
+ * These entries are MEASURED console addresses and must NOT be shifted again. */
 const OFFSET_lk_worker_wait_return             = [0x00038F31, 0x00039843, 0x00033D1E];
 // Byte that selects WHICH cond_wait_common body pthread_cond_wait calls:
 // 1 -> 0x38840 (the body 0x389B1 above was taken from), 0 -> 0x38BE0.
@@ -111,8 +117,14 @@ const OFFSET_wk_r9_zero_only             = true;
 // swapped.  ZF is unaffected by the swap, so branch_types.EQUAL (the only
 // type the engine uses) is exact; rop.js throws on the ordered types.
 const OFFSET_wk_cmp_operands_reversed    = true;
-/* `mov [rdi], rsi ; ret` at 0x7527F0 is NOT that instruction on this build.
- * Established by execution, since the text is execute-only and cannot be read:
+/* `mov [rdi], rsi ; ret` at 0x7527F0 does not execute as that instruction on
+ * this CONSOLE -- but it is exactly `48 89 37 c3` in the file, and the reason
+ * for the mismatch is now understood: 0x7527F0 is above the point where the
+ * console's build diverges from ours, so the real store sits at 0x7527F0 plus
+ * the shift (see the module-shift probe tables at the end of this file).
+ * `mov [rdi], rax` 0x79337 works only because it is BELOW that point. Routing
+ * through rax therefore remains correct and costs nothing; it is a symptom,
+ * not the fix. Original evidence, all still valid:
  *   probe=rsp  SILENT -- pop rsp 0x6EEE1 and the stack switch both work
  *   probe=p    SILENT -- pop rdi 0x31434 and pop rsi 0xB7098 each consume
  *                        exactly one stack slot and return correctly
@@ -551,3 +563,230 @@ const OFFSET_KERNEL_QA_FLAGS                    = 0x00000000; // not derived
 const OFFSET_KERNEL_UTOKEN_FLAGS                = 0x00000000; // not derived
 // VFS_ROOT(mp, LK_EXCLUSIVE, &rootvnode) at 0xffffffff80E2BCFA -> kdata+0x30C7510.
 const OFFSET_KERNEL_ROOTVNODE                   = 0x03D17510;
+
+/* ---------------------------------------------------------------------------
+ * Module-shift probe tables.
+ *
+ * The console is NOT running the build these offsets were generated from.
+ * PS5UPDATE-devkit-7_00_00_44 is the closest match on disk, but the devkit is
+ * on a "manu special" 7.00 image whose libSceNKWebKit and libkernel_web are the
+ * same code with extra bytes inserted -- so every address BELOW the insertion
+ * is exact (which is why pop rdi/rsi/rsp, mov [rdi],rax and the whole pivot
+ * work) and every address ABOVE it is short by the size of the insertion
+ * (which is why pop rdx, the shifts, the 8-byte store and every syscall stub
+ * land in the wrong place). Two independent facts pinned this down:
+ *
+ *   - the import GOT is exactly one 16KB page above where DT_RELA says. Text
+ *     ends 0x2de bytes short of a page boundary in our file, so any growth
+ *     over 0x2de pushes every following segment up by 0x4000 -- observed.
+ *   - the parked worker's stack holds lk+0x38f31 and lk+0x39843. Neither is an
+ *     instruction boundary in our libkernel_web, but subtract 0x580 and they
+ *     become 0x389b1 (the return of cond_wait_common's blocking call, exactly
+ *     the address predicted statically) and 0x392c3 (the return of `call
+ *     0x2d380`). Two unrelated stack slots, one delta.
+ *
+ * The tables below let the shift be MEASURED rather than guessed, from data
+ * that is readable (text is execute-only, so bytes cannot be compared). Each
+ * entry is [slot, addend] from the module's own R_X86_64_RELATIVE relocations:
+ * the qword at `slot` must hold base+addend, so whatever it actually holds,
+ * minus base and addend, IS the shift at that address. Sorting by addend gives
+ * a step profile: 0 below the insertion, the true delta above it.
+ *
+ * wk slots are read at slot+0x4000 (the data segments moved a page); lk slots
+ * are read as-is (libkernel_web's data has 0x191e bytes of slack above text,
+ * so it did not move -- which is why the base derivation and _thread_list,
+ * both data, work while every lk text address is wrong).
+ * ------------------------------------------------------------------------- */
+const OFFSET_wk_shift_probe = [
+	[0x3c5fc40, 0x2000],
+	[0x3ce45f0, 0x9efe0],
+	[0x3d49eb8, 0x1232a0],
+	[0x3d5b578, 0x125060],
+	[0x3ce62a8, 0x127e90],
+	[0x3cd83c8, 0x12a460],
+	[0x3cfb3b8, 0x12b460],
+	[0x3d50d30, 0x131330],
+	[0x3d4ddc8, 0x134430],
+	[0x3c7ad60, 0x136430],
+	[0x3d8e5d0, 0x13ae90],
+	[0x3cd8508, 0x13be80],
+	[0x3d53f60, 0x13de70],
+	[0x3cd8528, 0x1423d0],
+	[0x3d8e010, 0x149be0],
+	[0x3d5c758, 0x14c940],
+	[0x3cec0d8, 0x1554b0],
+	[0x3cd82e0, 0x158fd0],
+	[0x3cd7d18, 0x15be10],
+	[0x3d54f78, 0x1606c0],
+	[0x3d08738, 0x164220],
+	[0x3cd8340, 0x1676a0],
+	[0x3cd7d88, 0x16c180],
+	[0x3d37bf0, 0x174e10],
+	[0x3d4bc98, 0x177a10],
+	[0x3d91ea0, 0x17b0d0],
+	[0x3d8df58, 0x17d1d0],
+	[0x3d63540, 0x1808e0],
+	[0x3d8ece8, 0x18bb00],
+	[0x3ce4b20, 0x191630],
+	[0x3d8e210, 0x195be0],
+	[0x3d4c070, 0x197220],
+	[0x3ced3e8, 0x19aa20],
+	[0x3cfdc30, 0x19efd0],
+	[0x3d587c0, 0x1a1f80],
+	[0x3d8e280, 0x1a98e0],
+	[0x3d58778, 0x1b48f0],
+	[0x3cfb660, 0x1b8690],
+	[0x3c60bb0, 0x1bd530],
+	[0x3d3a7b8, 0x1bf970],
+	[0x3ce13e8, 0x1c3bc0],
+	[0x3d5b418, 0x1c77d0],
+	[0x3c77150, 0x1cb320],
+	[0x3d44dd8, 0x1cf530],
+	[0x3cd7a88, 0x1d4d00],
+	[0x3ce4380, 0x1d7940],
+	[0x3d9c8b0, 0x1d8990],
+	[0x3d56b08, 0x1da0d0],
+	[0x3d97c78, 0x1de630],
+	[0x3dbcc90, 0x1e45a0],
+	[0x3d8df08, 0x1e73b0],
+	[0x3d8e350, 0x1e9980],
+	[0x3d4df60, 0x1ec670],
+	[0x3c05060, 0x1eff70],
+	[0x3d4a620, 0x1f46e0],
+	[0x3d8dfc0, 0x1f7830],
+	[0x3d4aba8, 0x1fbd80],
+	[0x3d542f0, 0x1ff080],
+	[0x3de0908, 0x202790],
+	[0x3d56b78, 0x209960],
+	[0x3cd84a8, 0x20acf0],
+	[0x3ced4a8, 0x20e950],
+	[0x3d5b628, 0x2114b0],
+	[0x3d4ab88, 0x218670],
+	[0x3d46990, 0x218f40],
+	[0x3d4ab40, 0x21e410],
+	[0x3c512e0, 0x221670],
+	[0x3d4c028, 0x2748c0],
+	[0x3bfd230, 0x310cf8],
+	[0x3d8e318, 0x3ad7a0],
+	[0x3cd8358, 0x44a1a0],
+	[0x3ce14a0, 0x4c6ea0],
+	[0x3d732d8, 0x4e8070],
+	[0x3ccc588, 0x572690],
+	[0x3c7c910, 0x5847d0],
+	[0x3ce1498, 0x620500],
+	[0x3cfa900, 0x6bf960],
+	[0x3d8dfa0, 0x753040],
+	[0x3d5b580, 0x759b00],
+	[0x3d4a9f8, 0x7f5ff0],
+	[0x3cf5438, 0x891f20],
+	[0x3ced5c8, 0x92e790],
+	[0x3d444d8, 0x9d7c40],
+	[0x3d7c8c0, 0xa6fdf0],
+	[0x3cf0ec8, 0xb0d3b0],
+	[0x3cf11b8, 0xbacb30],
+	[0x3d45640, 0xc40d50],
+	[0x3d45c80, 0xcdc8c0],
+	[0x3cf46e8, 0xd76dd0],
+	[0x3cf5940, 0xe13560],
+	[0x3d46e98, 0xec5cd0],
+	[0x3cfaa08, 0xf5b590],
+	[0x3cfdc28, 0x101dee0],
+	[0x3d33030, 0x1098500],
+	[0x3cfb700, 0x10bf960],
+	[0x3cfd058, 0x112bfb0],
+	[0x3d06f08, 0x11ffe70],
+	[0x3d449c0, 0x1261a50],
+	[0x3d59840, 0x13108a0],
+	[0x3d55fb8, 0x13a4500],
+	[0x3d075a0, 0x1444b10],
+	[0x3d3aa88, 0x14e96e0],
+	[0x3d077a8, 0x1569f40],
+	[0x3d59938, 0x160b480],
+	[0x3dbc348, 0x16a3490],
+	[0x3d76c80, 0x1740ea0],
+	[0x3d33928, 0x18020d0],
+	[0x3dbc488, 0x187dc10],
+	[0x3d76980, 0x1946bf0],
+	[0x3d366a8, 0x19e4130],
+	[0x3d32ae8, 0x1a76e30],
+	[0x3dbc5c8, 0x1affa50],
+	[0x3d38828, 0x1b94c10],
+	[0x3d6d398, 0x1c95f10],
+	[0x3d78400, 0x1cefa10],
+	[0x3d35c68, 0x1d65160],
+	[0x3dbdc48, 0x1e94040],
+	[0x3d86e90, 0x1e961a0],
+	[0x3d95688, 0x1f35720],
+	[0x3d910a0, 0x1fcf4d0],
+	[0x3d0e428, 0x206bcf0],
+	[0x3d2ffc0, 0x2108c50],
+	[0x3d32578, 0x21b5620],
+	[0x3d327c0, 0x2246960],
+	[0x3d39bc8, 0x22ffc60],
+	[0x3d39468, 0x23861d0],
+	[0x3d766b0, 0x2466250],
+	[0x3d62368, 0x2488370],
+	[0x3dde9e8, 0x24c6fe0],
+	[0x3d91738, 0x2551200],
+	[0x3d77ec0, 0x25ed8f0],
+	[0x3d3b390, 0x2690480],
+	[0x3d3ce08, 0x2733d50],
+	[0x3d3d430, 0x27c43e0],
+	[0x3d9a9e8, 0x28604d0],
+	[0x3d9e310, 0x2900840],
+	[0x3d47dd8, 0x299d080],
+	[0x3d42f70, 0x2a4e800],
+	[0x3d47180, 0x2ad7be0],
+	[0x3d4bf98, 0x2b6de70],
+	[0x3d4fae0, 0x2c11190],
+	[0x3d5b270, 0x2ca7600],
+	[0x3dbda88, 0x2d54190],
+	[0x3d535b0, 0x2d62140],
+	[0x3d54e60, 0x2de2560],
+	[0x3d5a368, 0x2e80290],
+	[0x3df5f28, 0x2f215e0],
+	[0x3de3618, 0x2fb9cc0],
+	[0x3d5aba0, 0x3060cf0],
+	[0x3e03700, 0x30eefe0],
+	[0x3def1d8, 0x318b860],
+	[0x3e0b1d8, 0x3229190],
+	[0x3d8d7d0, 0x32d4aa0],
+	[0x3d65628, 0x33614f0],
+	[0x3d65cc8, 0x33fe0b0],
+	[0x3d66528, 0x349ac20],
+	[0x3d66a28, 0x3537550],
+	[0x3d66fb0, 0x35d3740],
+	[0x3d97568, 0x35f9050],
+	[0x3e147c0, 0x366efa0]
+];
+
+const OFFSET_lk_shift_probe = [
+	[0x60e50, 0x7a00],
+	[0x60e60, 0x8ca0],
+	[0x60e58, 0x10790],
+	[0x60eb0, 0x33830],
+	[0x60e68, 0x35ca0],
+	[0x642e8, 0x35dda],
+	[0x642f0, 0x365ba],
+	[0x642f8, 0x3696e],
+	[0x64300, 0x36a03],
+	[0x64308, 0x36a24],
+	[0x64310, 0x36eb7],
+	[0x64318, 0x3777a],
+	[0x64320, 0x3799a],
+	[0x64328, 0x37caa],
+	[0x60e70, 0x383b0],
+	[0x64338, 0x3854d],
+	[0x60e78, 0x387b0]
+];
+
+const OFFSET_lk_shift_control = [
+	[0x603b8, 0x59bfb],
+	[0x60328, 0x5a52d],
+	[0x60238, 0x5b022],
+	[0x605f8, 0x5b89b],
+	[0x60bd0, 0x5c2b6],
+	[0x60028, 0x5cb07],
+	[0x60da0, 0x5d348],
+	[0x60d90, 0x5dc83]
+];
