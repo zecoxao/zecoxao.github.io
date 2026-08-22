@@ -4246,7 +4246,20 @@ export function makePoopsEngine(X) {
       b.clrBuf.base,
       8,
     );
-    await ttyMark("NETCTRL-CLEAR", "ret=" + cr.s32 + "-" + cr.errText);
+    /* flushMark, NOT ttyMark.
+       -----------------------------------------------------------------------
+       CLEAR is the over-release. From the instant it returns, the credential
+       this process runs on may be freed while td_ucred still points at it, and
+       the next syscall that touches a cred walks freed memory. tty() is a chain
+       launch -- syscalls, in that window, for a log line. The run died right
+       here with NETCTRL-CLEAR as the last thing in the transcript, which is
+       both what a working over-release looks like and what an unnecessary
+       syscall after one looks like; there is no reason to keep paying for the
+       second while trying to observe the first.
+       Nothing is lost: the mark still reaches the screen and the durable trail,
+       and clearRet is carried out to STAGE0-ROW, which is raised after the
+       attempt is over and is on the serial channel. */
+    flushMark("NETCTRL-CLEAR", "ret=" + cr.s32 + "-" + cr.errText);
     return {
       ok: true,
       slot,
@@ -4354,7 +4367,8 @@ export function makePoopsEngine(X) {
     const o = opts || {}, n = TW.S.n, b = S.buf;
     const rep = {
       ok: false, step: "", detail: "", twins: null,
-      reclaimRounds: -1, tripletAttempts: [-1, -1]
+      reclaimRounds: -1, tripletAttempts: [-1, -1],
+      uaf: -1, reused: "?", clearRet: undefined
     };
     const at = (s) => {
       rep.step = s;
@@ -4378,6 +4392,11 @@ export function makePoopsEngine(X) {
 
     at(STEPS[1]);
     const pre = await preFlushAct();
+    if (pre && pre.ok && pre.clearRet !== undefined) {
+      rep.uaf = pre.uaf;
+      rep.reused = pre.reused ? "Y" : "N";
+      rep.clearRet = pre.clearRet;
+    }
     if (pre && pre.ok === false) {
       /* Lead with the remedy when there is one. Both netcontrol slots stay
          occupied for the rest of the boot once a trigger has fired -- that is
@@ -4821,6 +4840,9 @@ export function makePoopsEngine(X) {
           "-recv=" + report.recvmsgRet +
           "-rec=" + report.reclaimRounds +
           "-trip=" + listOf(report.tripletAttempts) +
+          (report.clearRet === undefined
+            ? ""
+            : "-uaf=" + report.uaf + "/" + report.reused + "/" + report.clearRet) +
           "-" + attemptElapsedMs + "ms";
       } catch (e) {
         rowDetail = "a" + attempt + "-" + report.step
