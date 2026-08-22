@@ -328,7 +328,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-64-devkit-tty";
+const REV = "slopkit-poops-65-no-autorun-after-death";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -679,6 +679,7 @@ const CONCISE_SCREEN_SHOW = {
     "PREV-CRUMBS": 1,
     "TWIN-FIRST-CALLS": 1,
     "TTY": 1,
+    "POOPS-AUTORUN-REFUSED": 1,
     "PS1-ENTER": 1,
     "NETCTRL-SET": 1,
     "NETCTRL-UAF": 1,
@@ -2233,6 +2234,40 @@ function lastRunText() {
 (async function entry() {
 
     screenLine("slopkit -- reading the one-shot safety latch");
+
+    /* An auto-reload after a crash must not spend the boot.
+       -----------------------------------------------------------------------
+       When the WebProcess dies the browser respawns and reloads this page by
+       itself -- the serial log shows it, 4 to 13 seconds later, same URL -- and
+       this page auto-runs. So the first run of a boot is regularly an
+       unattended one that nobody sees, and by the time the operator looks both
+       netcontrol slots are gone and every later load can only report "already
+       spent earlier this boot". Three boots in a row went that way.
+       The trail says exactly this and nothing else does: it is non-empty, so a
+       previous load in this browser session got somewhere, and it does not
+       contain POOPS-COMPLETE, so that load never finished. Stop, name where it
+       died, and let the operator start the next one deliberately. The trail was
+       consumed on the way in, so the very next load runs normally. */
+    if (PREV_TRAIL && PREV_TRAIL.indexOf("POOPS-COMPLETE") === -1) {
+        const parts = PREV_TRAIL.split(">");
+        const diedAt = parts[parts.length - 1];
+        renderNav("", false);
+        showPrevTrail();
+        stage("previous load DIED at '" + diedAt
+            + "' -- not auto-running; reload to start a run", "bad");
+        summaryEl.textContent = "NOTHING was executed. The last load in this"
+            + " browser session ended at '" + diedAt + "' after " + parts.length
+            + " marks without completing, so this load is almost certainly the"
+            + " browser reloading itself after that death. Running now would"
+            + " spend this boot's netcontrol slots unattended -- there are two,"
+            + " and they do not come back until the console is rebooted."
+            + " Reload to run deliberately.";
+        flushMark("POOPS-AUTORUN-REFUSED",
+            "prevDiedAt=" + diedAt + "-steps=" + parts.length);
+        sendRemoteEvents(false);
+        offerReload();
+        return;
+    }
 
     if (PRODUCTION_REQUEST_ERROR) {
         renderNav("", false);
