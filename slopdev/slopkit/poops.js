@@ -8913,6 +8913,7 @@ export function buildLadder(X, E) {
         const pb = await H.readRtprio("driver-check");
         if (pb.type !== TK.PRI_REALTIME || pb.prio !== TK.POOPS_RTPRIO)
           return FAIL("driver rtprio read back " + pb.type + "/" + pb.prio);
+        flushMark("PS1-RTPRIO", "type=" + pb.type + "-prio=" + pb.prio);
         const pin = await H.pinDriver(driver.core);
         driver.affChanged = true;
         if (pin.failed)
@@ -8931,6 +8932,7 @@ export function buildLadder(X, E) {
               ((1 << driver.core) >>> 0).toString(16),
           );
         driver.pinned = true;
+        flushMark("PS1-PINNED", "core=" + driver.core);
         note(
           "driver: PRI_REALTIME/256 set and read back, pinned to core " +
             driver.core +
@@ -8938,6 +8940,7 @@ export function buildLadder(X, E) {
         );
 
         E.buildBuffers();
+        flushMark("PS1-BUFFERS", "built");
         note(
           "recvmsg iovec array is " +
             PK.MSG_IOV_NUM +
@@ -8958,9 +8961,11 @@ export function buildLadder(X, E) {
         const [ia, ib] = await E.socketpairUnix("iov");
         const [ua, ub] = await E.socketpairUnix("uio");
         E.setSocketpairs(ia, ib, ua, ub);
+        flushMark("PS1-SOCKETPAIRS", "iov=" + ia + "." + ib + "-uio=" + ua + "." + ub);
         const [mr, mw] = await E.pipe2Nonblock("master");
         const [vr, vw] = await E.pipe2Nonblock("victim");
         E.setPipes(mr, mw, vr, vw);
+        flushMark("PS1-PIPES", "master=" + mr + "." + mw + "-victim=" + vr + "." + vw);
         note(
           "master pipe r=" +
             mr +
@@ -8973,7 +8978,9 @@ export function buildLadder(X, E) {
         );
 
         await E.setupRacerGroups(driver.core);
+        flushMark("PS1-GROUPS", "core=" + driver.core + "-next=spawnRacers");
         const sp = await E.spawnRacers(driver.core);
+        flushMark("PS1-SPAWNED", sp.map((x) => x.name + "=" + x.live).join("-"));
         note(
           "racers: " +
             sp

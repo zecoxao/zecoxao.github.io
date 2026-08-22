@@ -176,7 +176,7 @@ let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./slopkit/poops.js?v=75");
+    const lib = await import("./slopkit/poops.js?v=76");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
@@ -249,7 +249,7 @@ const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
 const PROGRESS_KEY = "slopkit-poops:next";
 const RUNLOG_KEY = "slopkit-poops:last";
 const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-59-offsets-parse";
+const REV = "slopkit-poops-60-ps1-steps";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
@@ -631,7 +631,7 @@ function screenLine(text) {
 // Families whose members are generated, so they cannot be listed by
 // name: the module-shift probe emits one mark per step (SHIFT-WK-1,
 // SHIFT-LK-2, ...) precisely so no single mark hits the 110-char cap.
-const CONCISE_SCREEN_RE = /^(SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM|PIPE2-PROBE|SYSCALL-INSN|SYSCALL-BYNUMBER)/;
+const CONCISE_SCREEN_RE = /^(PS1-|SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM|PIPE2-PROBE|SYSCALL-INSN|SYSCALL-BYNUMBER)/;
 const CONCISE_SCREEN_SHOW = {
     "PROBE-WAIT": 1,
     "PROBE-W": 1,
@@ -815,6 +815,12 @@ function sendRemoteEvents(unloading) {
 }
 
 function screenMark(tag, extra) {
+    /* The durable trail is taken HERE rather than in flushMark, because
+       flushMark defers to queueEvent for the whole of a race window -- and
+       ps1_prepare runs entirely inside one. Trailing only the non-race marks
+       meant a death in there left "RACE-ENTER" and nothing else. Every mark,
+       both paths, crash or not. */
+    trailPush(markTrailTag(tag, extra));
     /* Before any filtering: both flushMark and queueEvent land here, and
        TRIGGER-EXHAUSTED is raised inside a race window, where flushMark
        defers to queueEvent. */
@@ -879,7 +885,6 @@ function flushMark(tag, extra) {
 
     if (raceMode && CRITICAL_MARKS[tag] !== 1) { queueEvent(tag, extra); return; }
     marksBlocked++;
-    trailPush(markTrailTag(tag, extra));
     screenMark(tag, extra);
 }
 
