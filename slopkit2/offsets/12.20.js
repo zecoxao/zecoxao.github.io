@@ -1,9 +1,9 @@
-// 12.00 -- generated from libSceNKWebKit / libkernel_web /
+// 12.20 -- generated from libSceNKWebKit / libkernel_web /
 // libSceLibcInternal. file offset = rva + 0x4000
 
 // host-constructor candidates: webkitBase = nativeCtorAddr - hc
 const OFFSET_wk_host_constructor_candidates = [0x0003A888, 0x0003AAD0, 0x0003BB18];
-const OFFSET_wk_vtable_first_element     = 0x0028EF30;
+const OFFSET_wk_vtable_first_element     = 0x0028EF30; // derived: unique `mov eax,0x37; ret` slot0, verified identical in all six 12.x modules
 const OFFSET_wk_memset_import                  = 0x03510238;
 const OFFSET_wk___stack_chk_guard_import       = 0x0350DB88;
 
@@ -11,34 +11,14 @@ const OFFSET_lk___stack_chk_guard              = 0x0006D1D0;
 const OFFSET_lk_pthread_create_name_np         = 0x00021800;
 const OFFSET_lk_pthread_join                   = 0x00022910;
 const OFFSET_lk_pthread_exit                   = 0x00021B90;
-// Exact retail exports used by the Stage-5 payload loader.
-const OFFSET_lk_scePthreadCreate               = 0x000079B0;
-const OFFSET_lk_scePthreadJoin                 = 0x0000B570;
-const OFFSET_lk_scePthreadAttrInit             = 0x000151E0;
-const OFFSET_lk_scePthreadAttrSetstacksize     = 0x0000C6B0;
-const OFFSET_lk_scePthreadAttrSetdetachstate   = 0x0000C0C0;
-const OFFSET_lk_scePthreadAttrDestroy          = 0x000104C0;
-const OFFSET_lk_sceKernelSendNotificationRequest = 0x000048B0;
-const OFFSET_lk_sysctlbyname                   = 0x00013BB0;
-const OFFSET_lk_pthread_create                 = 0x00021150;
-const OFFSET_lk_getpid                         = 0x0001B7D0;
-const OFFSET_lk__thread_list                   = 0x00064218;
-const OFFSET_lk_worker_wait_return             = 0x0001FC71;
 const OFFSET_lk_sleep                          = 0x00027E70;
 const OFFSET_lk_sceKernelGetCurrentCpu         = 0x00001200;
 
 const OFFSET_lc_memset                         = 0x00015BF0;
-const OFFSET_lc_malloc                         = 0x000060F0;
-const OFFSET_lc_free                           = 0x00006100;
-const OFFSET_lc_memcpy                         = 0x00003D80;
-const OFFSET_lc_strcmp                         = 0x000407C0;
-const OFFSET_lc_memcmp                         = 0x00078750;
-const OFFSET_lc_vsnprintf                      = 0x0005CF50;
 const OFFSET_lc_setjmp                         = 0x0005B850;
 const OFFSET_lc_longjmp                        = 0x0005B8A0;
 
-// Fallback estimate only; main.js fingerprints the saved worker PC at runtime.
-const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB68;
+const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB88;
 
 let wk_gadgetmap = {
 	"ret": 0x000000C7,
@@ -403,15 +383,48 @@ let syscall_map = {
 	0x2DD: 0x0001B3F0,
 };
 
-// Firmware-specific kernel offsets from the validated SDK family table.
-// Text-relative except for the two invariant syscall-stack frame offsets.
-const OFFSET_KERNEL_STACK_COOKIE                = 0x00000930;
-const OFFSET_KERNEL_STACK_SYS_SCHED_YIELD_RET   = 0x00000808;
-const OFFSET_KERNEL_DATA                        = 0x00D50000;
-const OFFSET_KERNEL_SYS_SCHED_YIELD_RET         = 0x0063AC62;
-const OFFSET_KERNEL_ALLPROC                     = 0x035D5E00;
-const OFFSET_KERNEL_SECURITY_FLAGS              = 0x01AD3064;
-const OFFSET_KERNEL_TARGETID                    = 0x01AD306D;
-const OFFSET_KERNEL_QA_FLAGS                    = 0x01AD3088;
-const OFFSET_KERNEL_UTOKEN_FLAGS                = 0x01AD30F0;
-const OFFSET_KERNEL_ROOTVNODE                   = 0x03E27510;
+/* ---------------------------------------------------------------------------
+ * p2jb offsets for 12.20.
+ *
+ * Before this block 12.20 carried WebKit offsets only, so p2jb died at load with a
+ * ReferenceError (main.js dereferences OFFSET_lk__thread_list and
+ * OFFSET_lk_worker_wait_return unguarded). Derived 2026-08-16.
+ *
+ * libkernel_web is group A (528364 bytes), the same build family as 12.00, which is
+ * hardware-proven - so 12.00 is the reference and the port was validated by first
+ * reproducing BOTH 12.00 and 12.70 from each other:
+ *   - the 16 exported functions come from the module's own NID symbol table, not from
+ *     byte signatures: 32/32 recorded values reproduced exactly
+ *   - _thread_list ported via the code that references it rip-relatively (4 agreeing
+ *     reference sites), controls passed both directions
+ *   - worker_wait_return ported by masked byte signature, unique hit, controls both ways
+ *   - OFFSET_KERNEL_* are ktext-relative; OFFSET_KERNEL_DATA is kdata_base - ktext_base
+ *     read from this firmware's own kernel PT_LOAD table (0xD50000 on all six 12.x), and
+ *     allproc was re-derived from this kernel's bytes rather than assumed frozen.
+ * UNTESTED ON HARDWARE - only 12.00 and 12.70 have been run on a console.
+ * ------------------------------------------------------------------------ */
+const OFFSET_KERNEL_ALLPROC                          = 0x035D5E00;
+const OFFSET_KERNEL_DATA                             = 0x00D50000;
+const OFFSET_KERNEL_QA_FLAGS                         = 0x01AD3088;
+const OFFSET_KERNEL_ROOTVNODE                        = 0x03E27510;
+const OFFSET_KERNEL_SECURITY_FLAGS                   = 0x01AD3064;
+const OFFSET_KERNEL_TARGETID                         = 0x01AD306D;
+const OFFSET_KERNEL_UTOKEN_FLAGS                     = 0x01AD30F0;
+const OFFSET_lc_free                                 = 0x00006100;
+const OFFSET_lc_malloc                               = 0x000060F0;
+const OFFSET_lc_memcmp                               = 0x00078750;
+const OFFSET_lc_memcpy                               = 0x00003D80;
+const OFFSET_lc_strcmp                               = 0x000407C0;
+const OFFSET_lc_vsnprintf                            = 0x0005CF50;
+const OFFSET_lk__thread_list                         = 0x00064218;
+const OFFSET_lk_getpid                               = 0x0001B7D0;
+const OFFSET_lk_pthread_create                       = 0x00021150;
+const OFFSET_lk_sceKernelSendNotificationRequest     = 0x000048B0;
+const OFFSET_lk_scePthreadAttrDestroy                = 0x000104C0;
+const OFFSET_lk_scePthreadAttrInit                   = 0x000151E0;
+const OFFSET_lk_scePthreadAttrSetdetachstate         = 0x0000C0C0;
+const OFFSET_lk_scePthreadAttrSetstacksize           = 0x0000C6B0;
+const OFFSET_lk_scePthreadCreate                     = 0x000079B0;
+const OFFSET_lk_scePthreadJoin                       = 0x0000B570;
+const OFFSET_lk_sysctlbyname                         = 0x00013BB0;
+const OFFSET_lk_worker_wait_return                   = 0x0001FC71;

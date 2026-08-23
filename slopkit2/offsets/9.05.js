@@ -1,10 +1,21 @@
-// 09.05 candidate -- 09.00 userland seed pending exact module-hash confirmation.
-// Verified 09.05 kernel offsets are kept separately at the end of this file.
+// 09.05 -- derived from 09.00, which it matches exactly in userland.
+//
+// VERIFIED, not assumed:
+//   libSceNKWebKit .text is BYTE-IDENTICAL to 09.00 (same SHA-256), so every wk_ offset
+//     and all 26 ROP gadgets are unchanged; each gadget was additionally re-checked by
+//     disassembling at its offset (26/26, with 09.00 as the control).
+//   all 25 NID-resolvable lk_/lc_ exports resolve identically in the real 09.05 modules.
+//   _thread_list and worker_wait_return are not exported; ported by signature 09.00->09.05
+//     with a round-trip control, both unchanged.
+//   syscall_map regenerated from the module's own stub bodies: 331/331 identical to 09.00
+//     (the regenerator reproduces poopsploit's proven 09.00 map exactly).
+// Sources: 09.05 system dump (libkernel_web / libSceLibcInternal / libSceNKWebKit + kdata).
+// Derived 2026-08-16. Kernel security_flags block CORRECTED 2026-08-17 (was copied from
+// 9.00 and wrong by 0x1000) - see the note above that block. UNTESTED ON HARDWARE.
+// file offset = rva + 0x4000
 
-// host-constructor candidates: webkitBase = nativeCtorAddr - hc
 const OFFSET_wk_host_constructor_candidates = [0x00034F98, 0x00035808, 0x00035900];
-// Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
-const OFFSET_wk_vtable_first_element     = 0x00285170;
+const OFFSET_wk_vtable_first_element     = 0x000763E0;
 const OFFSET_wk_memset_import                  = 0x033C3EC0;
 const OFFSET_wk___stack_chk_guard_import       = 0x033C18C8;
 
@@ -28,6 +39,9 @@ const OFFSET_lk__thread_list                   = 0x00064218;
 const OFFSET_lk_worker_wait_return             = 0x0001F091;
 const OFFSET_lk_sleep                          = 0x00027560;
 const OFFSET_lk_sceKernelGetCurrentCpu         = 0x000011E0;
+// Native sceKernelDlsym(handle, name, out) wrapper.  This is the sole caller
+// of the verified syscall-591 stub at lk+0x1AA40 in the retail 09.00 image.
+const OFFSET_lk_sceKernelDlsym                  = 0x00010400;
 
 const OFFSET_lc_memset                         = 0x00014B90;
 const OFFSET_lc_malloc                         = 0x00005FF0;
@@ -405,8 +419,33 @@ let syscall_map = {
 	0x2DD: 0x0001A920,
 };
 
-// Firmware-specific kernel offsets from the validated SDK family table.
-// Text-relative except for the two invariant syscall-stack frame offsets.
+/* ---------------------------------------------------------------------------
+ * Kernel offsets (ktext-relative; kdata-relative = value - OFFSET_KERNEL_DATA).
+ *
+ * CORRECTED 2026-08-17. The security_flags block was WRONG BY 0x1000 - it had been
+ * copied from 9.00, and 9.05 genuinely differs from 9.00 there. 9.00 really is
+ * 0x01A12064; 9.05 (and 9.20/9.40/9.60) are 0x01A13064. This file was the only one
+ * of the 15 poopsploit firmwares that disagreed with github.com/jordyidk/slopkit.
+ *
+ * How the correction was proved, on this console's own kdata.bin (which was captured
+ * AFTER a jailbreak, so it still holds the values main.js writes):
+ *      at 0x01A13064  security_flags = 0x00000017   = 0x03 | 0x14, the exact OR
+ *      at 0x01A1306D  targetid       = 0x82         the exact byte main.js writes
+ *      at 0x01A130F0  utoken_flags   = 0x01         the exact bit main.js sets
+ *      at 0x01A12064  (the old value) 0x0000F002, targetid 0x00, utoken 0x00
+ *                     - unrelated data inside a repeating "03 00 c4 10" record table
+ * Three independent post-jailbreak fingerprints land on the new address and none on
+ * the old one.
+ *
+ * LESSON: the previous note here recorded that TARGETID read 0x00 "rather than a
+ * console-type byte" and called it unproven. That caveat was the actual bug report,
+ * and it was written off as the field being unset. A plausible-looking value at a
+ * guessed address is not corroboration.
+ *
+ * The rest of the block stands and matches the reference: KERNEL_DATA from the
+ * kernel's own PT_LOAD table, ALLPROC and ROOTVNODE both reading back as genuine
+ * kernel pointers in the dump, SYS_SCHED_YIELD_RET after the call in sys_sched_yield.
+ * ------------------------------------------------------------------------ */
 const OFFSET_KERNEL_STACK_COOKIE                = 0x00000930;
 const OFFSET_KERNEL_STACK_SYS_SCHED_YIELD_RET   = 0x00000808;
 const OFFSET_KERNEL_DATA                        = 0x00CA0000;
