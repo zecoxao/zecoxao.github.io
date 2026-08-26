@@ -67,8 +67,12 @@ CONTENTS
   main.js core.js mem.js rop.js int64.js syscalls.js             shared engine
   rop-worker.js rop_slave.js p2jb_lk.js p2jb_poops.js           p2jb sync executor
   offsets/              per-firmware offsets, one file per version
-  payloads/             ELFs (etaHEN, kstuff, ftpsrv, shsrv, websrv, klogsrv, gdbsrv,
-                        pldmgr, autoloader, shadowmountplus, elfldr) + the kexp blob
+  payloads/             ELFs (etaHEN, OnionHEN, pizzahen, kstuff, ftpsrv, shsrv, websrv,
+                        klogsrv, gdbsrv, pldmgr, autoloader, shadowmountplus, elfldr)
+                        + the kexp blob. pizzahen.elf is PIZZA-HEN v2.00 and is 62 MB -
+                        it carries its own compressed bootstrapper - so its tile takes
+                        noticeably longer to deliver than the others. That is the file
+                        size, not a hang.
   ui/                   payload menu tile images
   api/                  OPTIONAL payload handlers (payload.php + .htaccess,
                         serve.js). Not needed to jailbreak; only for the tiles.

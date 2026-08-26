@@ -254,6 +254,7 @@
 		<a class="payloadTile" href="#" data-name="etaHEN.elf" data-key="etahen"><img data-src="ui/payload-etahen-default.png" alt=""></a>
 		<a class="payloadTile" href="#" data-name="kstuff.elf" data-key="kstuff"><img data-src="ui/payload-kstuff-default.png" alt=""></a>
 		<a class="payloadTile" href="#" data-name="OnionHEN.elf" data-key="onionhen"><img data-src="ui/payload-onionhen-default.png" alt=""></a>
+		<a class="payloadTile" href="#" data-name="pizzahen.elf" data-key="pizzahen"><img data-src="ui/payload-pizzahen-default.png" alt=""></a>
 		<a class="payloadTile" href="#" data-name="psplay.elf" data-key="psplay"><img data-src="ui/payload-psplay-default.png" alt=""></a>
 		<a class="payloadTile" href="#" data-name="poords4.elf" data-key="poords4"><img data-src="ui/payload-poords4-default.png" alt=""></a>
 		<a class="payloadTile" href="#" data-name="elf-arsenal.elf" data-key="elfarsenal"><img data-src="ui/payload-elfarsenal-default.png" alt=""></a>
@@ -286,8 +287,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=129"></script>
-<script src="main.js?v=129"></script>
+<script src="rop.js?v=130"></script>
+<script src="main.js?v=130"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -298,21 +299,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=129"></script>
+<script src="syscalls.js?v=130"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=129";
-import { installWindowP, pairStatus } from "./mem.js?v=129";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=130";
+import { installWindowP, pairStatus } from "./mem.js?v=130";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=129";
+    from "./poops.js?v=130";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=129");
+    const lib = await import("./poops.js?v=130");
 
-    await import("./poops.js?v=129");
-    const st = await import("./poops.js?v=129");
+    await import("./poops.js?v=130");
+    const st = await import("./poops.js?v=130");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -2081,10 +2082,10 @@ async function main() {
             });
             try {
                 if (!window.POOPS) throw new Error("window.POOPS not published by prepare()");
-                await loadScript("rop-worker.js?v=129");   // sync syscall executor (fireSync)
-                await loadScript("p2jb_lk.js?v=129");       // per-fw libkernel_web offsets for rop-worker
-                await loadScript("p2jb_poops.js?v=129");    // Y2JB adapter (sync syscall via rop-worker)
-                await loadScript("p2jb.js?v=129");          // exploit module (unchanged, sync)
+                await loadScript("rop-worker.js?v=130");   // sync syscall executor (fireSync)
+                await loadScript("p2jb_lk.js?v=130");       // per-fw libkernel_web offsets for rop-worker
+                await loadScript("p2jb_poops.js?v=130");    // Y2JB adapter (sync syscall via rop-worker)
+                await loadScript("p2jb.js?v=130");          // exploit module (unchanged, sync)
                 flushMark("P2JB-LOADED", "adapter+module on poopsploit primitives");
             } catch (e) {
                 /* This reported ONLY through flushMark. Served from a static host there is no
