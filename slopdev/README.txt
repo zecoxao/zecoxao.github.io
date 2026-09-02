@@ -59,9 +59,63 @@ the site works on a plain static host - with one real limitation, stated honestl
       up; only the tiles cannot deliver. Send ELFs yourself in that case:
           nc <console-ip> 9021 < payloads/etaHEN.elf
 
+DEVKIT CONSOLE LOG + NOTIFICATIONS  (devlog.js)
+-----------------------------------------------
+The on-screen log and the log/ beacon both die with the tab, which is exactly what
+happens on the failure we are chasing (App Crash reason=0xa on 7.00). devlog.js
+mirrors the same lines to two sinks that outlive the WebProcess:
+
+  sceKernelDebugOutText -> the devkit's console output.
+      Issued as the RAW syscall, mdbg_service(7, text, channel) = syscall 0x259,
+      not through the libkernel wrapper. 0x259 is in every firmware's syscall table
+      in offsets/, so this needed no new per-firmware constant. Verified against
+      devkit 7.60.00.07's own libkernel_web.sprx: sceKernelDebugOutText @ 0xAE00 is
+      `mov rdx,rdi; mov edi,7; call <0x259 stub>`, and the kernel's mdbg case 7
+      copyinstr()s from uap->arg1 - i.e. the string goes in RSI, not RDI.
+      If mdbg answers -1 (subsystem off, or the sandbox refuses 0x259) it falls
+      back ONCE to write(2, ...) and stays there: the WebProcess has a real
+      stdout - the serial log carries "SceNKWebProcess: arg[0] = ..." at every
+      spawn - so the same pane still gets the lines. ?klogfd=N picks the fd.
+
+  sceKernelSendNotificationRequest -> a toast on the TV.
+      OFFSET_lk_sceKernelSendNotificationRequest (0x8BE0 on 7.x), called as
+      (0, req, 0xC30, 0) with the message at req+0x2D. Firmwares whose offsets file
+      does not carry that constant (3.xx-6.xx, 13.xx) get no notifications and say so
+      in the probe line; the console log still works there.
+
+Both are bound in prepare() the instant getpid proves the ROP chain runs, and probed
+once - the page prints `devlog: klog=0x0 notify=0x0`. A non-zero or "refused" there
+means the sink is unavailable on this console, not that the exploit failed.
+
+What gets mirrored: every log() line, every telemetry mark, and the on-screen mark
+text. Notifications are reserved for ERROR/SUCCESS lines and failed ladder rows, and
+are capped (they are on-screen toasts, and there can be thousands of marks).
+
+  ?klog=0        no devkit console output
+  ?notify=0      no notifications
+  ?klognow=1     flush after every line - use this when hunting a HANG, since the
+                 default only flushes at ladder-row boundaries and at awaited log()
+                 calls, and a hang never reaches the next one
+  ?klogmarks=0   log() lines only, no telemetry marks
+  ?klogch=N      DebugOutText channel (default 0)
+  ?notifymax=N   notification cap per run (default 24, 0 = unlimited)
+  ?klogtag=STR   line prefix (default "slop")
+  ?klogfd=N      fd for the write() fallback (default 2)
+
+Every line is "[slop N s.mmm] ...". N is what makes a dead boot readable: the last
+N on the console is exactly where the run stopped, and a GAP in N means lines were
+dropped (queue cap) rather than never produced.
+
+IF YOU MOVE A FLUSH CALL, read the re-entrancy comment at the top of devlog.js first.
+Emitting a line runs a ROP chain, and the exploit runs ROP chains: devlog has its own
+chain stack so it can never clobber one being assembled, and it counts in-flight runs
+through p.launch_chain so it never crosses two launches on the one hijacked worker.
+Queueing (devlog.line) is safe anywhere; flushing is not.
+
 CONTENTS
 --------
   index.html            entry point, firmware gating
+  devlog.js             devkit console (sceKernelDebugOutText) + notification mirror
   p2jb.html / p2jb.js   p2jb exploit (12.00-12.70)
   poops.html / poops.js poopsploit (9.00-12.00)
   main.js core.js mem.js rop.js int64.js syscalls.js             shared engine

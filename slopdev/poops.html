@@ -252,8 +252,12 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=130"></script>
-<script src="main.js?v=130"></script>
+<!-- devlog.js must load BEFORE main.js: main.js's log()/jbmark() call into
+     window.devlog, and prepare() binds it the moment the ROP chain is proven.
+     It is inert until then (queue only), so ordering only costs early lines. -->
+<script src="devlog.js?v=131"></script>
+<script src="rop.js?v=131"></script>
+<script src="main.js?v=131"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -264,21 +268,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=130"></script>
+<script src="syscalls.js?v=131"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=130";
-import { installWindowP, pairStatus } from "./mem.js?v=130";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=131";
+import { installWindowP, pairStatus } from "./mem.js?v=131";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=130";
+    from "./poops.js?v=131";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=130");
+    const lib = await import("./poops.js?v=131");
 
-    await import("./poops.js?v=130");
-    const st = await import("./poops.js?v=130");
+    await import("./poops.js?v=131");
+    const st = await import("./poops.js?v=131");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -402,6 +406,11 @@ function setRaceMode(on) {
     return was;
 }
 function screenLine(text) {
+    /* Same sink, one more consumer: the devkit console. QUEUE ONLY - screenLine
+     * is reached from screenMark <- flushMark <- jb.mark, which fires from
+     * inside chain-building code, so it must not run a ROP chain of its own.
+     * See the re-entrancy note at the top of devlog.js. */
+    try { if (window.devlog) window.devlog.line(text); } catch (e) { }
     screenLines.push(text.length > 120 ? text.slice(0, 117) + "..." : text);
     if (screenLines.length > SCREEN_LINES)
         screenLines.splice(0, screenLines.length - SCREEN_LINES);
@@ -937,6 +946,7 @@ function setChainMarksQuiet(quiet) {
     chainMarksQuiet = !!quiet;
     return was;
 }
+try { window.screenLine = screenLine; } catch (e) { }
 if (!window.jb) window.jb = {};
 if (typeof window.jb.mark !== "function") window.jb.mark = jbMarkSink;
 
@@ -1424,6 +1434,12 @@ async function runLadder() {
         row(i + 1, entry, "RUN", "running...");
         flushMark("TEST-ENTER", entry.key
             + (entry.hot ? "-chainMarks=queued" : "-chainMarks=blocking"));
+        /* SAFE FLUSH POINT. Between two ladder rows nothing of ours is on the
+         * worker, so this is where everything queued during the previous row
+         * (and every mark this row's prologue produced) reaches the devkit
+         * console. Do it BEFORE entry.run(): if the row is the one that kills
+         * the WebProcess, the console already knows which row it was. */
+        try { if (window.devlog) await window.devlog.flush(); } catch (e) { }
         let result;
         const wasQuiet = setChainMarksQuiet(!!entry.hot);
         try {
@@ -1452,6 +1468,14 @@ async function runLadder() {
                     .replace(/[^\x20-\x7e]/g, "").slice(0, 400)
                 : ""));
         if (state.cleanupFailed) danger("cleanup failure: " + state.cleanupFailed);
+        try {
+            if (window.devlog) {
+                if (result.status === "FAIL")
+                    await window.devlog.notify(entry.key + " FAILED: "
+                        + String(result.detail || "").slice(0, 180));
+                await window.devlog.flush();
+            }
+        } catch (e) { }
 
         if (aborted || result.status === "FAIL") {
             if (!aborted) aborted = entry.key + " (FAIL)";

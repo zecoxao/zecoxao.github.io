@@ -99,12 +99,40 @@ var LogLevel = {
 let consoleElem = null;
 let lastLogIsTemp = false;
 
+/* devlog mirror (devlog.js). log() is the one sink every stage already routes
+ * human-readable progress through, so it is also where the devkit console gets
+ * fed. It returns devlog.flush()'s promise: every `await log(...)` site in this
+ * file therefore drains the queue AT A POINT WHERE THE EXPLOIT IS BETWEEN CHAIN
+ * OPERATIONS, which is the only place a ROP chain of our own may run. Bare
+ * `log(...)` calls just queue and ride along with the next awaited one.
+ * See the re-entrancy note at the top of devlog.js before changing this. */
+let lastTempMirror = 0;
+const LOG_LEVEL_NAME = ["DEBUG", "INFO", "LOG", "WARN", "ERROR", "OK"];
+
 function log(string, level) {
     if (consoleElem === null) {
         consoleElem = document.getElementById("console");
     }
 
     const isTemp = level & LogLevel.FLAG_TEMP;
+    let mirror = null;
+    try {
+        if (window.devlog) {
+            const lvl = (level | 0) & ~LogLevel.FLAG_TEMP;
+            /* Temp lines are progress counters that rewrite themselves; at full
+             * rate they would be thousands of round trips. One every 500ms is
+             * enough to see WHERE a run stopped moving. */
+            const now = Date.now();
+            if (!isTemp || now - lastTempMirror > 500) {
+                if (isTemp) lastTempMirror = now;
+                window.devlog.line((LOG_LEVEL_NAME[lvl] || "LOG") + " " + string);
+            }
+            if (lvl === LogLevel.ERROR || lvl === LogLevel.SUCCESS)
+                mirror = window.devlog.notify(string);
+            else
+                mirror = window.devlog.flush();
+        }
+    } catch (e) { }
     level = level & ~LogLevel.FLAG_TEMP;
     const elemClass = ["LOG-DEBUG", "LOG-INFO", "LOG-LOG", "LOG-WARN", "LOG-ERROR", "LOG-SUCCESS"][level];
 
@@ -112,7 +140,7 @@ function log(string, level) {
         const lastChild = consoleElem.lastChild;
         lastChild.innerText = string;
         lastChild.className = elemClass;
-        return;
+        return mirror;
     } else if (isTemp) {
         lastLogIsTemp = true;
     } else {
@@ -125,6 +153,7 @@ function log(string, level) {
     consoleElem.appendChild(logElem);
 
     consoleElem.scrollTop = consoleElem.scrollHeight;
+    return mirror;
 }
 
 const AF_INET = 2;
@@ -176,6 +205,14 @@ function jbmark(tag, detail) {
         if (window.jb && typeof window.jb.mark === "function")
             window.jb.mark(tag, String(detail));
     } catch (e) {  }
+    /* Queue only - jbmark is called from deep inside chain-building code (see
+     * launch_chain below, which marks between the stack write and the worker
+     * postMessage), so this must never touch the worker. devlog.line() is a
+     * plain array push; the next awaited log() carries it to the console. */
+    try {
+        if (window.devlog && window.devlog.cfg.marks)
+            window.devlog.line("MARK " + tag + " " + String(detail));
+    } catch (e) { }
 }
 
 async function prepare(p) {
@@ -495,6 +532,21 @@ async function prepare(p) {
         throw new Error("Webkit exploit failed.");
     }
     jbmark("PREP-GETPID-OK", "pid=" + pid.low);
+
+    /* The chain has now provably executed (getpid came back non-poison), which
+     * is the earliest moment it is safe to run one of our own. Bind the devkit
+     * console sink here and probe it immediately, so everything queued since
+     * page load lands on the console BEFORE the kernel stages start - those are
+     * the ones that take the process down with them. */
+    try {
+        if (window.devlog && window.devlog.bind(p2, chain)) {
+            await window.devlog.probe();
+            await window.devlog.flush();
+            jbmark("DEVLOG-BOUND", JSON.stringify(window.devlog.stats()));
+        }
+    } catch (e) {
+        jbmark("DEVLOG-BIND-FAILED", String(e));
+    }
 
     // ---- P2JB handoff: publish the primitive bundle the Y2JB adapter consumes ----
     // p2 carries read/write 1..8, malloc, gadgets{}, syscalls{}, libc bases,
