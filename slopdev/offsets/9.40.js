@@ -3,7 +3,8 @@
 
 // host-constructor candidates: webkitBase = nativeCtorAddr - hc
 const OFFSET_wk_host_constructor_candidates = [0x00034F98, 0x00035808, 0x00035900];
-const OFFSET_wk_vtable_first_element     = 0x000763E0;
+// Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
+const OFFSET_wk_vtable_first_element     = 0x00285150;
 const OFFSET_wk_memset_import                  = 0x033C3ED0;
 const OFFSET_wk___stack_chk_guard_import       = 0x033C18D8;
 
@@ -403,12 +404,15 @@ let syscall_map = {
 	0x2DD: 0x0001A920,
 };
 
-/* merged from the sibling site tree so both serve the same
- * offsets; the two trees had no conflicting values. */
-const OFFSET_KERNEL_ALLPROC                     = 0x033F5D50;
+// Firmware-specific kernel offsets from the validated SDK family table.
+// Text-relative except for the two invariant syscall-stack frame offsets.
+const OFFSET_KERNEL_STACK_COOKIE                = 0x00000930;
+const OFFSET_KERNEL_STACK_SYS_SCHED_YIELD_RET   = 0x00000808;
 const OFFSET_KERNEL_DATA                        = 0x00CA0000;
-const OFFSET_KERNEL_QA_FLAGS                    = 0x01A13088;
-const OFFSET_KERNEL_ROOTVNODE                   = 0x03C7B510;
+const OFFSET_KERNEL_SYS_SCHED_YIELD_RET         = 0x005B7F92;
+const OFFSET_KERNEL_ALLPROC                     = 0x033F5D50;
 const OFFSET_KERNEL_SECURITY_FLAGS              = 0x01A13064;
 const OFFSET_KERNEL_TARGETID                    = 0x01A1306D;
+const OFFSET_KERNEL_QA_FLAGS                    = 0x01A13088;
 const OFFSET_KERNEL_UTOKEN_FLAGS                = 0x01A130F0;
+const OFFSET_KERNEL_ROOTVNODE                   = 0x03C7B510;

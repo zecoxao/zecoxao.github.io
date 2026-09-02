@@ -3,7 +3,8 @@
 
 // host-constructor candidates: webkitBase = nativeCtorAddr - hc
 const OFFSET_wk_host_constructor_candidates = [0x0001E0D8, 0x0001E320, 0x0001F368];
-const OFFSET_wk_vtable_first_element     = 0x001D5BB0;
+// Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
+const OFFSET_wk_vtable_first_element     = 0x00151300;
 const OFFSET_wk_memset_import                  = 0x034F7DA0;
 const OFFSET_wk___stack_chk_guard_import       = 0x034F5718;
 
