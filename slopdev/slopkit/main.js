@@ -646,17 +646,24 @@ async function prepare(p) {
     /* Some gadgets come from libSceLibcInternal rather than libSceNKWebKit.
        rop.js never cared which module an address is in, and libc measured flat
        across 66 landmarks -- byte-identical between .44 and .70 -- so those
-       addresses need neither a shift nor an audit. `pop rdx` is here because
-       WebKit's crashes despite reading 5a c3 in our file with +0x0 measured
-       around it, which is what a same-size change looks like from the outside. */
+       addresses need neither a shift nor an audit. `pop rdx` used to be here
+       because the WebKit one we had crashed despite reading 5a c3 with +0x0
+       measured around it; 7.00 now carries a different WebKit address, so the
+       detour is switched off there and the map is empty. */
     const LC_SOURCED = {};
     if (typeof lc_gadgetmap !== "undefined") {
         for (const g in lc_gadgetmap) {
             gadgets[g] = libSceLibcInternalBase.add32(lc_gadgetmap[g]);
             LC_SOURCED[g] = 1;
         }
-        jbmark("GADGET-FROM-LC", Object.keys(lc_gadgetmap).map(g =>
-            g + "=lc+0x" + lc_gadgetmap[g].toString(16)).join(" "));
+        /* An empty map is a deliberate state, not a missing one -- it is how
+           the libc detour is switched off to re-test a WebKit gadget. Say so,
+           because "GADGET-FROM-LC" with a blank value reads like the lookup
+           failed. */
+        jbmark("GADGET-FROM-LC", Object.keys(lc_gadgetmap).length
+            ? Object.keys(lc_gadgetmap).map(g =>
+                g + "=lc+0x" + lc_gadgetmap[g].toString(16)).join(" ")
+            : "none: map is empty, every gadget comes from wk");
     }
     for (let sysc in syscall_map) {
         syscalls[sysc] = libKernelBase.add32(syscall_map[sysc]);
@@ -2280,11 +2287,11 @@ async function prepare(p) {
                     chain.push(gadgets["pop rdx"]); chain.push(V0);
                     chain.push(gadgets["pop rax"]); chain.push(M0);
                 }, (v) => v.low === M0.low && v.hi === M0.hi);
-                /* Name the address that RAN. pop rdx comes from libc now, so
-                   printing wk_gadgetmap's 0x21461c next to "ok" credits the
-                   gadget that does not work with the result of the one that
-                   does -- exactly the kind of thing that cost eight runs
-                   earlier in this port. */
+                /* Name the address that RAN, whichever module it came from.
+                   When the libc detour is on, printing wk_gadgetmap's address
+                   next to "ok" would credit the gadget that does not work with
+                   the result of the one that does -- exactly the kind of thing
+                   that cost eight runs earlier in this port. */
                 const src = LC_SOURCED["pop rdx"]
                     ? "lc+0x" + lc_gadgetmap["pop rdx"].toString(16)
                     : "wk+0x" + wk_gadgetmap["pop rdx"].toString(16);

@@ -1267,9 +1267,18 @@ const OFFSET_wk_text_audit = true;
  *
  * 0x57c87 is the spare if 0x51592 ever turns out to be inside something that
  * did change.
+ *
+ * DISABLED for this run. The WebKit `pop rdx` is no longer 0x21461c -- it is
+ * 0x001478F7 -- so the premise of the libc detour (the only WebKit `5a c3` we
+ * had crashed the chain) no longer holds and has to be re-tested rather than
+ * assumed. Leaving the libc entry in place would silently override the new
+ * address, so POP-RDX would keep reporting lc+0x51592 and the wk gadget would
+ * never actually execute. Empty map => LC_SOURCED is empty, gadgets["pop rdx"]
+ * stays wk+0x1478F7, and the exec:pop rdx rung tests the address we care about.
+ * To fall back, put the entry below back.
  * ------------------------------------------------------------------------- */
 let lc_gadgetmap = {
-	"pop rdx": 0x51592,
+	/* "pop rdx": 0x51592, */
 };
 
 // [rva in 7_00_00_44, syscall number, NID] for every syscall stub
@@ -1559,9 +1568,7 @@ const OFFSET_lk_stub_nids = [
  * already uses that exact fcntl call on its socketpair write end. */
 const OFFSET_lk_pipe2_flags_hang = true;
 
-// LIST_INIT(&allproc) in procinit() at 0xffffffff8074DEBB -> kdata+0x2859D50.
 const OFFSET_KERNEL_ALLPROC                         = 0x034A9D50;
-// kdata_base = text_base + text_size = 0xffffffff80210000 + 0xC50000.
 const OFFSET_KERNEL_DATA                            = 0x00C50000;
 const OFFSET_KERNEL_QA_FLAGS                        = 0x01718088;
 /* rootvnode, derived from this firmware's own x86_kernel.elf.
@@ -1574,7 +1581,6 @@ const OFFSET_KERNEL_QA_FLAGS                        = 0x01718088;
  * The method reproduces the known-good values on TWO anchors we already have:
  * 9.00 -> 0x03C7B510 and 12.00 -> 0x03E27510, both exact matches.
  * Range-checked: value sits past OFFSET_KERNEL_DATA and inside the image. */
-// VFS_ROOT(mp, LK_EXCLUSIVE, &rootvnode) at 0xffffffff80E2BCFA -> kdata+0x30C7510.
 const OFFSET_KERNEL_ROOTVNODE                       = 0x03D17510;
 const OFFSET_KERNEL_SECURITY_FLAGS                  = 0x01718064;
 const OFFSET_KERNEL_TARGETID                        = 0x0171806D;
