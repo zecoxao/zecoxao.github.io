@@ -3,8 +3,7 @@
 
 // host-constructor candidates: webkitBase = nativeCtorAddr - hc
 const OFFSET_wk_host_constructor_candidates = [0x00002C00, 0x00005178, 0x00005690];
-// Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
-const OFFSET_wk_vtable_first_element     = 0x000FBF10;
+const OFFSET_wk_vtable_first_element     = 0x000BCEF0;
 const OFFSET_wk_memset_import                  = 0x035CFCA8;
 const OFFSET_wk___stack_chk_guard_import       = 0x035CD6B8;
 
@@ -24,6 +23,11 @@ const OFFSET_lk_sysctlbyname                   = 0x000134B0;
 const OFFSET_lk_pthread_create                 = 0x00020780;
 const OFFSET_lk_getpid                         = 0x0001AF60;
 const OFFSET_lk__thread_list                   = 0x00064218;
+// PRIMARY path: saved worker cond_wait return PC fingerprint (poopsunclean value).
+// The earlier "scan found 0" was self-inflicted by an extra RSP-plausibility gate
+// in main.js find_worker_return_slot (now removed) -- the raw saved-PC match finds
+// exactly 1. wk_vtable stays 0xBCEF0 (this console's WebKit base leak, proven by
+// both lapse STAGE1 and poops reaching ps1_prepare past main.js:180).
 const OFFSET_lk_worker_wait_return             = 0x0001F281;
 const OFFSET_lk_sleep                          = 0x00027360;
 const OFFSET_lk_sceKernelGetCurrentCpu         = 0x000011E0;
@@ -38,7 +42,7 @@ const OFFSET_lc_vsnprintf                      = 0x0005B9C0;
 const OFFSET_lc_setjmp                         = 0x0005A2B0;
 const OFFSET_lc_longjmp                        = 0x0005A300;
 
-// Fallback estimate only; main.js fingerprints the saved worker PC at runtime.
+// Fallback estimate only (unused while the fingerprint above is defined).
 const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB68;
 
 let wk_gadgetmap = {
