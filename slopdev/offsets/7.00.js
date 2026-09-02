@@ -2,7 +2,7 @@
 // libSceLibcInternal. file offset = rva + 0x4000
 
 // no host-constructor value for this firmware
-const OFFSET_wk_host_constructor_candidates = [];
+const OFFSET_wk_host_constructor_candidates = [0x00010AE8, 0x00010590, 0x000114C0];
 /* Re-derived 2026-08-21. The previous value came from a 'unique mov eax,0x37; ret'
  * heuristic and was WRONG for this whole range - on 7.00 it pointed at 0x65C4E0,
  * which is slot 0 of a single 3-slot vtable, not a DOM element. main.js does:
@@ -16,7 +16,7 @@ const OFFSET_wk_host_constructor_candidates = [];
  * produced 0x818209240, which is not page aligned, and every module base
  * derived from it (lk, lc) came out as garbage.
  * previous (wrong): 0x0065C7C0 */
-const OFFSET_wk_vtable_first_element     = 0x0003D720;
+const OFFSET_wk_vtable_first_element     = 0x006E6910;
 
 const OFFSET_wk_memset_import                  = 0x03E1AEE0;
 const OFFSET_wk___stack_chk_guard_import       = 0x03E18910;
@@ -37,14 +37,14 @@ const OFFSET_lk__thread_list                   = 0x00064218;
 const OFFSET_lk_pthread_create_name_np         = 0x00001CE0;
 const OFFSET_lk_pthread_join                   = 0x00032860;
 const OFFSET_lk_pthread_exit                   = 0x00022670;
-const OFFSET_lk_sleep                          = 0x00025C90;
+const OFFSET_lk_sleep                          = 0x00025C50;
 const OFFSET_lk_sceKernelGetCurrentCpu         = 0x000028A0;
 
 const OFFSET_lc_memset                         = 0x00014E70;
 const OFFSET_lc_setjmp                         = 0x0005AF10;
 const OFFSET_lc_longjmp                        = 0x0005AF60;
 
-const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB88;
+const OFFSET_WORKER_STACK_OFFSET         = 0x0007FB68;
 
 let wk_gadgetmap = {
 	"ret": 0x00000042,
@@ -54,24 +54,24 @@ let wk_gadgetmap = {
 	"pop rcx": 0x00032473,
 	"pop rax": 0x000A6CAB,
 	"pop rsp": 0x0006EEE1,
-	"pop r8": 0x004C6011,
-	"pop r9": 0x010CA0DF,
-	"mov [rdi], rsi": 0x00752B00,
+	"pop r8": 0x004C5D31,
+	"pop r9": 0x010BF949,
+	"mov [rdi], rsi": 0x007527F0,
 	"mov [rdi], rax": 0x00079337,
 	"mov [rdi], eax": 0x00079338,
 	"mov rax, [rax]": 0x0012A439,
 	"add rax, rcx": 0x00024321,
-	"cmp [rcx], eax": 0x035F9349,
+	"cmp [rcx], eax": 0x035F9049,
 	"inc dword [rax]": 0x000B70B5,
 	"seta al": 0x0021A9C2,
 	"setb al": 0x000A2B46,
 	"sete al": 0x0001CF1F,
-	"setg al": 0x015C5B76,
-	"setl al": 0x006821AF,
-	"shl rax, 3": 0x02488663,
-	"shl rax, 4": 0x00572966,
-	"shr rax, 3": 0x013092C3,
-	"shr rax, 4": 0x02D60E54,
+	"setg al": 0x015C5876,
+	"setl al": 0x00681ECF,
+	"shl rax, 3": 0x02488363,
+	"shl rax, 4": 0x00572686,
+	"shr rax, 3": 0x01308FC3,
+	"shr rax, 4": 0x02D60B54,
 	"infloop": 0x000037D1,
 };
 
