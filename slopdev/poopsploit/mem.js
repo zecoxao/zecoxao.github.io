@@ -2,8 +2,13 @@ import { int64 } from "./int64.js";
 
 import {
     releaseFakeCell, fakeCellReleased,
-    carrierHeaderCopy, carrierHomeVector
-} from "./core.js?v=10";
+    carrierHeaderCopy, carrierHomeVector, CORE_INSTANCE
+} from "./core.js?v=lowfw17";
+
+// Re-exported so the page can prove mem.js and the page share the SAME core.js
+// instance. See the CORE_INSTANCE note in core.js.
+export const MEM_SEES_CORE = CORE_INSTANCE;
+
 
 let carrier = null;
 

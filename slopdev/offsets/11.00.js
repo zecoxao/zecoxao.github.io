@@ -3,8 +3,12 @@
 
 // host-constructor candidates: webkitBase = nativeCtorAddr - hc
 const OFFSET_wk_host_constructor_candidates = [0x0001E0D8, 0x0001E320, 0x0001F368];
-// Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
-const OFFSET_wk_vtable_first_element     = 0x00151300;
+// vtable[0] of HTMLTextAreaElement - the ICF-folded WebCore Element destructor,
+// derived from this firmware's libSceNKWebKit. main.js only reads it below 9.00,
+// so on this firmware it is a fallback that has never been exercised; it replaces
+// the WKDownloadGetTypeID export that used to be parked here, which was not a
+// vtable entry at all. Method validated 20/20 on 7.00-8.60, retail and devkit.
+const OFFSET_wk_vtable_first_element     = 0x01DBB960;
 const OFFSET_wk_memset_import                  = 0x034F7DA0;
 const OFFSET_wk___stack_chk_guard_import       = 0x034F5718;
 

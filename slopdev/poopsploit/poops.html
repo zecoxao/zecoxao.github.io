@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>slopkit</title>
+<title>poopsploit</title>
 <link rel="preload" href="cat.jpg" as="image">
 <link rel="preload" href="mmhmm-cats-ps5.gif" as="image">
 
@@ -141,8 +141,6 @@
         box-shadow: 0 18px 42px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.04);
         border-radius: 14px; padding: 13px 15px; margin: 10px auto 0; }
 
-  body.loader-ready #scr { display:none; }
-
   body.quiet tr:not(.r-FAIL) td.d .note   { display: none; }
 
   body.quiet tr:not(.r-FAIL) td.d > span:first-child {
@@ -162,83 +160,269 @@
     font-size:25px; font-weight:800; text-align:center; letter-spacing:.02em; }
   #failureMessage.on { display:block; }
 
-  body.loader-ready { justify-content:flex-start; overflow-y:auto; padding-top:22px; }
-  body.loader-ready #cat { width:112px; height:112px; margin-bottom:6px; }
-  body.loader-ready #nav { display:none !important; }
-  #payloadMenu { display:none; width:1356px; max-width:94vw; margin:4px auto 24px; }
-  #payloadMenu.on { display:block; }
-  #payloadMenu .menuTitle { display:block; width:330px; height:56px;
-    max-width:100%; margin:0 auto 12px; }
-  #payloadMenu .payloadGrid { display:flex; flex-wrap:wrap;
-    justify-content:center; }
-  #payloadMenu .payloadTile {
-    box-sizing:border-box; display:block; flex:0 0 calc(25% - 12px);
-    width:330px; min-width:0; max-width:330px; margin:6px; padding:0;
-    border:0; border-radius:13px;
-    background:transparent; text-decoration:none !important;
+  #main-content {
+    position:relative; min-width:0; min-height:0; width:100%; height:100%;
+    overflow:hidden; box-sizing:border-box;
   }
-  #payloadMenu .payloadTile:focus { outline:3px solid #fff; outline-offset:2px; }
-  #payloadMenu .payloadTile img { display:block; width:330px; height:72px;
-    max-width:100%; margin:0 auto; }
-  #payloadMenu .payloadTile.busy { opacity:.42; }
+  #main-content > .app-view {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    box-sizing:border-box; opacity:0; pointer-events:none;
+    transition:opacity .3s ease-in-out;
+  }
+  #main-content > .app-view.selected {
+    opacity:1 !important; pointer-events:auto !important;
+  }
+  #console-view {
+    display:flex; flex-direction:column; align-items:stretch; overflow:hidden;
+  }
+  #payloads-view {
+    display:grid !important; grid-template-rows:auto 1fr;
+    overflow:hidden; background:#0c0c0f; color:#fff;
+  }
+  #prompt-view {
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; background:#0c0c0f; color:#fff;
+  }
+  .payloadHeader {
+    position:relative; box-sizing:border-box; min-height:112px;
+    padding:.5rem; text-align:center;
+  }
+  .payloadHeader h2 {
+    margin:.35rem 0; color:#fff; font-size:2rem; line-height:1.2;
+  }
+  .payloadEyebrow { color:#ccc; font-size:1rem; }
+  .payloadHeader p { margin:0; color:#ccc; font-size:.9rem; }
+  .homeLink {
+    position:absolute; top:.75rem; right:1rem; padding:.5rem 1rem;
+    border-radius:1rem; color:#fff; background:#202125;
+    text-decoration:none; font-size:1rem;
+  }
+  .homeLink:hover, .homeLink:focus {
+    outline:0; background:#a2a2a6; color:#202020;
+  }
+
+  #payloads-view .payloadGrid {
+    display:grid !important;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-auto-rows:auto;
+    column-gap:2.5rem;
+    row-gap:1rem;
+    width:100%;
+    height:auto; min-height:0;
+    padding:0 2rem 2rem 2rem;
+    overflow-y:scroll;
+    overflow-x:hidden;
+    box-sizing:border-box;
+    align-content:start;
+  }
+  #payloads-view .btn {
+    display:inline-block;
+    box-sizing:border-box;
+    width:100%;
+    min-width:5rem;
+    margin:.2rem;
+    padding:1rem 2rem;
+    border:0;
+    border-radius:1.25rem;
+    background:#202125;
+    color:#fff;
+    cursor:pointer;
+    line-height:2.5rem;
+    text-align:center;
+    text-decoration:none;
+    font-size:1.3rem;
+  }
+  #payloads-view .btn:hover, #payloads-view .btn:focus {
+    outline:0;
+    background:#a2a2a6;
+    color:#202020;
+  }
+  .payload-btn-title {
+    display:block !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    margin:0;
+    padding:0;
+    color:#fff !important;
+    -webkit-text-fill-color:#fff;
+    line-height:2.5rem;
+    font-size:1.3rem;
+    font-weight:bolder;
+  }
+  .payload-btn-description {
+    display:block !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    max-width:100%;
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    color:#ccc;
+    -webkit-text-fill-color:#ccc;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    line-height:2rem;
+    font-size:1rem;
+  }
+  .btn:hover .payload-btn-description,
+  .btn:focus .payload-btn-description {
+    color:#444 !important; -webkit-text-fill-color:#444;
+  }
+  .payload-btn-info {
+    display:block !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    color:#999;
+    -webkit-text-fill-color:#999;
+    text-overflow:ellipsis;
+    line-height:1.5rem;
+    font-size:.9rem;
+    font-weight:normal;
+  }
+  .btn:hover .payload-btn-info,
+  .btn:focus .payload-btn-info {
+    color:#555 !important; -webkit-text-fill-color:#555;
+  }
+  #payloads-view .btn:hover .payload-btn-title,
+  #payloads-view .btn:focus .payload-btn-title {
+    color:#202020 !important; -webkit-text-fill-color:#202020;
+  }
+  #payloads-view .btn.busy { opacity:.45; pointer-events:none; }
+
+  #loaderPrompt {
+    display:block; width:70%; max-width:760px; margin:0; padding:2rem;
+    box-sizing:border-box;
+    text-align:center; color:#fff;
+  }
+  .promptBadge { display:none; }
+  #loaderPrompt h2 { margin:0; color:#fff; font-size:2rem; }
+  #loaderPrompt p { margin:10px auto 24px; max-width:470px; color:#ccc; font-size:1rem; }
+  .promptActions { display:block; text-align:center; }
+  .promptButton {
+    display:inline-block; box-sizing:border-box; width:50%; min-width:5rem;
+    margin:.2rem; padding:1rem 2rem; border:0; border-radius:1.25rem;
+    background:#202125; color:#fff; line-height:2.5rem;
+    text-decoration:none; font-size:1.3rem; font-weight:800;
+  }
+  .promptButton.secondary { padding:.5rem 2rem; font-size:1rem; }
+  .promptButton:hover, .promptButton:focus {
+    outline:0; background:#a2a2a6; color:#202020;
+  }
+
+  #payloadToastContainer { position:fixed; top:20px; right:20px; z-index:9999; }
+  .payloadToast {
+    width:300px; margin-top:10px; padding:20px 25px; border-radius:1rem;
+    background:#15161a; color:#fff; box-shadow:0 0 10px rgba(0,0,0,.2);
+    opacity:1; transition:opacity .4s; pointer-events:none;
+    font:16px/1.35 Arial,sans-serif;
+  }
+  .payloadToast.hide { opacity:0; }
+
+  #poopsploitHeader, #poopsploitFooter { display:block; }
+  body.quiet { display:grid;
+    grid-template-rows:auto 1fr auto; width:100%; height:100vh; padding:0; margin:0;
+    overflow:hidden; align-items:stretch; justify-content:stretch;
+    background:#0c0c0f; color:#fff; font-family:Arial,sans-serif; }
+  body.quiet.payload-view-active { grid-template-rows:1fr auto; }
+  body.quiet.payload-view-active #poopsploitHeader { display:none; }
+  body.quiet #poopsploitHeader {
+    display:block; padding:.5rem; text-align:center; }
+  body.quiet #poopsploitHeader h1 {
+    display:block; margin:.5rem 0; color:#fff; font-size:2rem; font-weight:bold; }
+  body.quiet #poopsploitHeader p {
+    margin:.25rem 0; color:#ccc; font-size:1rem; }
+  body.quiet #cat { display:none; }
+  body.quiet #scr { display:block;
+    box-sizing:border-box; width:auto; max-width:none; height:auto; min-height:0; flex:1;
+    margin:8px; padding:8px; overflow-y:auto; overflow-x:hidden;
+    border:1px solid #202125; border-radius:5px; background:inherit;
+    box-shadow:none; color:#fff; font:16px/1.35 monospace; white-space:pre-wrap; }
+  body.quiet #poopsploitFooter {
+    display:block; padding:.5rem; color:#ccc; text-align:center; font-size:.8rem; }
 
   #wrap { display:none !important; }
 </style>
 </head>
 <body class="quiet">
-<div id="failureMessage">UNLUCKY &mdash; YOU NEED TO REBOOT</div>
-<div id="cat">
-  <img id="catImage" src="mmhmm-cats-ps5.gif" alt="">
+<div id="poopsploitHeader">
+  <h1>poopsploit (7.00-12.00)</h1>
+  <p>Current firmware: <b id="currentFirmware">detecting...</b></p>
 </div>
-<h1>poops</h1>
-<div id="reboot"></div>
-<div id="verdict"></div>
-<div id="danger"></div>
-<div id="stage">idle</div>
-<div id="vitals"></div>
-<div id="cfg"></div>
-<pre id="early"></pre>
-<pre id="scr"></pre>
-<div id="payloadMenu">
-  <img class="menuTitle" data-src="../ui/payload-menu-title.png" alt="">
-	<div class="payloadGrid">
-		<a class="payloadTile" href="#" data-name="kstuff.elf" data-key="kstuff"><img data-src="../ui/payload-kstuff-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="shadowmountplus.elf" data-key="shadowmountplus"><img data-src="../ui/payload-shadowmountplus-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="autoloader.elf" data-key="autoloader"><img data-src="../ui/payload-autoloader-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="ftpsrv-ps5.elf" data-key="ftp"><img data-src="../ui/payload-ftp-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="pldmgr.elf" data-key="plk"><img data-src="../ui/payload-plk-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="gdbsrv-ps5.elf" data-key="gdb"><img data-src="../ui/payload-gdb-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="klogsrv-ps5.elf" data-key="klog"><img data-src="../ui/payload-klog-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="shsrv-ps5.elf" data-key="shell"><img data-src="../ui/payload-shell-default.png" alt=""></a>
-		<a class="payloadTile" href="#" data-name="websrv-ps5.elf" data-key="web"><img data-src="../ui/payload-web-default.png" alt=""></a>
-	</div>
+<div id="main-content">
+  <div id="console-view" class="app-view selected">
+    <div id="failureMessage">UNLUCKY &mdash; YOU NEED TO REBOOT</div>
+    <div id="cat">
+      <img id="catImage" src="mmhmm-cats-ps5.gif" alt="">
+    </div>
+    <h1>poops</h1>
+    <div id="reboot"></div>
+    <div id="verdict"></div>
+    <div id="danger"></div>
+    <div id="stage">idle</div>
+    <div id="vitals"></div>
+    <div id="cfg"></div>
+    <pre id="early"></pre>
+    <pre id="scr"></pre>
+    <div id="nav"></div>
+    <div id="arm" hidden>Open this page with <b>?go=1</b> to arm it. Nothing runs
+    otherwise.</div>
+    <div id="wrap">
+      <table>
+        <thead><tr><th>#</th><th>test</th><th>st</th><th>result</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="tally"></div>
+    <div id="summary"></div>
+  </div>
+  <div id="payloads-view" class="app-view">
+    <div class="payloadHeader">
+      <h2 id="payloadViewTitle">poopsploit dev Payloads (7.00-12.00)</h2>
+      <div class="payloadEyebrow" id="payloadNetworkStatus">Listening on console port 9021</div>
+      <p id="payloadProgress">Select a payload to send it to the ELF loader.</p>
+      <a class="homeLink" href="../index.html">Home</a>
+    </div>
+    <div class="payloadGrid"></div>
+  </div>
+<script>
+/* SITE IDENTITY - the ONE place this site names itself.
+   The ELF page used to carry another project's name and firmware range because the view
+   was ported verbatim; filling the header from these two constants means a copied file
+   can never silently advertise the wrong thing again. build_p2jb_idle.py rewrites
+   SITE_NAME when it regenerates the idle pair. Nothing here depends on the host, so it
+   is correct served from a LAN box or from a static site. */
+var SITE_NAME = "poopsploit dev";
+var SITE_FW   = "7.00-12.00";
+(function () {
+    try {
+        var h = document.getElementById("payloadViewTitle");
+        if (h) h.textContent = SITE_NAME + " Payloads (" + SITE_FW + ")";
+    } catch (e) { }
+    try { document.title = SITE_NAME; } catch (e) { }
+})();
+</script>
+  <div id="prompt-view" class="app-view">
+    <div id="loaderPrompt">
+      <div class="promptBadge">9021</div>
+      <h2>ELF loader is not running</h2>
+      <p>Port 9021 is not open. Would you like to run the jailbreak now and start the ELF loader?</p>
+      <div class="promptActions">
+        <a id="promptJailbreak" class="promptButton" href="#">Jailbreak</a>
+        <a class="promptButton secondary" href="../index.html">Cancel</a>
+      </div>
+    </div>
+  </div>
 </div>
-<div id="nav"></div>
-<div id="arm" hidden>Open this page with <b>?go=1</b> to arm it. Nothing runs
-otherwise.</div>
-<div id="wrap">
-<table>
-  <thead><tr><th>#</th><th>test</th><th>st</th><th>result</th></tr></thead>
-  <tbody id="rows"></tbody>
-</table>
-</div>
-<div id="tally"></div>
-<div id="summary"></div>
+<div id="payloadToastContainer"></div>
+<div id="poopsploitFooter">poopsploit final</div>
 
 <div id="console" hidden></div>
 
-<!-- index.html itself carries no cache-buster and the PS5 browser caches it,
-     so a stale copy pins every ?v= inside it and a push silently does nothing.
-     Three runs were analysed against code the console was not running before
-     that was noticed. Write the tags at parse time with a per-load stamp
-     instead: document.write keeps the ordering rop.js -> main.js that plain
-     tags give, and even a cached page then fetches fresh JS. window.__cb is
-     reused by main.js for the offsets profile and by the module imports. -->
-<script>
-window.__cb = "?cb=" + Date.now();
-document.write('<scr' + 'ipt src="rop.js' + window.__cb + '"><\/scr' + 'ipt>');
-document.write('<scr' + 'ipt src="main.js' + window.__cb + '"><\/scr' + 'ipt>');
-</script>
+<script src="rop.js?v=lowfw17"></script>
+<script src="main.js?v=lowfw17"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="../offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -251,23 +435,34 @@ document.write('<scr' + 'ipt src="main.js' + window.__cb + '"><\/scr' + 'ipt>');
 </script>
 <script src="syscalls.js"></script>
 
-<script type="module">
-/* NOT stamped, deliberately. A query string makes a DISTINCT module
-   instance, and mem.js imports "./int64.js" and "./core.js?v=10"
-   with those exact specifiers. Stamping only the page's copies gave
-   two int64 classes, so an int64 built here failed mem.js's type
-   check -- "bad numeric address NaN". Module URLs must match across
-   every importer, so busting these means editing mem.js too. */
-import { establishPrimitive, fakeCellReleased } from "./core.js?v=10";
-import { installWindowP, pairStatus } from "./mem.js?v=10";
+<script type="module">import { establishPrimitive, fakeCellReleased, CORE_INSTANCE } from "./core.js?v=lowfw17";
+import { installWindowP, pairStatus, MEM_SEES_CORE } from "./mem.js?v=lowfw17";
 import { int64 } from "./int64.js";
 
 let BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList;
+
+// Fail LOUDLY on a module-version split. core.js keeps the entire primitive in
+// module-level `let`s; if this page and mem.js import different core.js URLs they get
+// separate copies, establishPrimitive() fills one and mem.js reads the other, and the
+// only symptom is "pair was NOT promoted / mem: bad numeric address NaN". That cost six
+// runs on retail 12.00 on 2026-08-27, because THIS page had no guard. Keep EVERY module
+// version in lockstep: the page, index.html AND the hardcoded core.js import in mem.js.
+// tools/site_check.py now fails offline when they disagree.
+if (CORE_INSTANCE !== MEM_SEES_CORE) {
+    const msg = "MODULE SPLIT: mem.js imported a different core.js than this page."
+        + " page=" + CORE_INSTANCE.url + "  mem.js=" + MEM_SEES_CORE.url
+        + " -- bump every module version together.";
+    try { window.syncMark && window.syncMark("MODULE-SPLIT", msg); } catch (e) {}
+    throw new Error(msg);
+}
+
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
     await window.offsetsReady;
-    const lib = await import("./poops.js?v=86");
+    const firmwareLabel = document.getElementById("currentFirmware");
+    if (firmwareLabel) firmwareLabel.textContent = window.fw_str || "unknown";
+    const lib = await import("./poops.js?v=lowfw17");
     BANNED = lib.BANNED;
     ERRNO = lib.ERRNO;
     K = lib.K;
@@ -324,16 +519,19 @@ const ONLY = (Q.get("only") || "").split(",").map(s => s.trim()).filter(Boolean)
 const FILTERED_RUN = ONLY.length > 0 || FROM !== "";
 const MAX_ATTEMPTS = parseInt(Q.get("max") || "0", 10) || 0;
 const CORE_OVERRIDE = Q.has("core") ? parseInt(Q.get("core"), 10) : -1;
+const REUSE_ELFLDR = Q.get("reuse") === "1";
 
-const PROGRESS_KEY = "slopkit-poops:next";
-const RUNLOG_KEY = "slopkit-poops:last";
-const ROUTE_VERSION = "41";
-const REV = "slopkit-poops-75-is-it-already-uid-1";
+const PROGRESS_KEY = "poopsploit-poops:next";
+const RUNLOG_KEY = "poopsploit-poops:last";
+const ROUTE_VERSION = "lowfw17";
+const REV = "poopsploit-poops-final";
 const CHECKPOINT_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0";
 const STAGE5_ONLY = "ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate,"
     + "ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5";
 const STAGE5_FIRMWARES = Object.freeze([
-    "7.00", "9.00", "9.05", "9.20", "9.40", "9.60", "10.00", "10.01", "10.20",
+    "7.00", "7.01", "7.20", "7.40", "7.60", "7.61",
+    "8.00", "8.20", "8.40", "8.60",
+    "9.00", "9.05", "9.20", "9.40", "9.60", "10.00", "10.01", "10.20",
     "10.40", "10.60", "11.00", "11.20", "11.40", "11.60", "12.00"
 ]);
 
@@ -354,134 +552,6 @@ function storeJson(k) {
     const raw = storeGet(k);
     if (!raw) return null;
     try { return JSON.parse(raw); } catch { return null; }
-}
-
-/* Crash-durable mark trail -- see index.html, where this is documented in
-   full. sessionStorage does not survive the WebProcess dying; localStorage
-   does, so the tag stream goes there and is read back at the next load. */
-const TRAIL_KEY = "slopkit-poops:trail";
-const TRAIL_MAX = 80;
-const trail = [];
-function trailPush(tag) {
-    if (trail.length >= TRAIL_MAX) trail.shift();
-    trail.push(tag);
-    try { localStorage.setItem(TRAIL_KEY, trail.join(">")); } catch { }
-}
-function trailTake() {
-    let v = "";
-    try {
-        v = localStorage.getItem(TRAIL_KEY) || "";
-        localStorage.removeItem(TRAIL_KEY);
-    } catch { }
-    return v;
-}
-/* Wipe both halves. The refusal below emits marks of its own, and they land in
-   the trail like any others, so it has to be able to start the next load from
-   nothing. */
-function trailReset() {
-    trail.length = 0;
-    try { localStorage.removeItem(TRAIL_KEY); } catch { }
-}
-const PREV_TRAIL = trailTake();
-/* Printed TWICE: once at the top of main(), and again immediately above the
-   ladder -- the console log auto-scrolls, so anything said at the top of a run
-   is off-screen by the time the run dies, and the trail is only ever read after
-   a death. See index.html for the full note. */
-let prevTrailShown = 0;
-function showPrevTrail() {
-    if (!PREV_TRAIL || prevTrailShown >= 2) return;
-    prevTrailShown++;
-    const parts = PREV_TRAIL.split(">");
-    flushMark("PREV-TRAIL", "died-after="
-        + parts.slice(-8).reverse().join("<")
-        + "-steps=" + parts.length);
-}
-function markTrailTag(tag, extra) {
-    /* RACE-STEP is raised twelve times an attempt and its identity is entirely
-       in the detail -- s0-free-all-rthdrs, s2-iov-flush-32, s4-find-twins and
-       so on. Trailed as a bare "RACE-STEP" it says only that the race was
-       running, which is the one thing already obvious. The step costs nothing
-       extra to keep: the trail write happens either way, so this is the whole
-       race narrated inside the window without adding a single syscall to it. */
-    if (tag === "RACE-STEP")
-        return tag + ":" + String(extra == null ? "" : extra);
-    if (tag !== "TEST" && tag !== "TEST-ENTER") return tag;
-    const parts = String(extra == null ? "" : extra).split("-");
-    return tag + ":" + parts.slice(0, tag === "TEST" ? 2 : 1).join("-");
-}
-
-/* "Have the netcontrol slots already been spent this boot?"
-   ---------------------------------------------------------------------------
-   Once a netcontrol trigger has fired, both slots stay occupied until the
-   console reboots, so every later load fails to arm in about ten milliseconds
-   and the whole run is a no-op. That state is indistinguishable, from the top
-   of the screen, from a run that is about to do something -- you only find out
-   after spending a load and a screenshot on it.
-   The page has no clock_gettime, but it does have the driver's pid, and pids
-   are handed out in increasing order within a boot and reset low across one.
-   So: remember the pid that was live when a trigger last fired; if this load's
-   pid is LOWER, the console rebooted and the slots are fresh. If it is higher,
-   nothing has rebooted since and stage 0 cannot arm.
-   A heuristic, and it says so: a boot with few loads followed by a boot with
-   many can produce a false "spent". It only ever WARNS -- nothing is refused on
-   the strength of it. */
-const SPENT_KEY = "slopkit-poops:spent";
-let driverPid = -1;
-
-function spentRecord() {
-    try {
-        const v = JSON.parse(localStorage.getItem(SPENT_KEY) || "null");
-        return v && typeof v.pid === "number" ? v : null;
-    } catch { return null; }
-}
-
-function bootSlots(tag, extra) {
-    if (tag === "DRIVER-IDENTITY") {
-        const m = /(?:^|-)pid=(\d+)/.exec(String(extra == null ? "" : extra));
-        if (!m) return;
-        driverPid = parseInt(m[1], 10);
-        const s = spentRecord();
-        if (!s) {
-            flushMark("TRIGGER-SLOTS", "fresh-noRecord-pid=" + driverPid);
-        } else if (driverPid < s.pid) {
-            try { localStorage.removeItem(SPENT_KEY); } catch { }
-            flushMark("TRIGGER-SLOTS", "fresh-pid=" + driverPid
-                + "-below-lastFired=" + s.pid + "-so-the-console-rebooted");
-        } else {
-            flushMark("TRIGGER-SPENT", "REBOOT FIRST -- a trigger fired at pid "
-                + s.pid + " and this WebProcess is pid " + driverPid
-                + ", higher, so nothing has rebooted since. stage 0 will fail"
-                + " to arm. (pid heuristic)");
-        }
-        return;
-    }
-    // TRIGGER-ARMED / TRIGGER-EXHAUSTED: this boot's slots are gone.
-    if (driverPid < 0) return;
-    const rec = { pid: driverPid };
-    /* Record WHICH slot and WHICH fd number, not just that something was
-       spent. The netcontrol slots are system-wide -- "consumed by an earlier
-       trigger this boot" survives the WebProcess dying and respawning -- and
-       CLEAR_QUEUE matches a slot by the fd NUMBER stored in it, which is a
-       number in whatever process now asks. So a slot left behind by a run that
-       died still names an fd, and that is the whole input a later run would
-       need to hand it back (or to use it). Nothing reads this yet; it costs
-       one localStorage write on a mark that fires twice a boot. */
-    const m = /took slot (\d+) on fd (\d+)/.exec(
-        String(extra == null ? "" : extra));
-    if (m) {
-        rec.slot = parseInt(m[1], 10);
-        rec.fd = parseInt(m[2], 10);
-        rec.armedAt = driverPid;
-    }
-    try {
-        const prev = spentRecord();
-        if (prev && prev.slot !== undefined && rec.slot === undefined) {
-            rec.slot = prev.slot;
-            rec.fd = prev.fd;
-            rec.armedAt = prev.armedAt;
-        }
-        localStorage.setItem(SPENT_KEY, JSON.stringify(rec));
-    } catch { }
 }
 let STALLED_AT = storeGet(PROGRESS_KEY);
 let LAST_RUN = storeJson(RUNLOG_KEY);
@@ -542,6 +612,15 @@ const PRODUCTION_QUERY = Object.freeze({
     attempts: "8", only: STAGE5_ONLY, log: "debug", payload: "1",
     v: ROUTE_VERSION
 });
+const PRODUCTION_HREF = "poops.html?" + Object.keys(PRODUCTION_QUERY)
+    .map(key => encodeURIComponent(key) + "="
+        + encodeURIComponent(PRODUCTION_QUERY[key]))
+    .join("&");
+const REUSE_QUERY = Object.freeze({
+    go: "1", auto: "1", production: "1", trigger: "netcontrol",
+    attempts: "8", only: STAGE5_ONLY, log: "debug", payload: "1",
+    reuse: "1", v: ROUTE_VERSION
+});
 const STAGE5_INTENT = Q.has("stage5") || Q.has("payload")
     || Q.getAll("proof").some(value => value.indexOf("stage5") === 0)
     || Q.getAll("only").some(value => value.split(",")
@@ -562,7 +641,7 @@ function exactQuery(expected) {
 const STAGE5_REQUEST_ERROR = (() => {
     if (!STAGE5_INTENT) return "";
     if (!exactQuery(STAGE5_DRY_QUERY) && !exactQuery(STAGE5_LIVE_QUERY)
-        && !exactQuery(PRODUCTION_QUERY))
+        && !exactQuery(PRODUCTION_QUERY) && !exactQuery(REUSE_QUERY))
         return "noncanonical-stage5-request";
     return STAGE5_FIRMWARES.indexOf(window.fw_str) >= 0
         ? "" : "unsupported-stage5-firmware";
@@ -570,10 +649,10 @@ const STAGE5_REQUEST_ERROR = (() => {
 
 const PRODUCTION_REQUEST_ERROR = (() => {
     if (!Q.has("production") && !Q.has("auto") && !Q.has("next")) return "";
-    return exactQuery(PRODUCTION_QUERY)
+    return exactQuery(PRODUCTION_QUERY) || exactQuery(REUSE_QUERY)
         ? "" : "noncanonical-production-request";
 })();
-const PRODUCTION_RUN = exactQuery(PRODUCTION_QUERY);
+const PRODUCTION_RUN = exactQuery(PRODUCTION_QUERY) || exactQuery(REUSE_QUERY);
 
 function cleanNegativeCheckpoint(last) {
     return last && last.rev === REV && last.checkpoint === true
@@ -646,7 +725,7 @@ function canStartStage5Proof(last, proof, payload) {
 let elfldrSpawned = false;
 const screenLines = [];
 
-const SCREEN_LINES = 12;
+const screenLineLimit = 12;
 const scrEl = document.getElementById("scr");
 
 const clean = s => String(s).replace(/[^A-Za-z0-9_.:=,+-]/g, "_").slice(0, 200);
@@ -661,21 +740,20 @@ const CRITICAL_MARKS = { "TRIGGER-ARMED": 1, "LATCH-ESCALATE": 1 };
 function repaintScreen() {
     if (!screenDirty) return;
     screenDirty = false;
-    try { scrEl.textContent = screenLines.join("\n"); } catch { }
+    try {
+        scrEl.textContent = screenLines.join("\n");
+    } catch { }
 }
 function setRaceMode(on) {
     const was = raceMode;
     raceMode = !!on;
-    /* Marks raised inside the race window are not trailed -- a synchronous
-       store per mark could perturb the timing the race depends on. */
-    if (!was && raceMode) trailPush("RACE-ENTER");
-    if (was && !raceMode) { trailPush("RACE-LEAVE"); repaintScreen(); }
+    if (was && !raceMode) repaintScreen();
     return was;
 }
 function screenLine(text) {
     screenLines.push(text.length > 120 ? text.slice(0, 117) + "..." : text);
-    if (screenLines.length > SCREEN_LINES)
-        screenLines.splice(0, screenLines.length - SCREEN_LINES);
+    if (screenLines.length > screenLineLimit)
+        screenLines.splice(0, screenLines.length - screenLineLimit);
 
     if (raceMode) {
         screenDirty = true;
@@ -684,54 +762,12 @@ function screenLine(text) {
         lastPaint = nowMs;
         screenDirty = false;
     }
-    try { scrEl.textContent = screenLines.join("\n"); } catch { }
+    try {
+        scrEl.textContent = screenLines.join("\n");
+    } catch { }
 }
 
-// Families whose members are generated, so they cannot be listed by
-// name: the module-shift probe emits one mark per step (SHIFT-WK-1,
-// SHIFT-LK-2, ...) precisely so no single mark hits the 110-char cap.
-const CONCISE_SCREEN_RE = /^(PS1-|SHIFT-|SYSCALL-|MPROTECT-|GADGET-BAD|GADGET-FIX|GADGET-FROM-LC|AUDIT-|DLSYM|PIPE2-PROBE|SYSCALL-INSN|SYSCALL-BYNUMBER)/;
 const CONCISE_SCREEN_SHOW = {
-    "PROBE-WAIT": 1,
-    "PROBE-W": 1,
-    "GADGET-AUDIT": 1,
-    "PROBE-SEED": 1,
-    "PROBE-RESET": 1,
-    "GADGET-BROKEN": 1,
-    "GADGET-RESET": 1,
-    "POP-RDX": 1,
-    "GADGET-FLIP": 1,
-    "BUILD": 1,
-    "GADGET-STATE": 1,
-    "GADGET-OKLIST": 1,
-    "WORKER-RESLOT": 1,
-    "WORKER-RESLOT-OK": 1,
-    "TEXT-MAP": 1,
-    "GADGET-SELFTEST": 1,
-    "PREP-GETPID-OK": 1,
-    "PROBE-SJ": 1,
-    "PROBE-AUTO": 1,
-    "PROBE-VERDICT": 1,
-    "PREP-NULLCHAIN-OK": 1,
-    "PREV-CRUMBS": 1,
-    "TWIN-FIRST-CALLS": 1,
-    "TTY": 1,
-    "POOPS-AUTORUN-REFUSED": 1,
-    "PS1-ENTER": 1,
-    "NETCTRL-SET": 1,
-    "NETCTRL-SANDWICH": 1,
-    "NETCTRL-UAF": 1,
-    "NETCTRL-UAF-RETRY": 1,
-    "NETCTRL-UAF-RECYCLED": 1,
-    "NETCTRL-CLEAR": 1,
-    "TRIGGER-SLOTS": 1,
-    "TRIGGER-SPENT": 1,
-    "TWIN-SCAN-DONE": 1,
-    "TWIN-SPRAY-DEGRADED": 1,
-    "TWIN-FOUND": 1,
-    "IOV-BLOCKED": 1,
-    "PREV-TRAIL": 1,
-    "WORKER-RET-FINGERPRINT": 1,
     "POOPS-BOOT": 1,
     "OFFSETS-READY": 1,
     "TRIGGER-ARMED": 1,
@@ -745,15 +781,10 @@ const CONCISE_SCREEN_SHOW = {
     "POOPS-STALLED": 1,
     "BOOT-STALLED": 1,
     "CHAIN-DEAD": 1,
-    "CHAIN-HUNG": 1,
-    "PIPE2-CANDIDATES": 1,
-    "PIPE2-NOFLAGS": 1,
-    "PIPE2-FCNTL": 1,
-    "PIPE2-FDS": 1,
-    "TRIGGER-EXHAUSTED": 1,
     "STAGE5-DONE": 1,
     "POOPS-COMPLETE": 1,
     "POOPS-FAILED": 1,
+    "ELFLDR-MENU-VISIBLE": 1,
     "ELF-SENT": 1,
     "ELF-SEND-FAILED": 1,
     "ELF-SENDER-BLOCKED": 1
@@ -790,26 +821,25 @@ const REMOTE_DETAIL_SHOW = {
     "STAGE4-VERIFY": 1,
     "FAST-RW-SETUP-FAILED": 1
 };
+// NOT moved under /log/: the host's 204 route does not drain a request body, so a
+// POST there is answered with a connection reset. fetch() here is fully guarded so
+// the reset is swallowed, but this flush is batched and infrequent - trading a clean
+// 200 for an RST inside the exploit window buys nothing. Measured 2026-08-26.
 const REMOTE_LOG_URL = "/__poops_log";
 const REMOTE_LOG_STARTED = Date.now();
 const REMOTE_LOG_SESSION = REMOTE_LOG_STARTED.toString(36) + "-"
     + Math.floor(Math.random() * 0x100000000).toString(36);
-const REMOTE_STAGE_SHOW = /^STAGE5-|^STAGE[0-4]-(ATTEMPT|ROW|STEPS|OK|DONE|FAIL|FAILED|CONTROL|DEADLINE|VERIFY-FAILED|RW|ATTR|CREATE-RET|GETUID)$/;
+const REMOTE_STAGE_SHOW = /^STAGE5-|^STAGE[0-4]-(ATTEMPT|OK|DONE|FAIL|FAILED|CONTROL|DEADLINE|VERIFY-FAILED|RW|ATTR|CREATE-RET|GETUID)$/;
 const REMOTE_STAGE5_FLUSH = /^STAGE5-(ENTER|STAGED|SHELLCODE-VERIFY|ALIAS-VERIFY|ARGS|PIPEBUF|SPAWN|CREATE-RET|JOIN-PRE|DONE)$/;
 const remoteEvents = [];
 let remoteSequence = 0, remoteFlushTimer = null, remoteEarlyAttached = false;
-/* Set the first time a POST comes back as anything but success. On GitHub
-   Pages "/__poops_log" is a 404 and there is no sink, so the every-40-marks
-   flush would keep firing requests into it for the whole run. Learn once and
-   stop; the run-boundary flushes stay, since they cost nothing extra. */
-let remoteSinkDead = false;
 
 function captureRemoteEvent(tag, extra) {
     if (tag !== "TEST" && CONCISE_SCREEN_SHOW[tag] !== 1
-        && !CONCISE_SCREEN_RE.test(tag)
         && !/^(POOPS-|LATCH-|TRIGGER-)/.test(tag)
         && tag !== "CHAIN-DEAD" && tag !== "PAGE-LEFT-MID-RUN"
-        && tag !== "OFFSETS-READY" && REMOTE_DETAIL_SHOW[tag] !== 1
+        && tag !== "OFFSETS-READY"
+        && REMOTE_DETAIL_SHOW[tag] !== 1
         && !REMOTE_STAGE_SHOW.test(tag)) return;
     remoteEvents.push({
         seq: ++remoteSequence,
@@ -817,20 +847,8 @@ function captureRemoteEvent(tag, extra) {
         tag: String(tag).slice(0, 64),
         extra: extra == null ? "" : String(extra).slice(0, 1024)
     });
-    if (remoteEvents.length > 400) remoteEvents.shift();
-    /* Flush early and often, not just at the run boundaries.
-       -----------------------------------------------------------------------
-       A crash takes the buffer with it, so anything still sitting here when the
-       WebProcess dies is lost -- which is most of a run, since the old policy
-       only flushed on the STAGE5 tags and at the end. Ship a batch every 40
-       marks as well, so a death costs at most 40 of them. Never inside a race
-       window: the flush is a fetch, and the race is the one place where the
-       cost of extra work is not merely a nicety.
-       On GitHub Pages "/__poops_log" 404s and this is one wasted request per 40
-       marks; served from slopserve.py it is the whole log. */
-    if ((REMOTE_STAGE5_FLUSH.test(tag)
-            || (!raceMode && !remoteSinkDead && remoteEvents.length >= 40))
-        && remoteFlushTimer === null)
+    if (remoteEvents.length > 120) remoteEvents.shift();
+    if (REMOTE_STAGE5_FLUSH.test(tag) && remoteFlushTimer === null)
         remoteFlushTimer = setTimeout(function () {
             remoteFlushTimer = null;
             sendRemoteEvents(false);
@@ -842,7 +860,7 @@ function sendRemoteEvents(unloading) {
         clearTimeout(remoteFlushTimer);
         remoteFlushTimer = null;
     }
-    if (!remoteEvents.length) return;
+    if (!remoteEvents.length) return Promise.resolve();
     const events = remoteEvents.splice(0, remoteEvents.length);
     const early = !remoteEarlyAttached && Array.isArray(window.__jbEarly)
         ? window.__jbEarly.slice(-8) : [];
@@ -864,41 +882,28 @@ function sendRemoteEvents(unloading) {
         events: events
     });
     if (unloading && typeof navigator.sendBeacon === "function") {
-        try { if (navigator.sendBeacon(REMOTE_LOG_URL, body)) return; } catch (e) { }
+        try { if (navigator.sendBeacon(REMOTE_LOG_URL, body)) return Promise.resolve(); } catch (e) { }
     }
     try {
-        fetch(REMOTE_LOG_URL, {
+        return fetch(REMOTE_LOG_URL, {
             method: "POST",
             headers: { "Content-Type": "text/plain;charset=UTF-8" },
             body: body,
             cache: "no-store"
-        }).then(function (r) {
-            if (!r || (r.status !== 204 && !r.ok)) remoteSinkDead = true;
-        }).catch(function () { remoteSinkDead = true; });
-    } catch (e) { }
+        }).then(function () { }, function () { });
+    } catch (e) { return Promise.resolve(); }
 }
 
 function screenMark(tag, extra) {
-    /* The durable trail is taken HERE rather than in flushMark, because
-       flushMark defers to queueEvent for the whole of a race window -- and
-       ps1_prepare runs entirely inside one. Trailing only the non-race marks
-       meant a death in there left "RACE-ENTER" and nothing else. Every mark,
-       both paths, crash or not. */
-    trailPush(markTrailTag(tag, extra));
-    /* Before any filtering: both flushMark and queueEvent land here, and
-       TRIGGER-EXHAUSTED is raised inside a race window, where flushMark
-       defers to queueEvent. */
-    if (tag === "DRIVER-IDENTITY" || tag === "TRIGGER-ARMED"
-        || tag === "TRIGGER-EXHAUSTED") bootSlots(tag, extra);
     const s0 = extra == null ? "" : String(extra);
     if (tag === "STAGE5-DONE" && /(?:^|-)joinRet=0(?:-|$)/.test(s0) &&
         /(?:^|-)shellcodeRet=0x0+(?:-|$)/.test(s0)) {
         elfldrSpawned = true;
-        document.body.classList.add("loader-ready");
         clearFailureBanners();
         setCatResult(true);
         showVerdict(false, "ELF LOADER READY");
         stage("ELF LOADER READY", "ok");
+        showPayloadMenu();
     }
     catState(tag, s0);
     captureRemoteEvent(tag, s0);
@@ -915,18 +920,12 @@ function screenMark(tag, extra) {
         if (!LOG_DEBUG) return;
         line = "> " + s0.replace(/-chainMarks.*$/, "").replace(/-/, " ");
     } else if ((CONCISE_SCREEN_SHOW[tag] === 1
-        || CONCISE_SCREEN_RE.test(tag)
         || (LOG_DEBUG && DEBUG_SCREEN_SHOW.test(tag)))
         && !tag.endsWith("-PRE")) {
         line = s0 ? tag + " " + s0.replace(/_/g, " ") : tag;
     } else return;
     if (line.length > 110) line = line.slice(0, 107) + "...";
     screenLine(line);
-    /* ps1_prepare runs entirely inside a race window, and inside one screenLine
-       repaints at most every 250ms -- so its steps are precisely the thing that
-       does not survive a death in ps1. Seven marks, once each per run: force
-       them out. */
-    if (tag.indexOf("PS1-") === 0) repaintScreen();
 }
 
 function catState(tag, extra) {
@@ -951,13 +950,34 @@ function queueEvent(tag, extra) {
 function flushQueue() { repaintScreen(); }
 
 function flushMark(tag, extra) {
+    // LOCAL DIAGNOSTIC: mirror every mark into the URL of a 1px image request.
+    // The host logs request PATHS, but /__poops_log is a POST and its body is
+    // discarded, so the stage trail was invisible in host-live.log. A GET puts
+    // the mark in the path, where the log captures it. Best-effort and silent:
+    // it must never affect the run.
+    try {
+        var __m = String(tag) + (extra == null ? "" : "-" + String(extra))
+            + "|fw=" + (window.fw_str === undefined ? "UNDEF"
+                        : (window.fw_str === "" ? "EMPTY" : window.fw_str));
+        // "log/", not "slog/": ps-exploit-host routes telemetry with
+        // strstr(url, "/log/") and answers an empty 204 precisely so a mark costs
+        // nothing during a spray. "/slog/" does not contain "/log/", so every one of
+        // these missed the route and took a 404 through the static handler instead -
+        // 976 in one observed run. __beaconOff is the same latch p2jb carries: on a
+        // host that does not serve the route at all these fail forever, and ~16k
+        // failing marks have killed the renderer with OOM before.
+        if (!window.__beaconOff) {
+            new Image().src = "log/" + encodeURIComponent(__m).slice(0, 300)
+                + "?t=" + (Date.now() % 100000);
+        }
+    } catch (e) { }
 
     if (raceMode && CRITICAL_MARKS[tag] !== 1) { queueEvent(tag, extra); return; }
     marksBlocked++;
     screenMark(tag, extra);
 }
 
-const LATCH_KEY = "slopkit-poops:latch";
+const LATCH_KEY = "poopsploit-poops:latch";
 let latchState = storeGet(LATCH_KEY) ? "held" : "clear";
 const latch = {
     async read() {
@@ -997,7 +1017,7 @@ const rowsEl = document.getElementById("rows");
 const tallyEl = document.getElementById("tally");
 const summaryEl = document.getElementById("summary");
 const navEl = document.getElementById("nav");
-const payloadMenuEl = document.getElementById("payloadMenu");
+const payloadMenuEl = document.getElementById("payloads-view");
 const rowByKey = new Map();
 let payloadSendBusy = false;
 const PAYLOAD_PORT = 9021;
@@ -1008,34 +1028,244 @@ let payloadSockaddrStore = null;
 let payloadSocketOptionStore = null;
 let payloadSendTimeoutStore = null;
 let payloadSenderBlocked = "";
+let consoleNetworkInfo = { ip: "", name: "" };
 
-function showPayloadMenu() {
-    navEl.textContent = "";
-    navEl.style.display = "none";
-    payloadMenuEl.className = "on";
-    const title = payloadMenuEl.getElementsByClassName("menuTitle")[0];
-    if (title && !title.getAttribute("src"))
-        title.setAttribute("src", title.getAttribute("data-src"));
-    const tiles = payloadMenuEl.getElementsByTagName("a");
-    for (let i = 0; i < tiles.length; ++i) {
-        const image = tiles[i].getElementsByTagName("img")[0];
-        if (image && !image.getAttribute("src"))
-            image.setAttribute("src", image.getAttribute("data-src"));
+// Payload set kept IDENTICAL to p2jb / p2jb-dev (user request 2026-08-26), so a
+// console sees the same ELFs whichever site it came in through. Every name here
+// is checked against payloads\ by tools\site_check.py.
+const PAYLOADS = Object.freeze([
+    { title: "etaHEN", description: "Homebrew enabler and payload host.",
+        name: "etaHEN.elf", info: "etaHEN.elf" },
+    { title: "ps5-kstuff", description: "Kernel support payload and FPKG enabler.",
+        name: "kstuff.elf", info: "kstuff.elf - EchoStretch" },
+    { title: "ps5-kstuff (devkit)", description: "Devkit build of the kernel support payload.",
+        name: "kstuff-devkit-only.elf", info: "kstuff-devkit-only.elf - EchoStretch" },
+    { title: "ShadowMountPlus", description: "Mount and manage game images.",
+        name: "shadowmountplus.elf", info: "shadowmountplus.elf - Drakmor" },
+    { title: "Autoloader", description: "Runs a stored payload automatically.",
+        name: "autoloader.elf", info: "autoloader.elf" },
+    { title: "ftpsrv", description: "FTP server. Runs on port 2121.",
+        name: "ftpsrv-ps5.elf", info: "ftpsrv-ps5.elf - john-tornblom" },
+    { title: "Payload Manager", description: "Payload management tools.",
+        name: "pldmgr.elf", info: "pldmgr.elf" },
+    { title: "gdbsrv", description: "GDB server. Runs on port 2159.",
+        name: "gdbsrv-ps5.elf", info: "gdbsrv-ps5.elf - john-tornblom" },
+    { title: "klogsrv", description: "Kernel log server. Runs on port 3232.",
+        name: "klogsrv-ps5.elf", info: "klogsrv-ps5.elf - john-tornblom" },
+    { title: "shsrv", description: "Telnet shell server. Runs on port 2323.",
+        name: "shsrv-ps5.elf", info: "shsrv-ps5.elf - john-tornblom" },
+    { title: "websrv", description: "Homebrew web server. Runs on port 8080.",
+        name: "websrv-ps5.elf", info: "websrv-ps5.elf - john-tornblom" }
+]);
+
+function populatePayloadButtons() {
+    const grid = payloadMenuEl.getElementsByClassName("payloadGrid")[0];
+    if (!grid || grid.getElementsByClassName("payloadTile").length) return;
+
+    for (let i = 0; i < PAYLOADS.length; ++i) {
+        const payload = PAYLOADS[i];
+        const button = document.createElement("a");
+        button.classList.add("payloadTile");
+        button.classList.add("btn");
+        button.tabIndex = 0;
+        button.setAttribute("data-name", payload.name);
+
+        const title = document.createElement("p");
+        title.classList.add("payloadName");
+        title.classList.add("payload-btn-title");
+        title.textContent = payload.title;
+
+        const description = document.createElement("p");
+        description.classList.add("payload-btn-description");
+        description.textContent = payload.description;
+
+        const info = document.createElement("p");
+        info.classList.add("payloadStatus");
+        info.classList.add("payload-btn-info");
+        info.setAttribute("data-ready", payload.info);
+        info.textContent = payload.info.replace(" - ", " · ");
+
+        button.appendChild(title);
+        button.appendChild(description);
+        button.appendChild(info);
+        button.addEventListener("click", function (event) {
+            if (event && event.preventDefault) event.preventDefault();
+            sendPayloadInPlace(payload.name, button);
+        });
+        grid.appendChild(button);
     }
-    if (tiles.length) try { tiles[0].focus(); } catch (e) { }
+}
+populatePayloadButtons();
+
+function switchAppView(viewId) {
+    const main = document.getElementById("main-content");
+    const target = document.getElementById(viewId);
+    if (!main || !target) return;
+    if (viewId === "payloads-view")
+        document.body.classList.add("payload-view-active");
+    else
+        document.body.classList.remove("payload-view-active");
+    const views = main.getElementsByClassName("app-view");
+    for (let i = 0; i < views.length; ++i)
+        views[i].classList.remove("selected");
+    target.classList.add("selected");
+    void target.offsetHeight;
 }
 
+function setPayloadTileBusy(tile, busy) {
+    if (busy) tile.classList.add("busy");
+    else tile.classList.remove("busy");
+}
+
+function showPayloadMenu(readyState) {
+    const ready = readyState !== false;
+    populatePayloadButtons();
+
+    const prompt = document.getElementById("loaderPrompt");
+    prompt.classList.remove("on");
+    navEl.textContent = "";
+    navEl.style.display = "none";
+
+    payloadMenuEl.classList.add("on");
+    switchAppView("payloads-view");
+
+    const networkStatus = document.getElementById("payloadNetworkStatus");
+    if (networkStatus) {
+        networkStatus.innerHTML = consoleNetworkInfo.ip
+            ? "Listening on: <b>" + consoleNetworkInfo.ip + "</b> (port: 9021)"
+                + (consoleNetworkInfo.name ? " (" + consoleNetworkInfo.name + ")" : "")
+            : "Listening on console port 9021";
+    }
+
+    const grid = payloadMenuEl.getElementsByClassName("payloadGrid")[0];
+    if (grid) grid.removeAttribute("style");
+
+    const tiles = payloadMenuEl.getElementsByClassName("payloadTile");
+    for (let i = 0; i < tiles.length; ++i) {
+        setPayloadTileBusy(tiles[i], !ready);
+        tiles[i].style.pointerEvents = ready ? "auto" : "none";
+        tiles[i].tabIndex = ready ? 0 : -1;
+    }
+
+    const progress = document.getElementById("payloadProgress");
+    if (progress && ready)
+        progress.textContent = "Select a payload to send it to the ELF loader.";
+
+    setTimeout(function () {
+        const firstRect = tiles.length ? tiles[0].getBoundingClientRect() : null;
+        const firstStyle = tiles.length ? getComputedStyle(tiles[0]) : null;
+        const firstTitle = tiles.length
+            ? tiles[0].getElementsByClassName("payload-btn-title")[0] : null;
+        const titleStyle = firstTitle ? getComputedStyle(firstTitle) : null;
+        flushMark("ELFLDR-MENU-VISIBLE", "tiles=" + tiles.length
+            + "-menu=" + getComputedStyle(payloadMenuEl).display
+            + "-firstW=" + (firstRect ? Math.round(firstRect.width) : 0)
+            + "-firstH=" + (firstRect ? Math.round(firstRect.height) : 0)
+            + "-firstDisplay=" + (firstStyle ? firstStyle.display : "none")
+            + "-firstColor=" + (firstStyle ? firstStyle.color : "none")
+            + "-titleDisplay=" + (titleStyle ? titleStyle.display : "none")
+            + "-titleColor=" + (titleStyle ? titleStyle.color : "none")
+            + "-titleFill=" + (titleStyle
+                ? (titleStyle.webkitTextFillColor || "unset") : "none")
+            + "-titleText=" + (firstTitle ? clean(firstTitle.textContent) : "none"));
+        sendRemoteEvents(false);
+    }, 0);
+}
 function setPayloadTileState(tile, state) {
     tile.setAttribute("data-state", state);
-    const image = tile.getElementsByTagName("img")[0];
-    const key = tile.getAttribute("data-key");
-    if (image && key)
-        image.setAttribute("src", "../ui/payload-" + key + "-" + state + ".png");
+    const status = tile.getElementsByClassName("payloadStatus")[0];
+    if (status)
+        status.textContent = state === "default"
+            ? (status.getAttribute("data-ready") || "Ready")
+            : state === "sending" ? "Sending"
+                : state === "sent" ? "Sent to port 9021" : "Failed";
+}
+
+async function probeExistingElfLoader() {
+    // Match UMTX2's safe probe: do not connect an empty client to elfldr.
+    // If bind(127.0.0.1:9021) fails, another socket already owns the port.
+    preparePayloadSender();
+    let fd = -1;
+    let portOwned = false;
+    try {
+        const opened = await sys(SYS_SOCKET, 2, 1, 0);
+        if (opened.failed || opened.s32 < 0) return false;
+        fd = opened.s32;
+        track(fd);
+        const bound = await sys(SYS_BIND, fd, payloadSockaddrStore.ptr, 0x10);
+        portOwned = bound.failed || bound.s32 < 0;
+    } finally {
+        if (fd >= 0 && !chainDead) {
+            try {
+                const closed = await sys(SYS_CLOSE, fd);
+                if (!closed.failed && closed.s32 === 0) untrack(fd);
+            } catch (e) { }
+        }
+    }
+    return portOwned;
+}
+
+function openExistingPayloadMenu() {
+    elfldrSpawned = true;
+    clearFailureBanners();
+    setCatResult(true);
+    showVerdict(false, "ELF LOADER ALREADY READY ON PORT 9021");
+    stage("ELF LOADER READY -- opening payload menu", "ok");
+    showPayloadMenu();
+    flushMark("ELFLDR-REUSED", "bind-probe-found-127.0.0.1-port=9021-owned");
+}
+
+function showLoaderPrompt() {
+    clearFailureBanners();
+    payloadMenuEl.classList.remove("on");
+    const prompt = document.getElementById("loaderPrompt");
+    prompt.classList.add("on");
+    switchAppView("prompt-view");
+    const promptButtons = prompt.getElementsByClassName("promptButton");
+    for (let i = 0; i < promptButtons.length; ++i) {
+        promptButtons[i].removeAttribute("style");
+    }
+    const button = document.getElementById("promptJailbreak");
+    button.href = PRODUCTION_HREF;
+    try { button.focus(); } catch (e) { }
+}
+
+async function refreshConsoleNetworkInfo() {
+    if (consoleNetworkInfo.ip) return consoleNetworkInfo;
+    try {
+        const countResult = await sys(SYS_NETGETIFLIST, 0, 10);
+        if (countResult.failed || countResult.s32 <= 0)
+            throw payloadSyscallError("netgetiflist count", countResult);
+        const count = Math.min(countResult.s32, 32);
+        const recordSize = 0x3c0;
+        const records = mem(recordSize * count);
+        records.u8.fill(0);
+        const listResult = await sys(SYS_NETGETIFLIST, records.ptr, count);
+        if (listResult.failed)
+            throw payloadSyscallError("netgetiflist records", listResult);
+        for (let i = 0; i < count; ++i) {
+            const base = i * recordSize;
+            const octets = [records.u8[base + 40], records.u8[base + 41],
+                records.u8[base + 42], records.u8[base + 43]];
+            const ip = octets.join(".");
+            if (ip === "0.0.0.0" || ip === "127.0.0.1") continue;
+            let name = "";
+            for (let j = 0; j < 16 && records.u8[base + j]; ++j)
+                name += String.fromCharCode(records.u8[base + j]);
+            consoleNetworkInfo = { ip: ip, name: name };
+            flushMark("CONSOLE-NETWORK", "ip=" + clean(ip) + "-if=" + clean(name));
+            break;
+        }
+    } catch (error) {
+        flushMark("CONSOLE-NETWORK-FAILED", clean(error && error.message
+            ? error.message : error));
+    }
+    return consoleNetworkInfo;
 }
 
 function payloadIsListed(name) {
     if (!/^[A-Za-z0-9._-]+\.elf$/.test(name)) return false;
-    const tiles = payloadMenuEl.getElementsByTagName("a");
+    const tiles = payloadMenuEl.getElementsByClassName("payloadTile");
     for (let i = 0; i < tiles.length; ++i)
         if (tiles[i].getAttribute("data-name") === name) return true;
     return false;
@@ -1081,7 +1311,7 @@ async function sendPayloadToElfldr(name) {
     if (!elfldrSpawned)
         throw new Error("ELF loader is not ready");
     if (!P || !chain)
-        throw new Error("the post-galberik ROP runtime is unavailable");
+        throw new Error("the post-jailbreak ROP runtime is unavailable");
     if (chainDead)
         throw new Error("the ROP chain is unusable after " + chainDead);
     if (payloadSenderBlocked)
@@ -1097,7 +1327,7 @@ async function sendPayloadToElfldr(name) {
     if (!bytes.length)
         throw new Error("payload is empty");
     if (bytes.length > PAYLOAD_MAX_SIZE)
-        throw new Error("payload is larger than the 2 MiB limit");
+        throw new Error("payload is larger than the 4 MiB limit");
     if (bytes.length < 4 || bytes[0] !== 0x7f || bytes[1] !== 0x45
         || bytes[2] !== 0x4c || bytes[3] !== 0x46)
         throw new Error("payload does not start with the ELF signature");
@@ -1187,15 +1417,21 @@ async function sendPayloadToElfldr(name) {
 async function sendPayloadInPlace(name, tile) {
     if (payloadSendBusy) return;
     payloadSendBusy = true;
-    const tiles = payloadMenuEl.getElementsByTagName("a");
+    const titleEl = tile.getElementsByClassName("payloadName")[0];
+    const title = titleEl ? titleEl.textContent : name;
+    const toast = showPayloadToast(title + ": Fetching...");
+    const tiles = payloadMenuEl.getElementsByClassName("payloadTile");
     for (let i = 0; i < tiles.length; ++i)
-        tiles[i].className = "payloadTile busy";
-    tile.className = "payloadTile";
+        setPayloadTileBusy(tiles[i], true);
+    setPayloadTileBusy(tile, false);
     setPayloadTileState(tile, "sending");
     try {
+        updatePayloadToast(toast, title + ": Sending to port 9021...");
         const result = await sendPayloadToElfldr(name);
-        tile.className = "payloadTile";
+        setPayloadTileBusy(tile, false);
         setPayloadTileState(tile, "sent");
+        updatePayloadToast(toast, title + ": Sent to port 9021");
+        dismissPayloadToast(toast, 2000);
         flushMark("ELF-SENT", "name=" + clean(result.name) + "-bytes="
             + result.bytes + "-target=" + clean(result.target)
             + "-port=" + result.port);
@@ -1203,36 +1439,50 @@ async function sendPayloadInPlace(name, tile) {
             flushMark("ELF-SOCKET-CLOSE-WARN", "name=" + clean(result.name)
                 + "-why=" + clean(result.closeWarning.message || result.closeWarning));
     } catch (error) {
-        tile.className = "payloadTile";
+        setPayloadTileBusy(tile, false);
         setPayloadTileState(tile, "failed");
+        updatePayloadToast(toast, title + ": Error: "
+            + (error && error.message ? error.message : error));
+        dismissPayloadToast(toast, 5000);
         flushMark("ELF-SEND-FAILED", "name=" + clean(name) + "-why="
             + clean(error && error.message ? error.message : error));
     } finally {
         if (payloadSenderBlocked) {
             payloadSendBusy = true;
             for (let i = 0; i < tiles.length; ++i)
-                tiles[i].className = "payloadTile busy";
+                setPayloadTileBusy(tiles[i], true);
             setCatResult(false);
             flushMark("ELF-SENDER-BLOCKED", clean(payloadSenderBlocked));
         } else {
             payloadSendBusy = false;
             for (let i = 0; i < tiles.length; ++i)
-                if (tiles[i] !== tile) tiles[i].className = "payloadTile";
+                if (tiles[i] !== tile) setPayloadTileBusy(tiles[i], false);
             try { tile.focus(); } catch (e) { }
         }
     }
 }
 
-{
-    const tiles = payloadMenuEl.getElementsByTagName("a");
-    for (let i = 0; i < tiles.length; ++i) {
-        const tile = tiles[i];
-        tile.onclick = function (e) {
-            if (e && e.preventDefault) e.preventDefault();
-            sendPayloadInPlace(tile.getAttribute("data-name"), tile);
-            return false;
-        };
-    }
+function showPayloadToast(message) {
+    const container = document.getElementById("payloadToastContainer");
+    const toast = document.createElement("div");
+    toast.className = "payloadToast";
+    toast.textContent = message;
+    container.appendChild(toast);
+    return toast;
+}
+
+function updatePayloadToast(toast, message) {
+    if (toast) toast.textContent = message;
+}
+
+function dismissPayloadToast(toast, delay) {
+    setTimeout(function () {
+        if (!toast) return;
+        toast.className = "payloadToast hide";
+        setTimeout(function () {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 450);
+    }, delay);
 }
 
 function stage(text, cls) {
@@ -1537,36 +1787,19 @@ async function preflight() {
         throw new Error("syscalls.js did not evaluate -- SYS_GETPID is undefined");
 
     await window.offsetsReady;
-
-    /* offsetsReady resolves on the script element's LOAD event, and a script
-       that fails to PARSE still fires load. So one syntax error in a profile --
-       a duplicate `const` is enough, and every declaration in the file is then
-       absent -- arrives here as a bare ReferenceError on whichever symbol the
-       run touches first ("can't find variable wk_gadgetmap"), a long way from
-       the actual fault. Ask for the declarations behind a guard and say what
-       really happened. */
-    let nGadgets = -1, nSyscalls = -1, undeclared = "";
-    try { nGadgets = Object.keys(wk_gadgetmap).length; }
-    catch (e) { undeclared += "wk_gadgetmap (" + ((e && e.message) || e) + ") "; }
-    try { nSyscalls = Object.keys(syscall_map).length; }
-    catch (e) { undeclared += "syscall_map (" + ((e && e.message) || e) + ") "; }
-    if (undeclared)
-        throw new Error("../offsets/" + window.fw_str + ".js reported load but"
-            + " did NOT evaluate -- " + undeclared + "undeclared. That is a"
-            + " syntax error in the profile; a script that fails to parse still"
-            + " fires its load event, so nothing in the file exists. src="
-            + ((window.__offsetsScript && window.__offsetsScript.src) || "?"));
-
     flushMark("OFFSETS-READY", "fw=" + window.fw_str
-        + "-gadgets=" + nGadgets + "-syscalls=" + nSyscalls);
+        + "-gadgets=" + Object.keys(wk_gadgetmap).length
+        + "-syscalls=" + Object.keys(syscall_map).length);
 
-    if (!nGadgets || !nSyscalls)
+    if (!wk_gadgetmap || !Object.keys(wk_gadgetmap).length
+        || !syscall_map || !Object.keys(syscall_map).length)
         throw new Error("../offsets/" + window.fw_str + ".js loaded but is empty: "
-            + nGadgets + " gadgets, " + nSyscalls + " syscalls.");
+            + Object.keys(wk_gadgetmap || {}).length + " gadgets, "
+            + Object.keys(syscall_map || {}).length + " syscalls.");
 
     let verdict = "ok";
     try {
-        const r = await fetch("rop_slave.js", { cache: "no-store" });
+        const r = await fetch("rop_slave.js?v=lowfw17", { cache: "no-store" });
         if (!r.ok) verdict = "http-" + r.status;
     } catch (err) { verdict = "fetch-threw"; }
     if (verdict === "ok") {
@@ -1581,7 +1814,7 @@ async function preflight() {
             };
             const t = setTimeout(() => finish("timeout"), 4000);
             try {
-                w = new Worker("rop_slave.js");
+                w = new Worker("rop_slave.js?v=lowfw17");
                 w.onmessage = () => { clearTimeout(t); finish("ok"); };
                 w.onerror = () => { clearTimeout(t); finish("worker-error"); };
                 w.postMessage(0);
@@ -1646,7 +1879,7 @@ function refuseReferenceChain() {
             "bad");
         throw new Error("the reference chain's entry point is present");
     }
-    flushMark("REFERENCE-CHAIN-ABSENT", "only-slopkit-can-satisfy-this-page");
+    flushMark("REFERENCE-CHAIN-ABSENT", "only-poopsploit-can-satisfy-this-page");
 }
 
 async function chooseCore() {
@@ -1787,18 +2020,11 @@ async function runLadder() {
         else if (result.status === "SKIP") skipped++;
         else failed++;
         row(i + 1, entry, result.status, result.detail, currentNotes);
-        const testDetail = entry.key + "-" + result.status
+        flushMark("TEST", entry.key + "-" + result.status
             + (result.detail
                 ? "-why=" + String(result.detail).replace(/[\r\n\t]+/g, " ")
                     .replace(/[^\x20-\x7e]/g, "").slice(0, 400)
-                : "");
-        flushMark("TEST", testDetail);
-        /* Between rows is a safe place to spend a chain round trip,
-           and this is the line that says what the run actually did. */
-        try {
-            if (engine && engine.tty && !chainDead)
-                await engine.tty("TEST " + testDetail);
-        } catch (e) { }
+                : ""));
         if (state.cleanupFailed) danger("cleanup failure: " + state.cleanupFailed);
 
         if (aborted || result.status === "FAIL") {
@@ -1938,8 +2164,7 @@ async function runLadder() {
     flushMark("POOPS-COMPLETE", "pass=" + passed + "-fail=" + failed
         + "-skip=" + skipped + "-reboot=" + (mustReboot ? 1 : 0)
         + "-triggered=" + (engine && engine.triggered ? 1 : 0)
-        + "-rtmean=" + rtMean + "-filtered=" + (FILTERED_RUN ? 1 : 0)
-        + "-tty=" + (engine && engine.ttyState ? engine.ttyState() : "n/a"));
+        + "-rtmean=" + rtMean + "-filtered=" + (FILTERED_RUN ? 1 : 0));
 
     const payloadSuccess = cfg.payload === "1" && elfldrSpawned;
     const fullSuccess = payloadSuccess || (failed === 0 && !aborted
@@ -1952,7 +2177,7 @@ async function runLadder() {
             ? "ELF LOADER READY -- returning to the payload menu."
             : "SUCCESS -- all executed checks passed."
                 + (mustReboot
-                    ? "\n\nThe galberik changed this boot's kernel state; reboot before running it again."
+                    ? "\n\nThe jailbreak changed this boot's kernel state; reboot before running it again."
                     : "\n\nCleanup completed and the run may be repeated safely."));
     } else if (mustReboot) {
         setCatResult(false);
@@ -2032,9 +2257,11 @@ async function runLadder() {
     if (payloadSuccess) {
         flushMark("ELFLDR-MENU-INPAGE",
             "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
-        showPayloadMenu();
+        if (!payloadMenuEl.classList.contains("on")) showPayloadMenu();
     }
 }
+
+let bootChainReady = false;
 
 async function bootChain() {
     const bootTimer = setTimeout(() => {
@@ -2046,6 +2273,7 @@ async function bootChain() {
         await preflight();
         refuseReferenceChain();
         await bootPrimitiveAndChain();
+        bootChainReady = true;
     } finally {
         clearTimeout(bootTimer);
     }
@@ -2059,10 +2287,10 @@ async function bootPrimitiveAndChain() {
         stage("waiting for the primitive");
         await window.jbReady;
         flushMark("PRIMITIVE-REUSED", "via-window.jbReady");
-    } else if (typeof window.run_slopkit === "function") {
-        stage("running slopkit's deserializer bug through window.run_slopkit");
-        await window.run_slopkit(window.fw_str);
-        flushMark("PRIMITIVE-REUSED", "via-window.run_slopkit");
+    } else if (typeof window.run_poopsploit === "function") {
+        stage("running poopsploit's deserializer bug through window.run_poopsploit");
+        await window.run_poopsploit(window.fw_str);
+        flushMark("PRIMITIVE-REUSED", "via-window.run_poopsploit");
     } else {
         stage("running the webkit bug -- placement is ~1 attempt in 3, it "
             + "retries itself");
@@ -2161,7 +2389,6 @@ async function bootPrimitiveAndChain() {
 }
 
 async function main() {
-    showPrevTrail();
     flushMark("POOPS-BOOT", "rev=" + REV + "-trigger=" + cfg.trigger
         + "-burn=" + cfg.burn + "-sockets=" + cfg.sockets
         + "-attempts=" + cfg.attempts + "-from=" + (FROM || "none")
@@ -2171,7 +2398,8 @@ async function main() {
     lockNav(true);
     runInFlight = true;
     try {
-        await bootChain();
+        if (!bootChainReady) await bootChain();
+        await refreshConsoleNetworkInfo();
 
         await chooseCore();
 
@@ -2210,7 +2438,6 @@ async function main() {
             + "; will put back mask " + driver.origMaskHex + " and rtprio "
             + driver.origPrioType + "/" + driver.origPrio + "\n" + "chain watchdog " + WATCHDOG_MS + " ms per round trip; every loop " + "on this page is bounded by an iteration count AND a wall clock, " + "and every wait has a deadline.\n";
 
-        showPrevTrail();
         stage("running the ladder -- one row at a time");
         try {
             await runLadder();
@@ -2279,54 +2506,7 @@ function lastRunText() {
 
 (async function entry() {
 
-    screenLine("slopkit -- reading the one-shot safety latch");
-
-    /* An auto-reload after a crash must not spend the boot.
-       -----------------------------------------------------------------------
-       When the WebProcess dies the browser respawns and reloads this page by
-       itself -- the serial log shows it, 4 to 13 seconds later, same URL -- and
-       this page auto-runs. So the first run of a boot is regularly an
-       unattended one that nobody sees, and by the time the operator looks both
-       netcontrol slots are gone and every later load can only report "already
-       spent earlier this boot". Three boots in a row went that way.
-       The trail says exactly this and nothing else does: it is non-empty, so a
-       previous load in this browser session got somewhere, and it does not
-       contain POOPS-COMPLETE, so that load never finished. Stop, name where it
-       died, and let the operator start the next one deliberately. The trail was
-       consumed on the way in, so the very next load runs normally. */
-    if (PREV_TRAIL && PREV_TRAIL.indexOf("POOPS-COMPLETE") === -1) {
-        const parts = PREV_TRAIL.split(">");
-        /* The refusal's OWN marks go into the trail like any others, so without
-           this the gate arms itself: refuse, write two marks, and the next load
-           sees a non-empty trail with no POOPS-COMPLETE in it and refuses
-           again, forever. Observed immediately --
-           "prevDiedAt=POOPS-AUTORUN-REFUSED-steps=2".
-           So ignore our own bookkeeping when deciding, and wipe the trail on
-           the way out either way. */
-        const ownMarks = { "PREV-TRAIL": 1, "POOPS-AUTORUN-REFUSED": 1 };
-        const real = parts.filter((t) => !ownMarks[t]);
-        if (real.length) {
-            const diedAt = real[real.length - 1];
-            renderNav("", false);
-            showPrevTrail();
-            stage("previous load DIED at '" + diedAt
-                + "' -- not auto-running; reload to start a run", "bad");
-            summaryEl.textContent = "NOTHING was executed. The last load in"
-                + " this browser session ended at '" + diedAt + "' after "
-                + real.length + " marks without completing, so this load is"
-                + " almost certainly the browser reloading itself after that"
-                + " death. Running now would spend this boot's netcontrol slots"
-                + " unattended -- there are two, and they do not come back until"
-                + " the console is rebooted. Reload to run deliberately.";
-            flushMark("POOPS-AUTORUN-REFUSED",
-                "prevDiedAt=" + diedAt + "-steps=" + real.length);
-            sendRemoteEvents(false);
-            trailReset();
-            offerReload();
-            return;
-        }
-        trailReset();
-    }
+    screenLine("poopsploit -- reading the one-shot safety latch");
 
     if (PRODUCTION_REQUEST_ERROR) {
         renderNav("", false);
@@ -2351,6 +2531,31 @@ function lastRunText() {
         await clearMain();
         sendRemoteEvents(false);
         return;
+    }
+
+    if (REUSE_ELFLDR) {
+        screenLine("payloads -- checking ELF loader on port 9021");
+        stage("checking for an existing ELF loader on port 9021");
+        try {
+            await bootChain();
+            await refreshConsoleNetworkInfo();
+            if (await probeExistingElfLoader()) {
+                openExistingPayloadMenu();
+                sendRemoteEvents(false);
+                return;
+            }
+            flushMark("ELFLDR-REUSE-MISS", "127.0.0.1-port=9021-closed");
+            stage("no ELF loader found", "bad");
+            showLoaderPrompt();
+            sendRemoteEvents(false);
+            return;
+        } catch (err) {
+            const message = (err && err.message) || String(err);
+            stage("could not check port 9021: " + message, "bad");
+            flushMark("ELFLDR-REUSE-PROBE-FAILED", clean(message));
+            sendRemoteEvents(false);
+            return;
+        }
     }
 
     if (PRODUCTION_RUN) {
@@ -2476,7 +2681,7 @@ function lastRunText() {
 
             link("?trigger=none", "no -- go back to the negative control",
                 "extra");
-            link("../index.html", "back to slopkit", "extra");
+            link("../index.html", "back to poopsploit", "extra");
         }
         summaryEl.textContent = lastRunText()
             + "\n\nSAME-process re-arm checks, and their limit stated honestly: " + "this page records the first socket fd it is given and the " + "process's uid, and can therefore notice that THIS WebProcess has " + "already run";
