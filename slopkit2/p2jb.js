@@ -58,7 +58,7 @@
         // to act on. Emit it up front, with the actual query string.
         try {
             window.syncMark("FLAGS", "burn=" + _burn + " skipleak=" + _skipleak
-                + " rc=" + _rc + " v=130"
+                + " rc=" + _rc + " v=131"
                 // MUST mirror kexp_launch's own choice or this beacon lies. It did:
                 // v103 flipped the default to pthread and this line was left inverted
                 // from v99, so the run that finally worked reported spawn=thr_new while
