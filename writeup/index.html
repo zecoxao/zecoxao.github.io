@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>zecoxao // the construct</title>
+
+<!-- Terminal / Matrix-flavored monospace font -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --matrix-green:      #00ff41;   /* neon green */
+    --matrix-green-dim:  #008f11;
+    --matrix-green-glow: #00ff41;
+    --bg:                #000000;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--matrix-green);
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    overflow-x: hidden;
+  }
+
+  /* ---- Falling digital-rain canvas, pinned behind everything ---- */
+  #matrix-rain {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    display: block;
+  }
+
+  /* ---- Readable content sits above the rain ---- */
+  .content {
+    position: relative;
+    z-index: 1;
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 60px 24px 120px;
+    /* faint dark panel so text stays readable over the rain */
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(1px);
+    min-height: 100vh;
+  }
+
+  /* Neon glow applied to headings + key text */
+  .neon {
+    color: var(--matrix-green);
+    text-shadow:
+      0 0 4px  var(--matrix-green-glow),
+      0 0 11px var(--matrix-green-glow),
+      0 0 22px var(--matrix-green-glow);
+  }
+
+  h1 {
+    font-family: 'VT323', 'Share Tech Mono', monospace;
+    font-size: clamp(2.6rem, 8vw, 5rem);
+    letter-spacing: 2px;
+    line-height: 1.05;
+    margin-bottom: 8px;
+  }
+
+  h2 {
+    font-size: clamp(1.4rem, 4vw, 2rem);
+    letter-spacing: 1px;
+    margin: 48px 0 16px;
+    border-bottom: 1px solid var(--matrix-green-dim);
+    padding-bottom: 6px;
+  }
+
+  p, li {
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: var(--matrix-green);
+    margin-bottom: 16px;
+    text-shadow: 0 0 2px rgba(0, 255, 65, 0.4);
+  }
+
+  a {
+    color: #66ff88;
+    text-decoration: none;
+    border-bottom: 1px dashed var(--matrix-green-dim);
+  }
+  a:hover { text-shadow: 0 0 8px var(--matrix-green-glow); }
+
+  .subtitle {
+    color: var(--matrix-green-dim);
+    font-size: 1.1rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 40px;
+  }
+
+  /* A blinking terminal cursor you can put after any text: <span class="cursor"></span> */
+  .cursor {
+    display: inline-block;
+    width: 0.6ch;
+    height: 1.1em;
+    background: var(--matrix-green);
+    vertical-align: text-bottom;
+    animation: blink 1s steps(1) infinite;
+    box-shadow: 0 0 8px var(--matrix-green-glow);
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Images you drop in will glow to match the theme */
+  .content img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--matrix-green-dim);
+    box-shadow: 0 0 14px rgba(0, 255, 65, 0.35);
+    margin: 16px 0;
+  }
+
+  /* Optional code / monospace block */
+  pre, code {
+    font-family: 'Share Tech Mono', monospace;
+    background: rgba(0, 40, 10, 0.6);
+    border: 1px solid var(--matrix-green-dim);
+    color: #9dffb0;
+  }
+  pre { padding: 16px; overflow-x: auto; margin: 16px 0; }
+  code { padding: 1px 5px; }
+
+  ::selection { background: var(--matrix-green); color: #000; }
+</style>
+</head>
+<body>
+
+  <!-- Digital rain background -->
+  <canvas id="matrix-rain"></canvas>
+
+  <!-- ============================================================
+       EVERYTHING BELOW IS YOURS TO EDIT.
+       Replace the placeholder text, add <img> tags, more <h2>
+       sections, links, code blocks, etc.
+       ============================================================ -->
+  <main class="content">
+
+    <h1 class="neon">Glitching the "Almost" Perfect Code...</h1>
+    <p class="subtitle">a write-up by zecoxao</p>
+	<p class="subtitle">credits to the following people:</p>
+    <p class="subtitle">wildcard</p>
+    <p class="subtitle">ZeroTolerance</p>
+    <p class="subtitle">jestero</p>
+    <p class="subtitle">MikeM64</p>
+    <p class="subtitle">DJ</p>
+    <p class="subtitle">flat_z</p>
+    <p class="subtitle">Mina Ralwasser</p>
+    <p class="subtitle">sagemono</p>
+    <p class="subtitle">Kafuu</p>
+    <p class="subtitle">esc0rtd3w</p>
+    <p class="subtitle">naehrwert</p>
+    <p class="subtitle">mysis</p>
+    <p class="subtitle">skgleba</p>
+    <p class="subtitle">xorloser</p>
+    <p class="subtitle">Myria</p>
+    <p class="subtitle">bguerville</p>
+	<p class="subtitle">Proxima</p>
+	<p class="subtitle">golden</p>
+	<p class="subtitle">and last but not least...Anonymous</p>
+
+    <h2 class="neon">The previous work</h2>
+    <p>
+      No decent write up for this rom should start without first talking about the 
+	  previous work done by wildcard, myself, ZeroTolerance, Proxima, golden, DJ, MinaRalwasser
+	  and others responsible for obtaining the master keys used to decrypt syscon firmwares and their patches,
+	  as well as the keys necessary to interact with the testbench (our pc) and diagnose the state of the ps3.
+	  Without this, qcfw would not become a reality later for all future models. And, without this,
+	  no workshop would be able to fix most of their ps3 related hw errors. (Project Frankenstein was born this way,
+	  via the multiple collaboration of people who dedicate their lives into making Backwards Compatible PS3s
+	  alive again). 
+      <span class="cursor"></span>
+    </p>
+	<pre><code><img src="images/pyramid.jpg" alt="description"></code></pre>
+
+    <h2 class="neon">QuasiCFW and BadWDSD</h2>
+    <p>
+      It should also be noted that the work set out by the incredible hacker kafuu, together with esc0rtd3w and 
+	  bguerville, who created, out of a random post from 2010 (describing a possible hack for the wdsd command register
+	  vulnerability), turned into what we see now as QuasiCFW, a hack designed for all unhackable consoles that lets you
+	  patch any region of lv0, lv1 and lv2 as soon as lv0ldr exits its loading.
+    </p>
+    
+
+    <h2 class="neon">The Rom</h2>
+    <p>
+      So, you all know the story by now, something from some place in memory loads lv0ldr, this in turn loads lv0, 
+	  and then that place in memory returns somehow and loads metldr, which then loads isoldr, appldr, rvkldr, lv1ldr and lv2ldr.
+	  Then each loads something specific: isoldr loads the isolated spu modules, appldr loads the userland apps, rvkldr loads the
+	  revokation lists, lv1ldr loads the hypervisor and lv2ldr loads the kernel. simple, right? The chain looks almost perfect, 
+	  and since sony patched the ecdsa vulnerability on later models, there should be no room to where we could craft and sign.
+	  but there is, and it is in the very two first loaders, lv0ldr, and metldr.
+      
+    </p>
+	
+	<h2 class="neon">Obtaining The (Microcode) Rom</h2>
+    <p>
+      Simplest way to obtain the very first bootrom is via decapping and imaging. After entering into contact with
+	  Anonymous, we decided to ask him if he could help us with this process. Proxima already had a decent ammount of 
+	  experience in decoding roms, so all we really needed was the right pictures of the bits. After some exchange of 
+	  words and deciding on a price, work went finally through. The theory was that the supposed rom was in the ppe
+	  area, near the pervasive region. He took some pictures and delivered them to us. Unfortunately, it was a massive disappointment, 
+	  as this rom was not the spu rom, but was in fact the microcode rom. (This piece of code is used to setup the complex ppe instructions
+	  into simple machine code). This happened around Christmas 2025.
+    </p>
+	
+	<h2 class="neon">Obtaining The SPU Rom</h2>
+    <p>
+      After later insisting the SPU regions should be checked (even though it made no sense to check for bits in 8 supposedly identical places),
+	  a discovery! The rom existed. It was a bit cluster of 8192 (mirrored) bits, so 0x400 bytes (with the proper decoding).
+	  The group started to look for vulnerabilities and to see how the code behaved (anergistic was used for this effect, lvx as well, and tools
+	  were created to interact with syscon uart).
+	  Code was analyzed and it contained the entire aes handling of the lv0ldr and metldr (minus of course the key, which was channeled through
+	  32 bit reads of channel 66 and locked out from any future access).
+	  Several attempts were made of obtaining the key (write specific values to channel 64, mess with isolation status, and a myriad of other attempts).
+	  It got settled that, if we were to obtain this key (which is perconsole) we'd have to either glitch or dpa / dfa / spa our way into it somehow.
+    </p>
+	<pre><code><img src="images/yellow.png" alt="description"></code></pre>
+	
+	<h2 class="neon">The Flaw</h2>
+    <p>
+      After some days of conversation, jestero noticed something peculiar via anergistic: spu registers would maintain their values through multiple executions of spu code!
+	  This means that, should any of these registers preserve either the channel 66 key or the derived keys, we could obtain it and ALL security would be defeated!
+	  After some careful deliberation, a good point of attack was choosen. register 7 was only used during the aes key expansion of the channel 66 derived key.
+	  So, if we got this key by glitching the cleanup at a precise timing and reading the register 7, we could then derive backwards (AES allows that),
+	  and obtain both the body key AND the cmac key! Finally, after a while, jestero got his CECHL lv0ldr perconsole body key.
+    </p>
+	<pre><code><img src="images/pc.png" alt="description"></code></pre>
+	<pre><code><img src="images/flex.png" alt="description"></code></pre>
+	
+	<h2 class="neon">The Future and what it Holds for ps3 Hacking</h2>
+	<p>
+      Thanks to these keys we can (this is all theoretical now but should be practical at some point):
+	  <br/>
+	  -> Get the Channel 66 Key (We can then encrypt and "sign" our own lv0ldr and metldr)
+	  <br/>
+	  -> Encrypt and sign our lv0ldr and use it to load whatever we want (modded signatures and all)
+	  <br/>
+	  -> Decrypt lv0ldr.2 and metldr.2 (We can then obtain the future signature keys, though they are useless by now)
+	  <br/>
+	  -> CFW on ALL PS3 models (thanks mostly to kafuu on this one as his qcfw will allow for true CFW on slim 3000 and super slim)
+	  <br/>
+	  -> Unbrick on ALL PS3 models (provided the CPU Key/HW Master Key /Channel 66 Key is dumped, or at least one of the
+	  two derived keys for either lv0ldr or metldr)
+	  <br/>
+	  -> Load anything on it, provided the code exists for it and makes it functional
+	  <br/>
+	  -> Skip dead bluray boards
+	  <br/>
+	  -> Skip dead wifi
+	  <br/>
+	  -> Remarry (Both syscon AND bluray)
+    </p>
+
+  </main>
+
+  <script>
+  // ---- Matrix digital rain --------------------------------------------
+  (function () {
+    const canvas = document.getElementById('matrix-rain');
+    const ctx = canvas.getContext('2d');
+
+    // Half-width katakana + latin + digits, like the film's code glyphs.
+    const glyphs =
+      'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ' +
+      '0123456789ABCDEFZ:.=*+-<>¦｜╌';
+    const chars = glyphs.split('');
+
+    const fontSize = 16;
+    let columns, drops;
+
+    function resize() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+      columns = Math.floor(canvas.width / fontSize);
+      // random start height per column so it doesn't all begin in a line
+      drops = new Array(columns).fill(0).map(
+        () => Math.floor(Math.random() * -canvas.height / fontSize)
+      );
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    function draw() {
+      // translucent black fade -> leaves fading trails
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.font = fontSize + 'px monospace';
+
+      for (let i = 0; i < drops.length; i++) {
+        const text = chars[Math.floor(Math.random() * chars.length)];
+        const x = i * fontSize;
+        const y = drops[i] * fontSize;
+
+        // leading glyph is bright white-green, trail is neon green
+        if (Math.random() > 0.975) {
+          ctx.fillStyle = '#c9ffd4';
+        } else {
+          ctx.fillStyle = '#00ff41';
+        }
+        ctx.fillText(text, x, y);
+
+        // reset column to top at random once it falls off-screen
+        if (y > canvas.height && Math.random() > 0.975) {
+          drops[i] = 0;
+        }
+        drops[i]++;
+      }
+    }
+
+    setInterval(draw, 45);
+  })();
+  </script>
+
+</body>
+</html>
