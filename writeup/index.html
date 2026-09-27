@@ -233,7 +233,7 @@
 	<pre><code><img src="images/yellow.png" alt="description"></code></pre>
 	<pre><code><img src="images/iamhere.png" alt="description"></code></pre>
 	
-	<h2 class="neon">The Flaw</h2>
+	<h2 class="neon">The Flaw - Register Evil 7</h2>
     <p>
       After some days of conversation, jestero noticed something peculiar via anergistic: spu registers would maintain their values through multiple executions of spu code!
 	  This means that, should any of these registers preserve either the channel 66 key or the derived keys, we could obtain it and ALL security would be defeated!
@@ -241,6 +241,7 @@
 	  So, if we got this key by glitching the cleanup at a precise timing and reading the register 7, we could then derive backwards (AES allows that),
 	  and obtain both the body key AND the cmac key! Finally, after a while, jestero got his CECHL lv0ldr perconsole body key.
     </p>
+	<pre><code><img src="images/register-evil.gif" alt "description"></code></pre>
 	<pre><code><img src="images/glitch.jpg" alt="description"></code></pre>
 	<pre><code><img src="images/pc.png" alt="description"></code></pre>
 	<pre><code><img src="images/flex.png" alt="description"></code></pre>
