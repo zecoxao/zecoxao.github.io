@@ -88,7 +88,7 @@ function watchR2(onPress) {
     onPress();
   }
 
-  log("press R2 to load kstuff, shadowmountplus and etaHEN", "info");
+  log("press R2 to load kstuff-NG and shadowmountplus", "info");
   window.addEventListener("keydown", onKey, true);
 }
 
