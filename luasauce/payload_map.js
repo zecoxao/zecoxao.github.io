@@ -187,6 +187,17 @@ const payload_map = [
 		supportedFirmwares: ["3.","4.","5.","6.","7."],
         toPort: 9021
     },
+	    {
+        displayTitle: "ps5-linux-loader-2xx",
+        description: "Linux Loader for the PS5 by TheFlow, Sonic Iso and MassZero",
+        fileName: "ps5-linux-loader-2xx.elf",
+        author: "TheFlow,SonicIso,MassZero",
+        projectSource: "https://github.com/ps5-linux/ps5-linux-loader/",
+        binarySource: "https://github.com/ps5-linux/ps5-linux-loader/releases/tag/v2.3",
+        version: "2.xx",
+		supportedFirmwares: ["2."],
+        toPort: 9021
+    },
     {
         displayTitle: "Payload Manager",
         description: "Payload manager and autoloader. Web UI on port 8084.",
