@@ -55,7 +55,7 @@ const payload_map = [
         fileName: "alembic.elf",
         author: "fthdgn-gh",
         projectSource: "https://github.com/fthdgn-gh/Alembic",
-		binarySource: "https://github.com/fthdgn-gh/Alembic/releases/tag/v0.3.2"
+		binarySource: "https://github.com/fthdgn-gh/Alembic/releases/tag/v0.3.2",
         version: "0.3.2",
         toPort: 9021
     },
