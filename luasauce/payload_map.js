@@ -45,7 +45,7 @@ const payload_map = [
         description: "Jailbreak Daemon for Lapy Apps",
         fileName: "lapy_jb_daemon.elf",
         author: "lapy",
-        version: "1.1b",
+        version: "1.2",
         toPort: 9021
     },
 	{
