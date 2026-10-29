@@ -40,6 +40,15 @@ const payload_map = [
         version: "2.5b",
         toPort: 9021
     },
+	{
+        displayTitle: "A53 PPR Fast Install",
+        description: "FPKG for PS5 by drakmor",
+        fileName: "a53_ppr_fast_install.elf",
+        author: "drakmor",
+        projectSource: "https://github.com/drakmor/ppr-patch",
+        version: "15.09",
+        toPort: 9021
+    },
     {
         displayTitle: "ps5-kstuff-lite",
         description: "FPKG enabler",
