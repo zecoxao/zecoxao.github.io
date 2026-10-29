@@ -49,6 +49,16 @@ const payload_map = [
         version: "15.09",
         toPort: 9021
     },
+	{
+        displayTitle: "alembic",
+        description: "FPKG FFPKG FFPFSC converter",
+        fileName: "alembic.elf",
+        author: "fthdgn-gh",
+        projectSource: "https://github.com/fthdgn-gh/Alembic",
+		binarySource: "https://github.com/fthdgn-gh/Alembic/releases/tag/v0.3.2"
+        version: "0.3.2",
+        toPort: 9021
+    },
     {
         displayTitle: "ps5-kstuff-lite",
         description: "FPKG enabler",
