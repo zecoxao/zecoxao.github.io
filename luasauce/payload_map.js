@@ -140,8 +140,8 @@ const payload_map = [
         fileName: "shadowmountplus.elf",
         author: "drakmor",
         projectSource: "https://github.com/drakmor/ShadowMountPlus/",
-        binarySource: "https://github.com/drakmor/ShadowMountPlus/releases/tag/1.6beta16",
-        version: "1.6beta16",
+        binarySource: "https://github.com/drakmor/ShadowMountPlus/releases/tag/1.7beta10",
+        version: "1.7beta10",
         toPort: 9021
     },
     {
