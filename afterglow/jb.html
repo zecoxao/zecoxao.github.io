@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en" manifest="cache.appcache">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>afterglow</title>
+    <!-- This page carries its own styles and starts its own module, and it
+         loads NOTHING else. That duplicates a little of style.css, and it is
+         deliberate: every subresource is one more allocation and one more
+         timing shift in the process that core.js is about to groom, and this
+         exploit is decided by exactly that. The landing page may use the
+         shared stylesheet; this one may not. -->
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #0e1116;
+        --sunk: #11151b;
+        --line: #1e2732;
+        --fg: #c8ced8;
+        --bright: #e6ebf2;
+        --dim: #7c8798;
+        --faint: #4d5765;
+        --ok: #7fd0a0;
+        --bad: #d08a7f;
+        --warn: #d8c07f;
+        --sans: "Segoe UI", system-ui, sans-serif;
+        --mono: Consolas, "DejaVu Sans Mono", monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.45 var(--sans);
+      }
+      #brand {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+        text-align: center;
+      }
+      #brand b {
+        color: var(--bright);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+      }
+      /* The live heap readout sits in the flow under the bar. Nothing here
+         scrolls the document itself, so it stays in view without being
+         positioned over the wordmark. */
+      #ramBox {
+        overflow: hidden;
+        padding: 5px 10px;
+        border-bottom: 1px solid var(--line);
+        background: var(--sunk);
+        color: var(--ok);
+        font: 11px/1.4 var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* Running: a spinner under the bar. jb.js switches the body to .done,
+         .fail or .log. */
+      #spin {
+        position: fixed;
+        top: calc(50% + 20px);
+        left: 50%;
+        width: 46px;
+        height: 46px;
+        margin: -23px 0 0 -23px;
+        border: 4px solid var(--line);
+        border-top-color: var(--ok);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      #msg {
+        position: fixed;
+        top: 50%;
+        left: 0;
+        right: 0;
+        transform: translateY(-50%);
+        display: none;
+        text-align: center;
+        font-size: 16px;
+        letter-spacing: 0.5px;
+      }
+      #state,
+      #out {
+        display: none;
+      }
+      body.done #spin,
+      body.fail #spin {
+        display: none;
+      }
+      body.fail #msg {
+        display: block;
+      }
+      body.done #msg {
+        display: block;
+        color: var(--ok);
+        font-weight: 700;
+        letter-spacing: 2px;
+      }
+      /* ?log=1 -- the full step log. Laid out with flex rather than by
+         subtracting a header height from 100vh. */
+      body.log {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      body.log #spin,
+      body.log #msg {
+        display: none;
+      }
+      body.log #wrap {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        padding: 14px 18px 30px;
+      }
+      body.log #state {
+        display: block;
+        margin: 0 0 8px;
+        font-size: 22px;
+        font-weight: 700;
+      }
+      body.log #out {
+        display: block;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: var(--sunk);
+        font: 12px/1.45 var(--mono);
+        white-space: pre-wrap;
+      }
+      /* The retry notice, raised by jb.js when the chain throws or stalls. */
+      .notice {
+        margin: 1em 0;
+        padding: 0.7em 1em;
+        border: 2px solid #e66;
+        background: #2a1414;
+        color: #f99;
+        font: 700 20px/1.4 var(--sans);
+      }
+      .byline {
+        position: fixed;
+        bottom: 9px;
+        left: 11px;
+        margin: 0;
+        color: var(--faint);
+        font: 11px/1 var(--mono);
+        letter-spacing: 0.06em;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .bad {
+        color: var(--bad);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      code {
+        color: #9fb3d0;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- jb.js owns the body class: .log while the step log is shown, .done or
+         .fail once the chain has settled. The ids below are its contract --
+         #ramBox, #msg, #state and #out are read by name. -->
+    <div id="brand"><b>afterglow</b></div>
+    <div id="ramBox">RAM: checking...</div>
+    <div id="spin"></div>
+    <div id="msg">Restart your console</div>
+    <div id="wrap">
+      <div id="state"></div>
+      <div id="out"></div>
+    </div>
+    <p class="byline">by well0nez/m0zz</p>
+    <script type="module">
+      import "./jb.js";
+    </script>
+  </body>
+</html>
