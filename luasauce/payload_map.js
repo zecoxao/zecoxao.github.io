@@ -221,9 +221,10 @@ const payload_map = [
         description: "Payload manager and autoloader. Web UI on port 8084.",
         fileName: "pldmgr.elf",
         author: "PLK",
-        projectSource: "",
-        binarySource: "",
-        version: "0.5.1",
+        projectSource: "https://github.com/itsPLK/ps5-payload-manager",
+        binarySource: "https://github.com/itsPLK/ps5-payload-manager/releases/tag/v0.6.3",
+        version: "0.6.3",
+		supportedFirmwares: ["2.","3.","4.","5."],
         toPort: 9021
     },
     {
