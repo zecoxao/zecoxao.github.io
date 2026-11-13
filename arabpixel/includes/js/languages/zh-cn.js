@@ -1,0 +1,209 @@
+window.lang = {
+    "ps4FwCompatible": `PS4 固件：{ps4fw} | 兼容`,
+    "ps4FwIncompatible": `PS4 固件：{ps4fw} | 不兼容`,
+    "notPs4": "当前不是 PS4，平台：",
+    "clickToStart": "点击开始",
+    "chooseHEN": "选择你的 HEN 类型",
+    "exploitStatusHeader": "Exploit 状态",
+    "payloadsHeader": "Payload",
+    "settingsBtnTitle": "设置",
+    "aboutMenu": "关于",
+    "payloadsToolsHeader": "工具",
+    "payloadsHomebrewHeader": "自制软件",
+    "payloadsLinuxHeader": "Linux",
+    "payloadsCustomHeader": "自定义",
+    "customPayloadHint": "上传自定义 payload 文件。",
+    "aboutVersion": "版本：2.0",
+    "aboutDescription": "一个功能丰富的 PS4 越狱网页界面。",
+    "closeButton": "关闭",
+    "ps4FirmwareSupportedHeader": "支持的 PS4 固件",
+    "languageHeader": "语言",
+    "warnings": {
+        "note1": "首次运行 exploit 前，请先删除缓存数据",
+        "note2": "请等待缓存过程完整结束，以获得更好的稳定性",
+        "note3": "越狱可能需要多次尝试才能成功"
+    },
+    "secondHostBtn": "通过 Payload Loader 服务器加载 payload（HTTP 链接）",
+    "alert": "重要提示",
+    "waitingUserInput": "等待用户操作",
+    "cache": "正在安装缓存：",
+    "ghVer": "GoldHEN 版本",
+    "otherVer": "其他版本",
+    "latestVer": "最新",
+    "fanTitle": "风扇阈值",
+    "fanDescription": "设置风扇进入高速运转时的温度阈值",
+    "selectTemp": "选择温度",
+    "default": "默认",
+    "payloaderFirmwareSemiSupported": "* 所有固件版本均支持通过 Payload Loader 服务器加载 payload。",
+    "showAdvancedPayloads": "显示高级 Payload",
+    "optionsHeader": "选项",
+    "advanced": "高级",
+    "scanPayloadLoader": "扫描 Payload Loader 服务器",
+    "shutdownServerConfirm": "确定要关闭服务器吗？重新启动时需要再次注入 payload。",
+    "shutdownServerBtn": "关闭服务器",
+    "payloadLoaderFound": "已在以下地址找到 Payload Loader 服务器：",
+    "payloadLoaderNotFound": "未找到 Payload Loader 服务器。它正在运行吗？",
+    "ps4IpInvalid": "PS4 IP 地址无效",
+    "ps4IpPlaceholder": "PS4 IP 地址",
+    "ps4FwPlaceholder": "PS4 固件",
+    // deliverPayload.js
+    "payloadRequiresPayloadLoader": "此 payload 只能通过正在运行的 Payload Loader 服务器（如 GoldHEN 或 nexHEN）加载。",
+    "busyBinLoader": "Payload Loader 服务器正忙，无法加载 payload。",
+    "binLoaderNotDetected": "未检测到 Payload Loader 服务器。它正在运行吗？",
+    "disabledBinloader": "Payload Loader 服务器未运行。要改用 exploit 加载 payload 吗？",
+    "unsupportedFirmware": "不支持的固件：",
+    "payloadNotSupported": "此 exploit 不支持此 payload。",
+    "payloadLoaderSendFailed": "通过 Payload Loader 发送 {payload} 失败，目标地址：",
+    "payloadLoaderSendSuccess": "已通过 Payload Loader 将 {payload} 发送到：",
+    "payloadLoaderSending": "正在通过 Payload Loader 发送 {payload}...",
+    "customPayloadLoaded": "已加载自定义 Payload：",
+    "payloadNotFound": "在网页服务器上未找到 payload {payload}：",
+    "httpStatus": "HTTP 状态：{status}",
+    "responseBody": "响应内容：{body}",
+    "customPort": "自定义端口",
+    "binLoaderNotResponding": "Payload Loader 无响应，正在回退到 exploit...",
+    "elfLoaderStarting": "Elf Loader 启动文件已发送，正在等待其启动...",
+    "elfLoaderSent": "已通过 Elf Loader 成功发送 payload！",
+    "elfLoaderSending": "正在向 Elf Loader 发送 payload...",
+    "elfLoaderError": "Elf Loader 返回错误：{status} {body}",
+    "elfLoaderResponse": "已通过 Elf Loader 成功发送 payload！\n状态：{status} {statusText}\n响应：{body}",
+    "elfLoaderNetworkError": "错误：网络请求失败",
+    "elfLoaderRequestAborted": "错误：网络请求已中止",
+    "firmwareNotificationsUnavailable": "此固件支持 payload，但可能不会显示通知。",
+    "emptyPayloadFile": "未选择 payload 文件。",
+    "theme": "主题",
+    "vibrantColor": "鲜艳",
+    "autoJbRetryText": "自动重试越狱",
+    "autoJbRetry": "{seconds} 秒后重试...",
+    "autoJb": "自动越狱已启用，将在 {seconds} 秒后执行...",
+    "autoJbOption": "自动越狱",
+    "stopAutoJbBtn": "停止自动越狱",
+    "autoJbRetryConfirm": "现在开始越狱吗？如果失败，将自动重试直到成功。",
+    "jailbreakCountDown": "{seconds} 秒后重试越狱...",
+    "successRate": "成功率：",
+    "clearStatsConfirm": "确定要清除越狱统计吗？此操作无法撤销！",
+    "exploitChainTitle": "Exploit 链",
+    "modularLapse": "PSFree Lapse 模块化",
+    "bundleLapse": "PSFree Lapse 捆绑",
+    "creditsHeader": "鸣谢",
+    "themeSettingsHeader": "自定义",
+    "updateCache": "更新缓存",
+    "catppuccino": "猫咪卡布奇诺",
+    "jailbreakSuccess": "越狱成功！",
+    "reloadAfterJbText": "越狱成功后重新加载页面",
+    "payloadCategories": {
+        "tools": "工具",
+        "linux": "Linux",
+        "advanced": "高级"
+    },
+    "payloadItems": {
+        "FTP": {
+            "description": "启用 FTP 服务器，方便传输文件。"
+        },
+        "BinLoader": {
+            "description": "启动 9020 端口的 BinLoader 服务器，用于发送 bin Payload。"
+        },
+        "ElfLoader": {
+            "description": "启动 9021 端口的 Elf Loader 服务器，用于接收 ELF payload。"
+        },
+        "WebSrv": {
+            "name": "PS4-Websrv",
+            "description": "在 PS4 的 80 端口启动 Web 服务器，方便通过外部设备即时加载 Payload。"
+        },
+        "DisableUpdates": {
+            "name": "禁用更新",
+            "description": "禁用系统软件自动更新。"
+        },
+        "FanThreshold": {
+            "name": "风扇阈值",
+            "description": "设置 PlayStation 4 的散热风扇曲线。"
+        },
+        "HistoryBlocker": {
+            "name": "历史记录屏蔽",
+            "description": "阻止浏览器在启动时记住并返回上次打开的页面。再次运行可启用或禁用。"
+        },
+        "NpFakeSignin": {
+            "name": "NP 假登录",
+            "description": "将 PS4 的 PSN 状态设为“已登录”，适合在假激活后使用。"
+        },
+        "OrbisToolbox": {
+            "name": "Orbis 工具箱",
+            "description": "修改版 PlayStation UI，可辅助启动和开发 homebrew。"
+        },
+        "BackupDB": {
+            "name": "备份数据库",
+            "description": "备份 PS4 的数据库、许可证和用户数据。若需要重新初始化，密钥变化后备份可能无法使用。"
+        },
+        "RestoreDB": {
+            "name": "恢复数据库",
+            "description": "恢复“备份数据库”Payload 保存的数据。"
+        },
+        "ExitIDU": {
+            "name": "退出 IDU",
+            "description": "退出 IDU 模式并重启主机。"
+        },
+        "WebRTE": {
+            "description": "Web 实时训练器引擎。"
+        },
+        "App2USB": {
+            "name": "App2USB",
+            "description": "将已安装应用非官方迁移到外接 USB 存储设备。"
+        },
+        "Linux1024mb": {
+            "name": "Linux 加载器 1GB",
+            "description": "适用于所有主机的 Linux 加载器，1GB VRAM。首次安装建议使用。"
+        },
+        "Linux2048mb": {
+            "name": "Linux 加载器 2GB",
+            "description": "适用于所有主机的 Linux 加载器，2GB VRAM。"
+        },
+        "Linux3072mb": {
+            "name": "Linux 加载器 3GB",
+            "description": "适用于所有主机的 Linux 加载器，3GB VRAM。"
+        },
+        "Linux4096mb": {
+            "name": "Linux 加载器 4GB",
+            "description": "适用于所有主机的 Linux 加载器，4GB VRAM。"
+        },
+        "Linux128mb": {
+            "name": "Linux 加载器 128MB",
+            "description": "适用于所有主机的 Linux 加载器，128MB VRAM。"
+        },
+        "Linux256mb": {
+            "name": "Linux 加载器 256MB",
+            "description": "适用于所有主机的 Linux 加载器，256MB VRAM。"
+        },
+        "Linux512mb": {
+            "name": "Linux 加载器 512MB",
+            "description": "适用于所有主机的 Linux 加载器，512MB VRAM。"
+        },
+        "PS4Debug": {
+            "name": "PS4 调试",
+            "description": "PS4 调试工具。"
+        },
+        "PUPDecrypt": {
+            "name": "PUP 解密",
+            "description": "用于解密 PS4 固件更新文件（PUP）内容的 Payload。"
+        },
+        "ModuleDumper": {
+            "name": "模块导出",
+            "description": "将 /system、/system_ex、/update 以及文件系统根目录中的已解密模块导出到 USB 设备。"
+        },
+        "KernelDumper": {
+            "name": "内核导出",
+            "description": "导出 PS4 内核。"
+        },
+        "DisableASLR": {
+            "name": "禁用 ASLR",
+            "description": "禁用 ASLR（地址空间布局随机化），让内存调试和复现更容易。"
+        },
+        "PermanentUART": {
+            "name": "永久 UART",
+            "description": "无需内核补丁即可启用硬件 UART，并可在系统更新后继续保留。"
+        },
+        "RIFRenamer": {
+            "name": "RIF 重命名",
+            "description": "将“fake”RIF 重命名为“free”RIF，以获得更好的 HEN 兼容性。若你的 PKG 仅在 Mira+HEN 下可用，可使用此项。"
+        }
+    }
+}

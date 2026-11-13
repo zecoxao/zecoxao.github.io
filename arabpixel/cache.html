@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+    <title>WebKitty - Caching</title>
+    <meta name="author" content="ArabPixel">
+    <link rel="stylesheet" href="./includes/css/colors/default.css">
+    <link rel="stylesheet" href="./includes/css/layouts/index.css">
+    <link rel="stylesheet" href="./includes/css/cache.css">
+</head>
+
+<body class="bg-gray-900 text-white">
+    <main class="mainContainer">
+        <section class="cache-screen">
+            <div class="cache-title">Caching WebKitty</div>
+            <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" id="progressFill"></div>
+            </div>
+            <div class="cache-subtitle" id="cacheStatus">Preparing...</div>
+        </section>
+        <div class="absolute bottom-10 text-center w-full">Firmware-Based Caching System</div>
+    </main>
+
+    <iframe id="cacheFrame" src="about:blank"></iframe>
+
+    <script src="./includes/js/storage.js"></script>
+    <script src="./includes/js/testMode.js"></script>
+    <script src="./includes/js/firmware.js"></script>
+    <script>
+        var fwVersion = getPs4FwVersion();
+        var targetPage = getCachePage(fwVersion);
+
+        var statusEl = document.getElementById('cacheStatus');
+        var fillEl = document.getElementById('progressFill');
+        var frame = document.getElementById('cacheFrame');
+
+        // Listen for postMessages from the iframe (iframe_cache.js)
+        window.addEventListener('message', function (event) {
+            var data = event.data;
+            if (!data || !data.type) return;
+
+            if (data.type === 'CACHE_PROGRESS') {
+                if (data.percent >= 0) {
+                    fillEl.style.width = data.percent + '%';
+                    statusEl.textContent = 'Downloading... ' + data.percent + '%';
+                } else {
+                    statusEl.textContent = 'Downloading... (' + data.loaded + ' of ' + data.total + ')';
+                }
+            } else if (data.type === 'CACHE_COMPLETE' || data.type === 'CACHE_EXISTS') {
+                fillEl.style.width = '100%';
+                statusEl.textContent = data.type === 'CACHE_EXISTS' ? 'Already cached! Redirecting...' : 'Done! Redirecting...';
+                setTimeout(function () {
+                    window.location.replace(mainPage);
+                }, 1000);
+
+            } else if (data.type === 'CACHE_CHECKING') {
+                statusEl.textContent = 'Checking cache...';
+            } else if (data.type === 'CACHE_DOWNLOADING') {
+                statusEl.textContent = 'Caching files...';
+            } else if (data.type === 'CACHE_ERROR') {
+                var reason = data.reason || 'Unknown error';
+                statusEl.textContent = 'Cache error: ' + reason;
+                setTimeout(function () {
+                    window.location.replace(mainPage);
+                }, 3000);
+            }
+        }, false);
+
+        // Load the firmware-based cache page into the hidden iframe
+        statusEl.textContent = 'Starting cache for firmware ' + (fwVersion || 'unknown') + '...';
+        frame.src = targetPage;
+    </script>
+</body>
+
+</html>
