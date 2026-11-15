@@ -26,7 +26,7 @@ const payload_map = [
     //     fileName: "elfldr.elf",
     //     author: "john-tornblom",
     //     projectSource: "https://github.com/ps5-payload-dev/elfldr",
-    //     binarySource: "https://github.com/ps5-payload-dev/elfldr/releases/download/v0.19/Payload.zip",
+    //     binarySource: "https://github.com/ps5-payload-dev/elfldr/releases/tag/v0.27",
     //     version: "0.27",
     //     supportedFirmwares: ["1.", "2.", "3.", "4.", "5."]
     // },
