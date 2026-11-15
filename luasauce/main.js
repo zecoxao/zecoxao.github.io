@@ -619,28 +619,6 @@ async function main(userlandRW, wkOnly = false) {
         let jit_handle_store = p.malloc(0x4);
         // let test_store_buf   = p.malloc(0x4);
 
-        // [DBG] on-screen toast via sceKernelSendNotificationRequest, resolved with
-        // the dlsym syscall (libkernel handle = 1). Localizes where the loader dies.
-        let dbg_notify_fn = new int64(0, 0);
-        let dbg_notify_buf = p.malloc(0xc30);
-        let dbg_name_buf = p.malloc(0x40);
-        var dbg_notify = async function (msg) {
-            try {
-                if (dbg_notify_fn.low == 0 && dbg_notify_fn.hi == 0) {
-                    let out = p.malloc(0x8);
-                    p.writestr(dbg_name_buf, "sceKernelSendNotificationRequest");
-                    await chain.syscall(SYS_DYNLIB_DLSYM, 1, dbg_name_buf, out);
-                    dbg_notify_fn = p.read8(out);
-                }
-                await log("[dbg] " + msg, LogLevel.INFO);
-                if (dbg_notify_fn.low == 0 && dbg_notify_fn.hi == 0) { return; } // dlsym failed, log-only
-                for (let i = 0; i < 0xc30; i += 8) p.write8(dbg_notify_buf.add32(i), 0);
-                p.write4(dbg_notify_buf.add32(0x10), 0xffffffff);
-                p.writestr(dbg_notify_buf.add32(0x2d), "" + msg);
-                await chain.call(dbg_notify_fn, 0, dbg_notify_buf, 0xc30, 0);
-            } catch (e) { await log("dbg_notify err " + e, LogLevel.ERROR); }
-        };
-
         // ELF sizes and offsets
 
         let OFFSET_ELF_HEADER_ENTRY = 0x18;
@@ -651,6 +629,7 @@ async function main(userlandRW, wkOnly = false) {
         let OFFSET_PROGRAM_HEADER_FLAGS = 0x04;
         let OFFSET_PROGRAM_HEADER_OFFSET = 0x08;
         let OFFSET_PROGRAM_HEADER_VADDR = 0x10;
+        let OFFSET_PROGRAM_HEADER_FILESZ = 0x20;
         let OFFSET_PROGRAM_HEADER_MEMSZ = 0x28;
 
         let OFFSET_RELA_OFFSET = 0x00;
@@ -711,6 +690,7 @@ async function main(userlandRW, wkOnly = false) {
                 let program_vaddr = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_VADDR));
                 let program_memsz = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_MEMSZ));
                 let aligned_memsz = (program_memsz + 0x3FFF) & 0xFFFFC000;
+                let program_filesz = p.read4(elf_store.add32(program_header_offset + OFFSET_PROGRAM_HEADER_FILESZ));
 
                 if (program_type == ELF_PT_LOAD) {
                     // For executable segments, we need to take some care and do alias'd mappings.
@@ -723,31 +703,31 @@ async function main(userlandRW, wkOnly = false) {
                         chain.add_syscall_ret(jit_handle_store, SYS_JITSHM_CREATE, 0x0, aligned_memsz, 0x7);
                         await chain.run();
                         let exec_handle = p.read4(jit_handle_store);
-                        await dbg_notify("jitshm_create sz=0x" + aligned_memsz.toString(16) + " -> h=0x" + (exec_handle >>> 0).toString(16));
 
                         // Get write alias
                         chain.add_syscall_ret(jit_handle_store, SYS_JITSHM_ALIAS, exec_handle, 0x3);
                         await chain.run();
                         let write_handle = p.read4(jit_handle_store);
-                        await dbg_notify("jitshm_alias -> h=0x" + (write_handle >>> 0).toString(16));
 
                         // Map to shadow mapping
                         chain.add_syscall_ret(conn_ret_store, SYS_MMAP, shadow_mapping_addr, aligned_memsz, 0x3, 0x11, write_handle, 0);
                         await chain.run();
                         shadow_write_mapping = p.read8(conn_ret_store);
-                        await dbg_notify("mmap shadow -> 0x" + shadow_write_mapping.hi.toString(16) + "_" + (shadow_write_mapping.low >>> 0).toString(16));
 
                         // Copy in segment data
                         let dest = p.read8(conn_ret_store);
-                        for (let j = 0; j < program_memsz; j += 0x8) {
+                        for (let j = 0; j < program_filesz; j += 0x8) {
                             let src_qword = p.read8(elf_store.add32(program_offset + j));
                             p.write8(dest.add32(j), src_qword);
+                        }
+
+                        for (let j = program_filesz; j < aligned_memsz; j++) {
+                            p.write1(dest.add32(j), 0x0);
                         }
 
                         // Map executable segment
                         await chain.add_syscall_ret(conn_ret_store, SYS_MMAP, mapping_addr.add32(program_vaddr), aligned_memsz, 0x5, 0x11, exec_handle, 0);
                         await chain.run();
-                        await dbg_notify("mmap exec va=0x" + (program_vaddr >>> 0).toString(16) + " -> 0x" + p.read8(conn_ret_store).hi.toString(16) + "_" + (p.read8(conn_ret_store).low >>> 0).toString(16));
                     } else {
                         // Regular data segment
                         // data_mapping_addr = mapping_addr.add32(program_vaddr);
@@ -755,13 +735,16 @@ async function main(userlandRW, wkOnly = false) {
 
                         await chain.add_syscall_ret(conn_ret_store, SYS_MMAP, mapping_addr.add32(program_vaddr), aligned_memsz, 0x3, 0x1012, 0xFFFFFFFF, 0);
                         await chain.run();
-                        await dbg_notify("mmap data va=0x" + (program_vaddr >>> 0).toString(16) + " sz=0x" + aligned_memsz.toString(16) + " -> 0x" + p.read8(conn_ret_store).hi.toString(16) + "_" + (p.read8(conn_ret_store).low >>> 0).toString(16));
 
                         // Copy in segment data
                         let dest = mapping_addr.add32(program_vaddr);
-                        for (let j = 0; j < program_memsz; j += 0x8) {
+                        for (let j = 0; j < program_filesz; j += 0x8) {
                             let src_qword = p.read8(elf_store.add32(program_offset + j));
                             p.write8(dest.add32(j), src_qword);
+                        }
+
+                        for (let j = program_filesz; j < aligned_memsz; j++) {
+                            p.write1(dest.add32(j), 0x0);
                         }
                     }
                 }
@@ -860,7 +843,6 @@ async function main(userlandRW, wkOnly = false) {
 
             // Execute payload in pthread
             await log("    Executing...", LogLevel.INFO);
-            await dbg_notify("jump entry=0x" + (elf_entry_point >>> 0).toString(16) + " at 0x" + mapping_addr.add32(elf_entry_point).hi.toString(16) + "_" + (mapping_addr.add32(elf_entry_point).low >>> 0).toString(16));
             await chain.call(p.libKernelBase.add32(OFFSET_lk_pthread_create_name_np), pthread_handle_store, 0x0, mapping_addr.add32(elf_entry_point), args, p.stringify("payload"));
 
         }
@@ -879,9 +861,7 @@ async function main(userlandRW, wkOnly = false) {
 
         var load_local_elf = async function (filename) {
             try {
-                await dbg_notify("load " + filename + " start");
                 let total_sz = await load_payload_into_elf_store_from_local_file(filename);
-                await dbg_notify("fetched 0x" + (total_sz >>> 0).toString(16) + " bytes");
                 await parse_elf_store(total_sz);
                 await execute_elf_store();
                 return await wait_for_elf_to_exit();
@@ -891,7 +871,7 @@ async function main(userlandRW, wkOnly = false) {
             }
         }
 
-        if (await load_local_elf("elfldr.elf") == 0) {
+        if (await load_local_elf("elfldr-ps5.elf") == 0) {
             await log(`elfldr listening on ${ip.ip}:9021`, LogLevel.INFO);
             is_elfldr_running = true;
         } else {
